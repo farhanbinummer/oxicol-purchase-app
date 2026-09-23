@@ -231,10 +231,20 @@ function svgIcon(name, size) {
     profBtn.onclick = (e) => { e.stopPropagation(); profMenu.hidden = !profMenu.hidden; };
     profWrap.append(profBtn, profMenu);
 
+    // ---------- mobile: collapsed search pill expands to a full-width bar on tap ----------
+    const searchWrap = topbar.querySelector('.oxi-search');
+    searchWrap.addEventListener('click', (e) => {
+      if (window.innerWidth > 640 || searchWrap.classList.contains('oxi-search-active')) return;
+      e.stopPropagation();
+      searchWrap.classList.add('oxi-search-active');
+      document.getElementById('oxiSearch').focus();
+    });
+
     document.addEventListener('click', () => {
       profMenu.hidden = true;
       notifMenu.hidden = true;
       const cm = createWrap.querySelector('.oxi-menu'); if (cm) cm.hidden = true;
+      searchWrap.classList.remove('oxi-search-active');
     });
 
     // ---------- mobile sidebar toggle ----------

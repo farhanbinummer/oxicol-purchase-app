@@ -515,7 +515,27 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   .oxi-main-panel { padding: 20px 16px 28px; }
   th, td { padding: 7px 8px; font-size: 0.9rem; }
   form { padding: 12px; }
-  .oxi-topbar { padding: 0 12px; gap: 8px; }
+
+  /* The topbar's icons + search don't all fit at phone widths, so on a phone the
+     search bar collapses to just its icon (tap to expand) and the print button
+     - rarely used from a phone - hides, instead of everything overflowing off
+     the right edge. */
+  .oxi-topbar { padding: 0 10px; gap: 6px; }
+  .oxi-icon-btn { width: 34px; height: 34px; flex: none; }
+  #oxiPrintBtn { display: none; }
+  .oxi-btn-primary-sm { padding: 8px 14px; flex: none; }
+  .oxi-profile-btn { flex: none; }
+
+  .oxi-search { flex: none; max-width: none; padding: 8px; }
+  .oxi-search input {
+    width: 0; flex: none; padding: 2px 0; opacity: 0;
+    transition: width 0.2s ease, opacity 0.15s ease;
+  }
+  .oxi-search.oxi-search-active {
+    position: fixed; top: 8px; left: 10px; right: 10px; z-index: 50;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  }
+  .oxi-search.oxi-search-active input { width: 100%; flex: 1 1 auto; opacity: 1; }
 }
 
 /* ============================================================
