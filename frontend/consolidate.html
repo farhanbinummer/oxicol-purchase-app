@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Consolidate Orders</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a></p>
+  <h1>Consolidate Orders</h1>
+  <p>Combines every open branch request and production indent, so 3 branches wanting Paint Thinner become one line.</p>
+  <p id="message"></p>
+
+  <h3>Open branch requests</h3>
+  <table><thead><tr><th></th><th>Request</th><th>Branch</th><th>Items</th></tr></thead><tbody id="branchRows"></tbody></table>
+
+  <h3>Open production indents</h3>
+  <table><thead><tr><th></th><th>Indent</th><th>Head</th><th>Items</th></tr></thead><tbody id="indentRows"></tbody></table>
+
+  <h3>Consolidated items</h3>
+  <p><small>Tick the sources above to include; matching items combine automatically. Enter the rate you agreed with the supplier.</small></p>
+  <table id="consTable">
+    <thead><tr><th></th><th>Item</th><th>Total qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th></tr></thead>
+    <tbody id="consRows"></tbody>
+  </table>
+
+  <h3>Create PO</h3>
+  <label>Supplier<br><select id="supplier"><option value="">Loading...</option></select></label><br><br>
+  <label>Delivery date<br><input type="date" id="delivery"></label><br><br>
+  <button id="createBtn">Create PO from selected items</button>
+
+  <script src="common.js"></script>
+  <script>
+    let data = null;
+
+    fetch('/api/suppliers').then(r => r.json()).then(d => {
+      const sel = document.getElementById('supplier');
+      sel.innerHTML = '<option value="">-- Select supplier --</option>';
+      d.suppliers.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; sel.appendChild(o); });
+    });
+
+    async function load() {
+      data = await api('/api/consolidate/all');
+      if (!data.success) { show(data.error, false); return; }
+
+      const bRows = document.getElementById('branchRows'); bRows.innerHTML = '';
+      data.branch_requests.forEach(r => {
+        const tr = document.createElement('tr');
+        const cb = document.createElement('td');
+        const c = document.createElement('input'); c.type = 'checkbox'; c.className = 'srcBranch'; c.value = r.id; c.checked = true;
+        c.addEventListener('change', renderConsolidated);
+        cb.appendChild(c); tr.appendChild(cb);
+        addCell(tr, r.request_number); addCell(tr, r.branch);
+        addCell(tr, r.items.map(i => i.item_name + ' ' + i.quantity + i.unit).join(', '));
+        bRows.appendChild(tr);
+      });
+
+      const iRows = document.getElementById('indentRows'); iRows.innerHTML = '';
+      data.production_indents.forEach(r => {
+        const tr = document.createElement('tr');
+        const cb = document.createElement('td');
+        const c = document.createElement('input'); c.type = 'checkbox'; c.className = 'srcIndent'; c.value = r.id; c.checked = true;
+        c.addEventListener('change', renderConsolidated);
+        cb.appendChild(c); tr.appendChild(cb);
+        addCell(tr, r.indent_number); addCell(tr, r.production_head);
+        addCell(tr, r.items.map(i => i.item_name + ' ' + i.quantity + i.unit).join(', '));
+        iRows.appendChild(tr);
+      });
+
+      renderConsolidated();
+    }
+
+    // Recomputes the consolidated item list from only the CHECKED sources.
+    function renderConsolidated() {
+      const checkedBranch = new Set([...document.querySelectorAll('.srcBranch:checked')].map(c => Number(c.value)));
+      const checkedIndent = new Set([...document.querySelectorAll('.srcIndent:checked')].map(c => Number(c.value)));
+      const totals = new Map();
+      data.branch_requests.filter(r => checkedBranch.has(r.id)).forEach(r =>
+        r.items.forEach(i => {
+          const key = i.item_name.toLowerCase() + '||' + i.unit.toLowerCase();
+          const row = totals.get(key) || { item_name: i.item_name, unit: i.unit, qty: 0 };
+          row.qty += Number(i.quantity); totals.set(key, row);
+        }));
+      data.production_indents.filter(r => checkedIndent.has(r.id)).forEach(r =>
+        r.items.forEach(i => {
+          const key = i.item_name.toLowerCase() + '||' + i.unit.toLowerCase();
+          const row = totals.get(key) || { item_name: i.item_name, unit: i.unit, qty: 0 };
+          row.qty += Number(i.quantity); totals.set(key, row);
+        }));
+
+      const tbody = document.getElementById('consRows');
+      const oldRates = {}; // keep any rate the user already typed
+      tbody.querySelectorAll('tr').forEach(tr => { oldRates[tr.dataset.key] = tr.querySelector('.rate').value; });
+      tbody.innerHTML = '';
+      [...totals.entries()].forEach(([key, row]) => {
+        const tr = document.createElement('tr');
+        tr.dataset.key = key;
+        const cb = document.createElement('td');
+        const c = document.createElement('input'); c.type = 'checkbox'; c.className = 'incl'; c.checked = true;
+        c.addEventListener('change', updateAmount);
+        cb.appendChild(c); tr.appendChild(cb);
+        addCell(tr, row.item_name);
+        const qtyTd = addCell(tr, row.qty); qtyTd.className = 'qty';
+        addCell(tr, row.unit);
+        const rateTd = document.createElement('td');
+        const rateInp = document.createElement('input');
+        rateInp.type = 'number'; rateInp.min = '0'; rateInp.step = 'any'; rateInp.style.width = '90px';
+        rateInp.className = 'rate'; rateInp.value = oldRates[key] || '';
+        rateInp.addEventListener('input', updateAmount);
+        rateTd.appendChild(rateInp); tr.appendChild(rateTd);
+        const amtTd = addCell(tr, '0.00'); amtTd.className = 'amt';
+        tbody.appendChild(tr);
+      });
+      updateAmount();
+    }
+
+    function updateAmount() {
+      [...document.querySelectorAll('#consRows tr')].forEach(tr => {
+        const qty = Number(tr.querySelector('.qty').textContent) || 0;
+        const rate = Number(tr.querySelector('.rate').value) || 0;
+        tr.querySelector('.amt').textContent = money(qty * rate);
+      });
+    }
+
+    document.getElementById('createBtn').onclick = async () => {
+      const items = [];
+      document.querySelectorAll('#consRows tr').forEach(tr => {
+        if (!tr.querySelector('.incl').checked) return;
+        items.push({
+          item_name: tr.children[1].textContent,
+          quantity: Number(tr.querySelector('.qty').textContent),
+          unit: tr.children[3].textContent,
+          rate: tr.querySelector('.rate').value
+        });
+      });
+      const branch_request_ids = [...document.querySelectorAll('.srcBranch:checked')].map(c => Number(c.value));
+      const production_indent_ids = [...document.querySelectorAll('.srcIndent:checked')].map(c => Number(c.value));
+      const btn = document.getElementById('createBtn'); btn.disabled = true;
+      const d = await api('/api/consolidate/create-po', 'POST', {
+        supplier_id: document.getElementById('supplier').value,
+        delivery_date: document.getElementById('delivery').value,
+        branch_request_ids, production_indent_ids, items
+      });
+      btn.disabled = false;
+      if (d.success) {
+        show(d.po_number + ' created | Total ₹' + money(d.total_amount) +
+             ' | linked ' + d.branch_requests_linked + ' branch request(s), ' + d.production_indents_linked + ' indent(s)', true);
+        load();
+      } else { show('Error: ' + d.error, false); }
+    };
+
+    load();
+  </script>
+</body>
+</html>

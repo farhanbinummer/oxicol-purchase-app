@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Branch Stock Requests</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="branch-request-form.html">+ New request</a></p>
+  <h1>Branch Stock Requests</h1>
+  <p id="message"></p>
+  <div class="oxi-toolbar">
+    <input type="text" id="search" placeholder="Search request number, branch...">
+    <select id="statusFilter">
+      <option value="">All statuses</option>
+      <option value="pending">pending</option>
+      <option value="approved">approved</option>
+      <option value="po_raised">po_raised</option>
+      <option value="rejected">rejected</option>
+    </select>
+  </div>
+  <table>
+    <thead><tr><th>Request</th><th>Branch</th><th>Requested by</th><th>Needed by</th><th>Status</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
+  </table>
+
+  <script src="common.js"></script>
+  <script>
+    async function load() {
+      const d = await api('/api/branch-request');
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      if (d.requests.length === 0) { rows.innerHTML = '<tr><td colspan="6">No requests yet.</td></tr>'; return; }
+      d.requests.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.dataset.status = r.status;
+        addCell(tr, r.request_number);
+        addCell(tr, r.branch);
+        addCell(tr, r.requested_by);
+        addCell(tr, day(r.delivery_needed_by));
+        addBadge(tr, r.status);
+        const td = document.createElement('td');
+        if (r.status === 'pending') {
+          const b1 = document.createElement('button'); b1.textContent = 'Approve';
+          b1.onclick = async () => { const rr = await api('/api/branch-request/' + r.id + '/approve', 'PUT', {}); if (rr.success) { show('Approved', true); load(); } else show(rr.error, false); };
+          const b2 = document.createElement('button'); b2.textContent = 'Delete';
+          b2.onclick = async () => { if (!confirm('Delete this request?')) return; const rr = await api('/api/branch-request/' + r.id, 'DELETE'); if (rr.success) { show('Deleted', true); load(); } else show(rr.error, false); };
+          td.append(b1, b2);
+        }
+        tr.appendChild(td);
+        rows.appendChild(tr);
+      });
+      attachListFilter({ tbodyId: 'rows', searchId: 'search', statusId: 'statusFilter' });
+    }
+    load();
+  </script>
+</body>
+</html>

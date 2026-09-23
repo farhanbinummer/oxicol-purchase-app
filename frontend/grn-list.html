@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GRN History</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="grn-form.html">+ New GRN</a></p>
+  <h1>GRN History</h1>
+  <p id="message"></p>
+
+  <div class="oxi-toolbar">
+    <input type="text" id="search" placeholder="Search GRN number, PO, supplier...">
+    <select id="statusFilter">
+      <option value="">All statuses</option>
+      <option value="pending_qc">pending_qc</option>
+      <option value="approved">approved</option>
+      <option value="rejected">rejected</option>
+    </select>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>GRN</th><th>Date</th><th>PO</th><th>Supplier</th><th>Received by</th><th>Condition</th><th>Status</th><th>Discrepancy</th><th></th></tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="9">Loading...</td></tr></tbody>
+  </table>
+
+  <h2>Discrepancies (received &ne; ordered)</h2>
+  <table>
+    <thead>
+      <tr><th>GRN</th><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Variance</th></tr>
+    </thead>
+    <tbody id="disc"><tr><td colspan="7">Loading...</td></tr></tbody>
+  </table>
+
+  <script src="common.js"></script>
+  <script>
+    async function load() {
+      const d = await api('/api/grn');
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      if (d.grns.length === 0) rows.innerHTML = '<tr><td colspan="9">No GRNs yet.</td></tr>';
+      d.grns.forEach(g => {
+        const tr = document.createElement('tr');
+        tr.dataset.status = g.status;
+        addLink(tr, g.grn_number, 'grn-detail.html?id=' + g.id);
+        addCell(tr, day(g.grn_date));
+        addLink(tr, g.po_number, 'po-detail.html?id=' + g.po_id);
+        addCell(tr, g.supplier_name);
+        addCell(tr, g.received_by);
+        addBadge(tr, g.condition);
+        addBadge(tr, g.status);
+        const dc = addCell(tr, g.discrepancy_count > 0 ? g.discrepancy_count + ' item(s)' : 'none');
+        if (g.discrepancy_count > 0) dc.className = 'error';
+        const td = document.createElement('td');
+        if (g.status === 'pending_qc') {
+          [['Approve', true], ['Reject', false]].forEach(([label, ok]) => {
+            const btn = document.createElement('button');
+            btn.textContent = label;
+            btn.onclick = async () => {
+              const r = await api('/api/grn/' + g.id + '/approve', 'PUT', { approved: ok });
+              if (r.success) { show('GRN ' + r.status, true); load(); } else { show(r.error, false); }
+            };
+            td.appendChild(btn);
+          });
+        }
+        tr.appendChild(td);
+        rows.appendChild(tr);
+      });
+      attachListFilter({ tbodyId: 'rows', searchId: 'search', statusId: 'statusFilter' });
+
+      const x = await api('/api/grn/discrepancies');
+      const disc = document.getElementById('disc');
+      disc.innerHTML = '';
+      if (!x.success || x.discrepancies.length === 0) { disc.innerHTML = '<tr><td colspan="7">No discrepancies.</td></tr>'; return; }
+      x.discrepancies.forEach(i => {
+        const tr = document.createElement('tr');
+        addLink(tr, i.grn_number, 'grn-detail.html?id=' + i.grn_id);
+        addCell(tr, i.po_number);
+        addCell(tr, i.supplier_name);
+        addCell(tr, i.item_name);
+        addCell(tr, Number(i.po_quantity));
+        addCell(tr, Number(i.received_quantity));
+        addCell(tr, (Number(i.variance) > 0 ? '+' : '') + Number(i.variance)).className = 'error';
+        disc.appendChild(tr);
+      });
+    }
+    load();
+  </script>
+</body>
+</html>

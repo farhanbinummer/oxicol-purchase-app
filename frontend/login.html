@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in - Oxicol Purchase App</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="oxi-login">
+  <div class="oxi-login-card">
+    <h1>Oxicol Purchase App</h1>
+    <h3>Log in to continue</h3>
+    <p id="message"></p>
+
+    <form id="loginForm">
+      <label>Username<br><input id="username" autocapitalize="off" required></label>
+      <label>Password<br><input id="password" type="password" required></label>
+      <button type="submit" id="loginBtn">Log in</button>
+    </form>
+  </div>
+
+  <script>
+    const msg = document.getElementById('message');
+    function show(text, ok) { msg.textContent = text; msg.className = ok ? 'success' : 'error'; }
+
+    // Already logged in? Skip straight to the app.
+    if (localStorage.getItem('oxicol_token')) location.href = 'index.html';
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn'); btn.disabled = true;
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value
+          })
+        });
+        const d = await r.json();
+        if (d.success) {
+          localStorage.setItem('oxicol_token', d.token);
+          localStorage.setItem('oxicol_user', JSON.stringify(d.user));
+          location.href = 'index.html';
+        } else {
+          show(d.error, false);
+        }
+      } catch (err) {
+        show('Could not reach the server. Is it running?', false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Permissions</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="users.html">Manage Users</a></p>
+  <h1>Permissions</h1>
+  <p style="color:var(--text-muted);max-width:640px;">
+    Tick or untick a box to grant or revoke that role's access to that action - it takes effect
+    immediately, for everyone with that role, the next time they try it. <b>Admin</b> can always do
+    everything and isn't shown as a checkbox, since that can't be turned off.
+  </p>
+  <p id="message"></p>
+
+  <div id="matrixBox">Loading...</div>
+
+  <h3>Not editable here, on purpose</h3>
+  <p style="color:var(--text-muted);max-width:640px;">
+    <b>User management</b> (viewing, creating, renaming, or deleting accounts) and <b>this permissions
+    page itself</b> always stay locked to admin, in the code, not in this table. If they were editable
+    here, a mistake - or a compromised non-admin account - could grant itself admin-level power. Changing
+    those two would need an actual code change, not a checkbox.
+  </p>
+
+  <h3>Notes on how roles are scoped</h3>
+  <ul style="color:var(--text-muted);font-size:0.9rem;">
+    <li><b>Branch</b> logins only ever see and act on their <b>own branch's</b> requests - a Kannur login
+      cannot view or approve a Thrissur request, even with "View requests" ticked for Branch.</li>
+    <li>Every signed-in user, of any role, can change their own password and log out
+      (<a href="account.html">My Account</a>) - that's not role-gated, so it isn't listed below.</li>
+    <li>Search results are automatically limited to what that role could open anyway.</li>
+  </ul>
+
+  <script src="common.js"></script>
+  <script>
+    // Admin only - this page would otherwise let anyone view (and, without this check, edit) the matrix.
+    (function () {
+      let u = null;
+      try { u = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+      if (!u || u.role !== 'admin') location.href = 'index.html';
+    })();
+
+    const ROLE_LABEL = { branch: 'Branch', production: 'Production', store: 'Store', purchase: 'Purchase', accounts: 'Accounts' };
+
+    async function load() {
+      const d = await api('/api/auth/role-permissions');
+      const box = document.getElementById('matrixBox');
+      box.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+
+      // Group the flat catalog into its modules, in the order the backend sent them.
+      const modules = [];
+      d.catalog.forEach(item => {
+        let mod = modules.find(m => m.name === item.module);
+        if (!mod) { mod = { name: item.module, rows: [] }; modules.push(mod); }
+        mod.rows.push(item);
+      });
+
+      modules.forEach(mod => {
+        const h = document.createElement('h3'); h.textContent = mod.name; box.appendChild(h);
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        addCell(headRow, 'Action').style.width = '40%';
+        d.roles.forEach(r => addCell(headRow, ROLE_LABEL[r]));
+        addCell(headRow, 'Admin');
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        mod.rows.forEach(row => {
+          const tr = document.createElement('tr');
+          addCell(tr, row.action);
+          d.roles.forEach(r => {
+            const td = document.createElement('td');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!d.granted[r + '|' + row.key];
+            cb.title = ROLE_LABEL[r] + ': ' + row.action;
+            cb.addEventListener('change', async () => {
+              cb.disabled = true;
+              const res = await api('/api/auth/role-permissions', 'PUT', { role: r, permission_key: row.key, allowed: cb.checked });
+              cb.disabled = false;
+              if (res.success) {
+                show(ROLE_LABEL[r] + (cb.checked ? ' can now ' : ' can no longer ') + row.action.toLowerCase(), true);
+              } else {
+                cb.checked = !cb.checked; // revert on failure
+                show(res.error, false);
+              }
+            });
+            td.appendChild(cb);
+            tr.appendChild(td);
+          });
+          const tdAdmin = document.createElement('td');
+          tdAdmin.appendChild(badge('Yes'));
+          tr.appendChild(tdAdmin);
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        box.appendChild(table);
+      });
+    }
+
+    load();
+  </script>
+</body>
+</html>

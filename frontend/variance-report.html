@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Variance Report</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a></p>
+  <h1>Variance Report</h1>
+  <p id="message"></p>
+
+  <h3>Rejected GRNs awaiting resupply</h3>
+  <p><small>Goods were rejected and nothing has replaced them yet - chase the supplier for a return/replacement.</small></p>
+  <table>
+    <thead><tr><th>GRN</th><th>Date</th><th>PO</th><th>Supplier</th><th>Condition</th><th>QC notes</th></tr></thead>
+    <tbody id="rejRows"><tr><td colspan="6">Loading...</td></tr></tbody>
+  </table>
+
+  <h3>Goods receipt: short / excess quantity</h3>
+  <table>
+    <thead><tr><th>GRN</th><th>PO</th><th>Supplier</th><th>Item</th><th>Ordered</th><th>Received</th><th>Variance</th></tr></thead>
+    <tbody id="grnRows"><tr><td colspan="7">Loading...</td></tr></tbody>
+  </table>
+
+  <h3>Invoice: amount does not match PO / goods received</h3>
+  <table>
+    <thead><tr><th>Invoice</th><th>PO</th><th>Supplier</th><th>Result</th><th>PO total</th><th>Goods value</th><th>Invoice total</th><th>Variance</th><th>Notes</th></tr></thead>
+    <tbody id="invRows"><tr><td colspan="9">Loading...</td></tr></tbody>
+  </table>
+
+  <script src="common.js"></script>
+  <script>
+    (async () => {
+      const d = await api('/api/dashboard/variance-report');
+      if (!d.success) { show(d.error, false); return; }
+
+      const rj = document.getElementById('rejRows'); rj.innerHTML = '';
+      if (d.rejected_awaiting_resupply.length === 0) rj.innerHTML = '<tr><td colspan="6">None.</td></tr>';
+      d.rejected_awaiting_resupply.forEach(i => {
+        const tr = document.createElement('tr');
+        addCell(tr, i.grn_number); addCell(tr, day(i.grn_date)); addCell(tr, i.po_number);
+        addCell(tr, i.supplier_name); addCell(tr, i.condition); addCell(tr, i.qc_notes || '-');
+        rj.appendChild(tr);
+      });
+
+      const gr = document.getElementById('grnRows'); gr.innerHTML = '';
+      if (d.grn_discrepancies.length === 0) gr.innerHTML = '<tr><td colspan="7">None.</td></tr>';
+      d.grn_discrepancies.forEach(i => {
+        const tr = document.createElement('tr');
+        addCell(tr, i.reference); addCell(tr, i.po_number); addCell(tr, i.supplier_name); addCell(tr, i.item_name);
+        addCell(tr, Number(i.po_quantity)); addCell(tr, Number(i.received_quantity));
+        const v = Number(i.variance);
+        addCell(tr, (v > 0 ? '+' : '') + v).className = 'error';
+        gr.appendChild(tr);
+      });
+
+      const ir = document.getElementById('invRows'); ir.innerHTML = '';
+      if (d.invoice_variances.length === 0) ir.innerHTML = '<tr><td colspan="9">None.</td></tr>';
+      d.invoice_variances.forEach(i => {
+        const tr = document.createElement('tr');
+        addCell(tr, i.reference); addCell(tr, i.po_number); addCell(tr, i.supplier_name); addCell(tr, i.status);
+        addCell(tr, money(i.po_total)); addCell(tr, money(i.grn_total)); addCell(tr, money(i.invoice_total));
+        addCell(tr, money(i.variance_amount)).className = 'error';
+        addCell(tr, i.notes);
+        ir.appendChild(tr);
+      });
+    })();
+  </script>
+</body>
+</html>

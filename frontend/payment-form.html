@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Record Advance Payment</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="payment-list.html">All payments</a></p>
+  <h1>Record Advance Payment (100%)</h1>
+  <p id="message"></p>
+
+  <form id="payForm">
+    <p>
+      <label>Purchase Order (only POs without a payment are listed)<br>
+        <select id="po" required><option value="">Loading...</option></select>
+      </label>
+    </p>
+    <table style="width:auto">
+      <tr><td>Supplier</td><td id="supplier">-</td></tr>
+      <tr><td>Amount to pay (₹)</td><td id="amount"><b>-</b></td></tr>
+    </table>
+    <p><label>Payment date<br><input type="date" id="date"></label></p>
+    <p><label>UTR number (bank transfer reference)<br><input id="utr" size="30" placeholder="e.g. HDFC123456789"></label></p>
+    <p><label>Approved by<br><input id="by" size="30" placeholder="e.g. Farhan"></label></p>
+    <p><label><input type="checkbox" id="approved"> I confirm this payment is approved</label></p>
+    <p><label>Notes<br><textarea id="notes" rows="2" cols="50"></textarea></label></p>
+    <p><button type="submit" id="saveBtn">Record payment</button></p>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    let pos = [];
+    document.getElementById('date').value = todayISO();
+
+    // Fill the dropdown with POs that can still be paid.
+    async function loadPOs() {
+      const d = await api('/api/po');
+      const sel = document.getElementById('po');
+      if (!d.success) { show(d.error, false); return; }
+      pos = d.pos.filter(p => p.payment_status === 'none' && ['created', 'payment_pending'].includes(p.status));
+      sel.innerHTML = '<option value="">-- Select PO --</option>';
+      pos.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.po_number + '  |  ' + p.supplier_name + '  |  ₹' + money(p.total_amount);
+        sel.appendChild(o);
+      });
+      if (pos.length === 0) sel.innerHTML = '<option value="">No POs waiting for payment</option>';
+      showAmount();
+    }
+
+    // Show the PO amount as soon as a PO is selected.
+    function showAmount() {
+      const p = pos.find(x => String(x.id) === document.getElementById('po').value);
+      document.getElementById('supplier').textContent = p ? p.supplier_name : '-';
+      document.getElementById('amount').innerHTML = p ? '<b>' + money(p.total_amount) + '</b>' : '<b>-</b>';
+    }
+    document.getElementById('po').addEventListener('change', showAmount);
+
+    document.getElementById('payForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      const d = await api('/api/payment/advance', 'POST', {
+        po_id: document.getElementById('po').value,
+        payment_date: document.getElementById('date').value,
+        utr_number: document.getElementById('utr').value,
+        approved_by: document.getElementById('by').value,
+        approved: document.getElementById('approved').checked,
+        notes: document.getElementById('notes').value
+      });
+      btn.disabled = false;
+      if (d.success) {
+        show(d.payment_id + ' saved for ' + d.po_number + ' | ₹' + money(d.amount) + ' | UTR ' + d.utr + ' | ' + d.status, true);
+        document.getElementById('payForm').reset();
+        document.getElementById('date').value = todayISO();
+        loadPOs();
+      } else {
+        show('Error: ' + d.error, false);
+      }
+    });
+
+    loadPOs();
+  </script>
+</body>
+</html>

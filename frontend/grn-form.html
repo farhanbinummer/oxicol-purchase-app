@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create GRN</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="grn-list.html">All GRNs</a></p>
+  <h1>Goods Receipt Note (GRN)</h1>
+  <p id="message"></p>
+
+  <form id="grnForm">
+    <p>
+      <label>Purchase Order (only POs without a GRN are listed)<br>
+        <select id="po" required><option value="">Loading...</option></select>
+      </label>
+    </p>
+
+    <div id="itemsBox" hidden>
+      <h3>Items received</h3>
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Ordered</th><th>Received</th><th>Variance</th><th>Condition</th></tr>
+        </thead>
+        <tbody id="items"></tbody>
+      </table>
+      <p id="flag"></p>
+    </div>
+
+    <p><label>GRN date<br><input type="date" id="date"></label></p>
+    <p><label>Received by<br><input id="by" size="30" placeholder="e.g. Biju"></label></p>
+    <p><label>Storage location<br><input id="loc" size="30" placeholder="e.g. Rack A2"></label></p>
+    <p><label>QC notes<br><textarea id="qcnotes" rows="2" cols="50"></textarea></label></p>
+    <p><label><input type="checkbox" id="qc"> QC approved</label></p>
+    <p><button type="submit" id="saveBtn">Save GRN</button></p>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    let pos = [];
+    let poItems = [];
+    const tbody = document.getElementById('items');
+    document.getElementById('date').value = todayISO();
+
+    async function loadPOs() {
+      const d = await api('/api/po');
+      const sel = document.getElementById('po');
+      if (!d.success) { show(d.error, false); return; }
+      pos = d.pos.filter(p => !p.has_grn);
+      sel.innerHTML = '<option value="">-- Select PO --</option>';
+      pos.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.po_number + '  |  ' + p.supplier_name + '  |  payment: ' + p.payment_status;
+        sel.appendChild(o);
+      });
+      if (pos.length === 0) sel.innerHTML = '<option value="">No POs waiting for goods</option>';
+    }
+
+    // When a PO is picked, load its items with the ordered quantities.
+    document.getElementById('po').addEventListener('change', async (e) => {
+      tbody.innerHTML = '';
+      document.getElementById('itemsBox').hidden = true;
+      if (!e.target.value) return;
+      const d = await api('/api/po/' + e.target.value);
+      if (!d.success) { show(d.error, false); return; }
+      poItems = d.items;
+      poItems.forEach(it => {
+        const tr = document.createElement('tr');
+        addCell(tr, it.item_name);
+        addCell(tr, Number(it.quantity) + ' ' + it.unit);
+        const tdQ = document.createElement('td');
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.min = '0'; inp.step = 'any'; inp.style.width = '90px';
+        inp.value = Number(it.quantity);          // starts equal to the PO quantity
+        inp.className = 'recv';
+        inp.addEventListener('input', recalc);
+        tdQ.appendChild(inp); tr.appendChild(tdQ);
+        const tdV = addCell(tr, '0'); tdV.className = 'var';
+        const tdC = document.createElement('td');
+        const sel = document.createElement('select');
+        sel.className = 'cond';
+        ['Good', 'Damaged', 'Short'].forEach(c => { const o = document.createElement('option'); o.textContent = c; sel.appendChild(o); });
+        tdC.appendChild(sel); tr.appendChild(tdC);
+        tbody.appendChild(tr);
+      });
+      document.getElementById('itemsBox').hidden = false;
+      recalc();
+    });
+
+    // Variance = received - ordered. Marks SHORT / EXTRA and switches the condition to Short.
+    function recalc() {
+      let anyShort = false, anyDiff = false;
+      [...tbody.rows].forEach((tr, i) => {
+        const ordered = Number(poItems[i].quantity);
+        const recv = Number(tr.querySelector('.recv').value);
+        const v = Math.round((recv - ordered) * 1000) / 1000;
+        const cell = tr.querySelector('.var');
+        cell.textContent = v > 0 ? '+' + v : String(v);
+        cell.className = 'var' + (v !== 0 ? ' error' : '');
+        const cond = tr.querySelector('.cond');
+        if (v < 0) { anyShort = true; if (cond.value === 'Good') cond.value = 'Short'; }
+        if (v >= 0 && cond.value === 'Short') cond.value = 'Good';
+        if (v !== 0) anyDiff = true;
+      });
+      const flag = document.getElementById('flag');
+      flag.textContent = anyShort ? 'SHORT: received quantity is less than ordered.'
+                       : anyDiff ? 'Note: received quantity is more than ordered.' : '';
+      flag.className = anyDiff ? 'error' : '';
+    }
+
+    document.getElementById('grnForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const items = [...tbody.rows].map((tr, i) => ({
+        po_item_id: poItems[i].id,
+        received_qty: tr.querySelector('.recv').value,
+        condition: tr.querySelector('.cond').value
+      }));
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      const d = await api('/api/grn/create', 'POST', {
+        po_id: document.getElementById('po').value,
+        grn_date: document.getElementById('date').value,
+        received_by: document.getElementById('by').value,
+        storage_location: document.getElementById('loc').value,
+        qc_notes: document.getElementById('qcnotes').value,
+        qc_approved: document.getElementById('qc').checked,
+        items
+      });
+      btn.disabled = false;
+      if (d.success) {
+        show(d.grn_number + ' saved for ' + d.po_number + ' | status: ' + d.status +
+             (d.discrepancies ? ' | DISCREPANCY: received quantity differs from PO' : ' | quantities match'), !d.discrepancies);
+        document.getElementById('grnForm').reset();
+        document.getElementById('date').value = todayISO();
+        tbody.innerHTML = ''; document.getElementById('itemsBox').hidden = true;
+        loadPOs();
+      } else {
+        show('Error: ' + d.error, false);
+      }
+    });
+
+    loadPOs();
+  </script>
+</body>
+</html>

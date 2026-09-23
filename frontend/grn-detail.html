@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GRN Details</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="grn-list.html">&larr; GRN history</a></p>
+
+  <div class="oxi-print-letterhead">
+    <h2>Oxicol Car Care Products</h2>
+    <div class="addr">Malappuram, Kerala</div>
+    <div class="doc-title">GOODS RECEIPT NOTE</div>
+  </div>
+
+  <h1 id="title">GRN</h1>
+  <p id="message"></p>
+
+  <div id="detail" hidden>
+    <table style="width:auto">
+      <tr><td>PO</td><td id="po"></td></tr>
+      <tr><td>Supplier</td><td id="supplier"></td></tr>
+      <tr><td>GRN date</td><td id="date"></td></tr>
+      <tr><td>Received by</td><td id="by"></td></tr>
+      <tr><td>Storage location</td><td id="loc"></td></tr>
+      <tr><td>Condition</td><td id="cond"></td></tr>
+      <tr><td>Status</td><td id="status"></td></tr>
+      <tr><td>QC notes</td><td id="qc"></td></tr>
+    </table>
+    <p id="flag"></p>
+    <table>
+      <thead><tr><th>Item</th><th>Ordered</th><th>Received</th><th>Variance</th><th>Condition</th></tr></thead>
+      <tbody id="items"></tbody>
+    </table>
+
+    <div class="oxi-print-signatures">
+      <div>Received &amp; checked by (Store)</div>
+      <div>QC / Warehouse in-charge</div>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+    const set = (i, t) => { document.getElementById(i).textContent = t; };
+    const setBadge = (i, status) => { const el = document.getElementById(i); el.innerHTML = ''; el.appendChild(badge(status)); };
+
+    (async () => {
+      const d = await api('/api/grn/' + encodeURIComponent(id));
+      if (!d.success) { show(d.error, false); return; }
+      const g = d.grn;
+      set('title', g.grn_number);
+      set('po', g.po_number);
+      set('supplier', g.supplier_name);
+      set('date', day(g.grn_date));
+      set('by', g.received_by);
+      set('loc', g.storage_location || '-');
+      setBadge('cond', g.condition);
+      setBadge('status', g.status);
+      set('qc', g.qc_notes || '-');
+      const flag = document.getElementById('flag');
+      flag.textContent = d.discrepancies ? 'DISCREPANCY: received quantity differs from the PO.' : 'Quantities match the PO.';
+      flag.className = d.discrepancies ? 'error' : 'success';
+      const tbody = document.getElementById('items');
+      d.items.forEach(i => {
+        const tr = document.createElement('tr');
+        addCell(tr, i.item_name);
+        addCell(tr, Number(i.po_quantity));
+        addCell(tr, Number(i.received_quantity));
+        const v = Number(i.variance);
+        const c = addCell(tr, (v > 0 ? '+' : '') + v);
+        if (v !== 0) c.className = 'error';
+        addBadge(tr, i.condition);
+        tbody.appendChild(tr);
+      });
+      document.getElementById('detail').hidden = false;
+    })();
+  </script>
+</body>
+</html>

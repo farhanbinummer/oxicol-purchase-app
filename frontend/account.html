@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Account</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a></p>
+  <h1>My Account</h1>
+  <p id="message"></p>
+
+  <table style="width:auto" id="whoBox"></table>
+
+  <h3>Change password</h3>
+  <form id="pwForm">
+    <p><label>Current password<br><input id="current" type="password" required></label></p>
+    <p><label>New password<br><input id="next" type="password" required minlength="4"></label></p>
+    <p><label>Confirm new password<br><input id="confirm" type="password" required minlength="4"></label></p>
+    <p><button type="submit" id="saveBtn">Change password</button></p>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    let user = null;
+    try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+    if (user) {
+      const t = document.getElementById('whoBox');
+      [['Name', user.name], ['Username', user.username], ['Role', user.role], ['Branch', user.branch || '-']]
+        .forEach(([k, v]) => { const tr = document.createElement('tr'); addCell(tr, k); addCell(tr, v); t.appendChild(tr); });
+    }
+
+    document.getElementById('pwForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const next = document.getElementById('next').value;
+      const confirm_ = document.getElementById('confirm').value;
+      if (next !== confirm_) { show('New password and confirmation do not match', false); return; }
+      const btn = document.getElementById('saveBtn'); btn.disabled = true;
+      const d = await api('/api/auth/change-password', 'POST', {
+        current_password: document.getElementById('current').value,
+        new_password: next
+      });
+      btn.disabled = false;
+      if (d.success) { show('Password changed', true); document.getElementById('pwForm').reset(); }
+      else show(d.error, false);
+    });
+  </script>
+</body>
+</html>

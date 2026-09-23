@@ -1,0 +1,23 @@
+{
+  "name": "oxicol-purchase-app",
+  "version": "0.1.0",
+  "description": "Purchase Order, Payment and GRN app for Oxicol Car Care Products",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "body-parser": "^1.20.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.7.0",
+    "pg": "^8.13.0"
+  }
+}

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Branch Stock Request</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="branch-request-list.html">All requests</a></p>
+  <h1>Branch Stock Request</h1>
+  <p id="message"></p>
+
+  <form id="reqForm">
+    <p><label>Branch<br>
+      <select id="branch" required>
+        <option value="">-- Select branch --</option>
+        <option>Kannur</option><option>Thrissur</option><option>Trivandrum</option><option>Ernakulam</option>
+      </select></label></p>
+    <p><label>Requested by<br><input id="by" size="30" required></label></p>
+    <p><label>Delivery needed by<br><input type="date" id="deadline"></label></p>
+
+    <h3>Items needed</h3>
+    <table id="items">
+      <thead><tr><th>Item name</th><th>Qty</th><th>Unit</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p><button type="button" id="addRow">+ Add item</button></p>
+    <p><button type="submit" id="saveBtn">Submit request</button></p>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    const tbody = document.querySelector('#items tbody');
+    function addRow() {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><input class="name" size="26"></td>' +
+        '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
+        '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
+        '<td><button type="button" class="del">X</button></td>';
+      tbody.appendChild(tr);
+      tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) tr.remove(); };
+    }
+    document.getElementById('addRow').onclick = addRow;
+    addRow();
+
+    document.getElementById('reqForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const items = [...tbody.rows].map(tr => ({
+        item_name: tr.querySelector('.name').value,
+        quantity: tr.querySelector('.qty').value,
+        unit: tr.querySelector('.unit').value
+      }));
+      const btn = document.getElementById('saveBtn'); btn.disabled = true;
+      const d = await api('/api/branch-request/create', 'POST', {
+        branch: document.getElementById('branch').value,
+        requested_by: document.getElementById('by').value,
+        delivery_needed_by: document.getElementById('deadline').value,
+        items
+      });
+      btn.disabled = false;
+      if (d.success) {
+        show(d.request_number + ' submitted (status: pending)', true);
+        document.getElementById('reqForm').reset();
+        tbody.innerHTML = ''; addRow();
+      } else { show('Error: ' + d.error, false); }
+    });
+  </script>
+</body>
+</html>

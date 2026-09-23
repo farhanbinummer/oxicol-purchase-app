@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oxicol Purchase Management System</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="oxi-hero">
+    <h1 id="greeting">Good day</h1>
+    <p id="status">Checking server...</p>
+  </div>
+  <p id="message"></p>
+
+  <div class="oxi-home-grid">
+    <div class="oxi-action-cards" id="actionCards"></div>
+    <div class="oxi-insight-card" id="insightCard">
+      <div class="oxi-insight-label">Today</div>
+      <div class="oxi-insight-value" id="insightValue">Checking...</div>
+      <div class="oxi-insight-note" id="insightNote"></div>
+    </div>
+  </div>
+
+  <div class="oxi-kpi-chips" id="kpiChips" data-roles="store,purchase,accounts"></div>
+
+  <div class="oxi-command-bar">
+    <div class="oxi-command-input">
+      <span id="cmdIcon"></span>
+      <input id="cmdSearch" placeholder="Search PO, supplier, GRN, invoice, or payment..." autocomplete="off">
+    </div>
+    <div id="cmdResults"></div>
+    <div class="oxi-pill-actions" id="pillActions"></div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    let user = null;
+    try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+    const isAllowed = (roles) => !user || user.role === 'admin' || roles.split(',').includes(user.role);
+    document.getElementById('cmdIcon').innerHTML = svgIcon('search', 18);
+
+    fetch('/api/health').then(r => r.json()).then(d => {
+      document.getElementById('status').textContent =
+        d.success ? 'Server OK, database connected.' : 'Problem: ' + d.error;
+    }).catch(() => { document.getElementById('status').textContent = 'Server not reachable.'; });
+
+    document.querySelectorAll('[data-roles]').forEach(el => { if (!isAllowed(el.dataset.roles)) el.remove(); });
+
+    // ---------- greeting ----------
+    if (user) {
+      const hour = new Date().getHours();
+      const part = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+      document.getElementById('greeting').textContent = 'Good ' + part + ', ' + user.name.split(' ')[0];
+    }
+
+    // ---------- figure out who this role needs to chase for approval, and where ----------
+    async function pendingApprovals() {
+      const items = [];
+      if (['store', 'admin'].includes(user.role)) {
+        const a = await api('/api/branch-request?status=pending');
+        if (a.success) items.push(...a.requests.map(() => 'branch-request-list.html'));
+        const b = await api('/api/production-indent?status=pending');
+        if (b.success) items.push(...b.indents.map(() => 'production-indent-list.html'));
+        const c = await api('/api/grn?discrepancies=false');
+        if (c.success) items.push(...c.grns.filter(g => g.status === 'pending_qc').map(g => 'grn-detail.html?id=' + g.id));
+      }
+      if (['accounts', 'admin'].includes(user.role)) {
+        const d = await api('/api/payment');
+        if (d.success) items.push(...d.payments.filter(p => p.status === 'initiated').map(() => 'payment-list.html'));
+      }
+      return items; // items[i] is the href for that pending thing; count = items.length
+    }
+
+    // ---------- action cards ----------
+    const CANDIDATE_CARDS = [
+      { title: 'Create Purchase Order', tag: 'Purchase', icon: 'po', href: 'po-form.html', roles: 'purchase',
+        desc: 'Create and send purchase orders to suppliers.' },
+      { title: 'Consolidate Orders', tag: 'Purchase', icon: 'consolidate', href: 'consolidate.html', roles: 'purchase',
+        desc: 'Merge branch and production requests into one PO.' },
+      { title: 'Goods Received', tag: 'Warehouse', icon: 'grn', href: 'grn-form.html', roles: 'store',
+        desc: 'Record a GRN and match received items with the order.' },
+      { title: 'Supplier Payments', tag: 'Finance', icon: 'payment', href: 'payment-form.html', roles: 'accounts',
+        desc: 'Record advances and track outstanding balances.' },
+      { title: 'Branch Stock Request', tag: 'Branch', icon: 'branch', href: 'branch-request-form.html', roles: 'branch',
+        desc: 'Ask HQ for stock for your branch.' },
+      { title: 'Production Indent', tag: 'Production', icon: 'production', href: 'production-indent-form.html', roles: 'production',
+        desc: 'Request raw materials for production.' },
+      { title: 'Manage Users', tag: 'Admin', icon: 'users', href: 'users.html', roles: 'admin',
+        desc: 'Add, rename, or disable team accounts.' }
+    ];
+
+    (async () => {
+      const cardsBox = document.getElementById('actionCards');
+      const cards = CANDIDATE_CARDS.filter(c => isAllowed(c.roles)).slice(0, 3);
+
+      // "Approvals Waiting" is only meaningful for roles that can actually approve something.
+      if (['store', 'accounts', 'admin'].includes(user.role)) {
+        const pending = await pendingApprovals();
+        cards.unshift({
+          title: 'Approvals Waiting', tag: 'Approval', icon: 'variance',
+          href: pending[0] || 'variance-report.html',
+          desc: pending.length ? pending.length + ' item' + (pending.length === 1 ? '' : 's') + ' waiting for your review.' : 'Nothing waiting - you are all caught up.'
+        });
+      }
+      cardsBox.innerHTML = '';
+      cards.slice(0, 4).forEach(c => {
+        const a = document.createElement('a');
+        a.className = 'oxi-action-card'; a.href = c.href;
+        a.innerHTML =
+          '<span class="oxi-action-icon">' + svgIcon(c.icon, 20) + '</span>' +
+          '<span class="oxi-action-tag">' + c.tag + '</span>' +
+          '<span class="oxi-action-title">' + c.title + '</span>' +
+          '<span class="oxi-action-desc">' + c.desc + '</span>';
+        cardsBox.appendChild(a);
+      });
+
+      // ---------- insight card: one real, honest highlight ----------
+      const iv = document.getElementById('insightValue'), ino = document.getElementById('insightNote');
+      if (['store', 'accounts', 'admin'].includes(user.role)) {
+        const pending = await pendingApprovals();
+        if (pending.length > 0) {
+          iv.textContent = pending.length + ' item' + (pending.length === 1 ? '' : 's') + ' need your approval';
+          ino.textContent = 'Clear these first to keep purchases moving.';
+        } else if (isAllowed('purchase,store,accounts')) {
+          const d = await api('/api/dashboard/summary');
+          iv.textContent = d.success ? '₹' + money(d.total_purchase_value) : 'All caught up';
+          ino.textContent = d.success ? 'Total purchase value on record.' : '';
+        }
+      } else if (user.role === 'branch') {
+        const d = await api('/api/branch-request?status=pending');
+        iv.textContent = d.success ? d.requests.length + ' request' + (d.requests.length === 1 ? '' : 's') + ' pending' : '-';
+        ino.textContent = 'Waiting for HQ to review.';
+      } else if (user.role === 'production') {
+        const d = await api('/api/production-indent?status=pending');
+        iv.textContent = d.success ? d.indents.length + ' indent' + (d.indents.length === 1 ? '' : 's') + ' pending' : '-';
+        ino.textContent = 'Waiting for HQ to review.';
+      } else {
+        iv.textContent = 'Welcome';
+        ino.textContent = '';
+      }
+    })();
+
+    // ---------- KPI chips (real numbers only - no fabricated "low stock" metric) ----------
+    if (document.getElementById('kpiChips')) {
+      api('/api/dashboard/summary').then(d => {
+        if (!d.success) return;
+        const box = document.getElementById('kpiChips');
+        const chip = (cls, label, value) => {
+          const s = document.createElement('div'); s.className = 'oxi-kpi-chip' + (cls ? ' ' + cls : '');
+          s.innerHTML = '<span class="oxi-kpi-chip-dot"></span><span><b>' + value + '</b> ' + label + '</span>';
+          return s;
+        };
+        box.append(
+          chip('', 'Pending Requests', d.pending_branch_requests + d.pending_production_indents),
+          chip('', 'Open POs', d.active_pos),
+          chip(d.pending_grn_qc > 0 ? 'warn' : 'good', 'Awaiting QC Approval', d.pending_grn_qc),
+          chip('', 'Total Purchase Value', '₹' + money(d.total_purchase_value)),
+          chip(d.variance_issues > 0 ? 'bad' : 'good', 'Variance Issues', d.variance_issues)
+        );
+      }).catch(() => {});
+    }
+
+    // ---------- bottom command bar: search + role-aware pill actions ----------
+    const cmdInput = document.getElementById('cmdSearch');
+    const cmdResults = document.getElementById('cmdResults');
+    let cmdTimer = null;
+    cmdInput.addEventListener('input', () => {
+      clearTimeout(cmdTimer);
+      const q = cmdInput.value.trim();
+      if (q.length < 2) { cmdResults.innerHTML = ''; return; }
+      cmdTimer = setTimeout(async () => {
+        const d = await api('/api/search?q=' + encodeURIComponent(q));
+        cmdResults.innerHTML = '';
+        const list = document.createElement('div');
+        list.className = 'oxi-search-results'; list.style.cssText = 'position:static;box-shadow:none;margin-bottom:14px;';
+        if (d.success && d.results.length) {
+          d.results.forEach(r => {
+            const a = document.createElement('a'); a.href = r.href; a.innerHTML = '<small>' + r.type + '</small>' + r.label;
+            list.appendChild(a);
+          });
+        } else {
+          list.innerHTML = '<div class="oxi-search-empty">No matches</div>';
+        }
+        cmdResults.appendChild(list);
+      }, 250);
+    });
+
+    (async () => {
+      const pillBox = document.getElementById('pillActions');
+      const pending = ['store', 'accounts', 'admin'].includes(user.role) ? await pendingApprovals() : [];
+      const PILLS = [
+        { label: 'New PO', href: 'po-form.html', roles: 'purchase' },
+        { label: 'Create GRN', href: 'grn-form.html', roles: 'store' },
+        { label: 'Record Payment', href: 'payment-form.html', roles: 'accounts' },
+        { label: 'New Branch Request', href: 'branch-request-form.html', roles: 'branch' },
+        { label: 'New Production Indent', href: 'production-indent-form.html', roles: 'production' },
+        { label: 'View Reports', href: isAllowed('store,purchase,accounts') ? 'variance-report.html'
+                                       : isAllowed('branch') ? 'branch-request-list.html' : 'production-indent-list.html', roles: '*' },
+        { label: 'Pending Approvals (' + pending.length + ')', href: pending[0] || 'variance-report.html', roles: 'store,accounts',
+          secondary: true, hide: pending.length === 0 }
+      ];
+      PILLS.filter(p => isAllowed(p.roles) && !p.hide).forEach(p => {
+        const a = document.createElement('a');
+        a.href = p.href; a.className = 'oxi-pill' + (p.secondary ? ' secondary' : ''); a.textContent = p.label;
+        pillBox.appendChild(a);
+      });
+    })();
+  </script>
+</body>
+</html>

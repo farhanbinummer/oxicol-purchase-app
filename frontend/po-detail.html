@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PO Details</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="po-list.html">&larr; All POs</a></p>
+
+  <div class="oxi-print-letterhead">
+    <h2>Oxicol Car Care Products</h2>
+    <div class="addr">Malappuram, Kerala</div>
+    <div class="doc-title">PURCHASE ORDER</div>
+  </div>
+
+  <h1 id="title">Purchase Order</h1>
+  <p id="message"></p>
+
+  <div id="detail" hidden>
+    <table style="width:auto">
+      <tr><td>Supplier</td><td id="supplier"></td></tr>
+      <tr><td>PO date</td><td id="podate"></td></tr>
+      <tr><td>Delivery date</td><td id="delivery"></td></tr>
+      <tr><td>Status</td><td id="status"></td></tr>
+      <tr><td>Notes</td><td id="notes"></td></tr>
+    </table>
+
+    <h3>Items</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th></tr></thead>
+      <tbody id="items"></tbody>
+    </table>
+
+    <table style="width:auto">
+      <tr><td>Subtotal</td><td id="subtotal" align="right"></td></tr>
+      <tr><td>CGST 9%</td><td id="cgst" align="right"></td></tr>
+      <tr><td>SGST 9%</td><td id="sgst" align="right"></td></tr>
+      <tr><td><b>TOTAL</b></td><td id="total" align="right"></td></tr>
+    </table>
+
+    <h3>Payments</h3>
+    <table>
+      <thead><tr><th>Payment ID</th><th>Date</th><th>Amount (₹)</th><th>UTR</th><th>Status</th></tr></thead>
+      <tbody id="pays"></tbody>
+    </table>
+
+    <h3>Goods receipts</h3>
+    <table>
+      <thead><tr><th>GRN</th><th>Date</th><th>Received by</th><th>Status</th></tr></thead>
+      <tbody id="grns"></tbody>
+    </table>
+
+    <h3>Invoice &amp; 3-way match</h3>
+    <div id="invoiceBox">Loading...</div>
+
+    <h3>Tally</h3>
+    <button id="tallyBtn">Sync to Tally (test mode: logs only)</button>
+    <pre id="tallyOut"></pre>
+
+    <h3>Change status</h3>
+    <p id="statusHint"></p>
+    <select id="newStatus"></select>
+    <button id="statusBtn">Update status</button>
+    <button id="deleteBtn">Delete PO</button>
+
+    <div class="oxi-print-signatures">
+      <div>Prepared by (Purchase)</div>
+      <div>Authorised signatory</div>
+    </div>
+  </div>
+  <script src="common.js"></script>
+
+  <script>
+    // money() / day() / badge() / show() come from common.js.
+    const id = new URLSearchParams(location.search).get('id');
+    const set = (elId, text) => { document.getElementById(elId).textContent = text; };
+    const setBadge = (elId, status) => {
+      const el = document.getElementById(elId); el.innerHTML = ''; el.appendChild(badge(status));
+    };
+
+    // Must match STATUS_FLOW in backend/routes/po.js - only statuses AFTER the
+    // current one are offered, so the dropdown can never propose a move the server refuses.
+    const STATUS_FLOW = ['created', 'payment_pending', 'payment_done', 'in_transit', 'delivered',
+                          'invoice_matched', 'variance_flagged', 'posted_to_tally', 'closed'];
+
+    function rebuildStatusOptions(currentStatus) {
+      const sel = document.getElementById('newStatus');
+      const btn = document.getElementById('statusBtn');
+      const hint = document.getElementById('statusHint');
+      const from = STATUS_FLOW.indexOf(currentStatus);
+      const next = from === -1 ? STATUS_FLOW : STATUS_FLOW.slice(from + 1);
+      sel.innerHTML = next.map(s => '<option value="' + s + '">' + s + '</option>').join('');
+      if (next.length === 0) {
+        hint.textContent = 'This PO is "closed" - there is nowhere further to move it.';
+        sel.hidden = true; btn.hidden = true;
+      } else {
+        hint.textContent = 'Currently "' + currentStatus + '". You can move it forward to:';
+        sel.hidden = false; btn.hidden = false;
+      }
+    }
+
+    // Loads the PO from the server and fills the page.
+    async function load() {
+      try {
+        const r = await fetch('/api/po/' + encodeURIComponent(id));
+        const d = await r.json();
+        if (!d.success) { show(d.error, false); return; }
+        const po = d.po;
+        set('title', po.po_number);
+        set('supplier', po.supplier_name);
+        set('podate', day(po.po_date));
+        set('delivery', day(po.delivery_date));
+        setBadge('status', po.status);
+        rebuildStatusOptions(po.status);
+        set('notes', po.notes || '-');
+        set('subtotal', money(po.subtotal));
+        set('cgst', money(po.cgst_amount));
+        set('sgst', money(po.sgst_amount));
+        set('total', money(po.total_amount));
+        const tbody = document.getElementById('items');
+        tbody.innerHTML = '';
+        d.items.forEach(it => {
+          const tr = document.createElement('tr');
+          [it.item_name, Number(it.quantity), it.unit, money(it.rate), money(it.line_amount)]
+            .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+          tbody.appendChild(tr);
+        });
+        const pays = document.getElementById('pays');
+        pays.innerHTML = '';
+        if (d.payments.length === 0) pays.innerHTML = '<tr><td colspan="5">No payment yet.</td></tr>';
+        d.payments.forEach(p => {
+          const tr = document.createElement('tr');
+          [p.payment_id, day(p.payment_date), money(p.amount), p.utr_number || '-']
+            .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+          const td = document.createElement('td'); td.appendChild(badge(p.status)); tr.appendChild(td);
+          pays.appendChild(tr);
+        });
+        const grns = document.getElementById('grns');
+        grns.innerHTML = '';
+        if (d.grns.length === 0) grns.innerHTML = '<tr><td colspan="4">No goods receipt yet.</td></tr>';
+        d.grns.forEach(g => {
+          const tr = document.createElement('tr');
+          const td = document.createElement('td');
+          const a = document.createElement('a');
+          a.href = 'grn-detail.html?id=' + g.id; a.textContent = g.grn_number;
+          td.appendChild(a); tr.appendChild(td);
+          [day(g.grn_date), g.received_by]
+            .forEach(v => { const c = document.createElement('td'); c.textContent = v; tr.appendChild(c); });
+          const st = document.createElement('td'); st.appendChild(badge(g.status)); tr.appendChild(st);
+          grns.appendChild(tr);
+        });
+        document.getElementById('detail').hidden = false;
+      } catch (e) { show('Could not reach the server.', false); }
+      loadInvoice();
+    }
+
+    // Shows the invoice (if uploaded) + its match history, and offers Upload/Match buttons.
+    async function loadInvoice() {
+      const box = document.getElementById('invoiceBox');
+      const r = await fetch('/api/invoice/' + id);
+      const d = await r.json();
+      if (!d.success) { box.textContent = d.error; return; }
+
+      if (!d.invoice) {
+        box.innerHTML =
+          '<p>No invoice uploaded yet.</p>' +
+          '<label>Invoice number <input id="invNum" size="20"></label> ' +
+          '<label>Date <input id="invDate" type="date"></label> ' +
+          '<label>Amount (₹) <input id="invAmt" type="number" step="any" style="width:110px"></label> ' +
+          '<label>GST # <input id="invGst" size="16"></label> ' +
+          '<button id="invUpload">Upload invoice</button>';
+        document.getElementById('invUpload').onclick = async () => {
+          const rr = await fetch('/api/invoice/upload', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              po_id: id,
+              invoice_number: document.getElementById('invNum').value,
+              invoice_date: document.getElementById('invDate').value,
+              invoice_amount: document.getElementById('invAmt').value,
+              gst_number: document.getElementById('invGst').value
+            })
+          });
+          const dd = await rr.json();
+          if (dd.success) { show('Invoice uploaded', true); loadInvoice(); } else { show(dd.error, false); }
+        };
+        return;
+      }
+
+      const inv = d.invoice;
+      let html = '<table style="width:auto">'
+        + '<tr><td>Invoice #</td><td>' + inv.invoice_number + '</td></tr>'
+        + '<tr><td>Date</td><td>' + day(inv.invoice_date) + '</td></tr>'
+        + '<tr><td>Amount</td><td>₹' + money(inv.invoice_amount) + '</td></tr>'
+        + '<tr><td>GST #</td><td>' + (inv.gst_number || '-') + '</td></tr>'
+        + '<tr><td>Status</td><td>' + inv.status + '</td></tr>'
+        + '</table>'
+        + '<button id="matchBtn">Run 3-way match</button>';
+
+      if (d.matches.length > 0) {
+        html += '<h4>Match history</h4><table><thead><tr><th>When</th><th>PO total</th><th>Goods received value</th>'
+          + '<th>Invoice total</th><th>Variance</th><th>Result</th><th>Notes</th></tr></thead><tbody>';
+        d.matches.forEach(m => {
+          html += '<tr><td>' + day(m.created_at) + '</td><td>' + money(m.po_total) + '</td><td>' + money(m.grn_total)
+            + '</td><td>' + money(m.invoice_total) + '</td><td>' + money(m.variance_amount) + '</td>'
+            + '<td class="' + (m.status === 'matched' ? 'success' : 'error') + '">' + m.status + '</td>'
+            + '<td>' + m.notes + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+      box.innerHTML = html;
+      document.getElementById('matchBtn').onclick = async () => {
+        const rr = await fetch('/api/invoice/match/' + inv.id, { method: 'POST' });
+        const dd = await rr.json();
+        if (dd.success) { show(dd.status.toUpperCase() + ': ' + dd.notes, dd.status === 'matched'); load(); }
+        else { show(dd.error, false); }
+      };
+    }
+
+    document.getElementById('tallyBtn').onclick = async () => {
+      const r = await fetch('/api/tally/sync/' + id, { method: 'POST' });
+      const d = await r.json();
+      if (d.success) {
+        show(d.message + ' | PO status: ' + d.po_status, true);
+        document.getElementById('tallyOut').textContent = JSON.stringify(d.vouchers, null, 2);
+        load(); // refresh the Status row - the sync just changed it in the database
+      } else { show(d.error, false); }
+    };
+
+    document.getElementById('statusBtn').onclick = async () => {
+      const r = await fetch('/api/po/' + id + '/status', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: document.getElementById('newStatus').value })
+      });
+      const d = await r.json();
+      if (d.success) { show('Status updated to ' + d.status, true); load(); } else { show(d.error, false); }
+    };
+
+    document.getElementById('deleteBtn').onclick = async () => {
+      if (!confirm('Delete this PO? This cannot be undone.')) return;
+      const r = await fetch('/api/po/' + id, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.success) { location.href = 'po-list.html'; } else { show(d.error, false); }
+    };
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create Purchase Order</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="po-list.html">All POs</a></p>
+  <h1>Create Purchase Order</h1>
+  <p id="message"></p>
+
+  <form id="poForm">
+    <p>
+      <label>Supplier<br>
+        <select id="supplier" required><option value="">Loading...</option></select>
+      </label>
+    </p>
+    <p>
+      <label>Delivery date<br><input type="date" id="delivery"></label>
+    </p>
+
+    <h3>Items</h3>
+    <table id="items">
+      <thead>
+        <tr><th>Item name</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p><button type="button" id="addRow">+ Add item</button></p>
+
+    <table style="width:auto">
+      <tr><td>Subtotal</td><td id="subtotal" align="right">0.00</td></tr>
+      <tr><td>CGST 9%</td><td id="cgst" align="right">0.00</td></tr>
+      <tr><td>SGST 9%</td><td id="sgst" align="right">0.00</td></tr>
+      <tr><td><b>TOTAL</b></td><td id="total" align="right"><b>0.00</b></td></tr>
+    </table>
+
+    <p><label>Notes<br><textarea id="notes" rows="2" cols="50"></textarea></label></p>
+    <p><button type="submit" id="saveBtn">Save PO</button></p>
+  </form>
+  <script src="common.js"></script>
+
+  <script>
+    // money() / show() come from common.js.
+    const tbody = document.querySelector('#items tbody');
+
+    // Fill the supplier dropdown from the server.
+    fetch('/api/suppliers').then(r => r.json()).then(d => {
+      const sel = document.getElementById('supplier');
+      sel.innerHTML = '<option value="">-- Select supplier --</option>';
+      d.suppliers.forEach(s => {
+        const o = document.createElement('option');
+        o.value = s.id; o.textContent = s.name;
+        sel.appendChild(o);
+      });
+    }).catch(() => show('Could not load suppliers. Is the server running?', false));
+
+    // Adds one empty item row to the table.
+    function addRow() {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><input class="name" size="28"></td>' +
+        '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
+        '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
+        '<td><input class="rate" type="number" min="0" step="any" style="width:90px"></td>' +
+        '<td class="amt" align="right">0.00</td>' +
+        '<td><button type="button" class="del">X</button></td>';
+      tbody.appendChild(tr);
+      tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) { tr.remove(); recalc(); } };
+      tr.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc));
+    }
+
+    // Updates line amounts and totals on screen (the server recalculates on save).
+    function recalc() {
+      let subtotal = 0;
+      [...tbody.rows].forEach(tr => {
+        const amt = (Number(tr.querySelector('.qty').value) || 0) * (Number(tr.querySelector('.rate').value) || 0);
+        tr.querySelector('.amt').textContent = money(amt);
+        subtotal += Math.round(amt * 100) / 100;
+      });
+      const cgst = subtotal * 0.09, sgst = subtotal * 0.09;
+      document.getElementById('subtotal').textContent = money(subtotal);
+      document.getElementById('cgst').textContent = money(cgst);
+      document.getElementById('sgst').textContent = money(sgst);
+      document.getElementById('total').innerHTML = '<b>' + money(subtotal + cgst + sgst) + '</b>';
+    }
+
+    document.getElementById('addRow').onclick = addRow;
+    addRow();
+
+    // Send the form to the server.
+    document.getElementById('poForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const items = [...tbody.rows].map(tr => ({
+        item_name: tr.querySelector('.name').value,
+        quantity: tr.querySelector('.qty').value,
+        unit: tr.querySelector('.unit').value,
+        rate: tr.querySelector('.rate').value
+      }));
+      const body = {
+        supplier_id: document.getElementById('supplier').value,
+        delivery_date: document.getElementById('delivery').value,
+        notes: document.getElementById('notes').value,
+        items
+      };
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/po/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (d.success) {
+          show('PO saved: ' + d.po_number + '  |  Total ₹' + money(d.total_amount), true);
+          document.getElementById('poForm').reset();
+          tbody.innerHTML = ''; addRow(); recalc();
+        } else {
+          show('Error: ' + d.error, false);
+        }
+      } catch (err) {
+        show('Could not reach the server. Is it running?', false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

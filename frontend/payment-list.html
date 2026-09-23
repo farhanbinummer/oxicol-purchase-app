@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>All Payments</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="payment-form.html">+ Record payment</a></p>
+  <h1>All Payments</h1>
+  <p id="message"></p>
+
+  <table style="width:auto">
+    <tr><td>Total paid (confirmed)</td><td align="right" id="paid">-</td></tr>
+    <tr><td><b>Outstanding advances</b><br><small>paid, but goods not yet received (no GRN)</small></td>
+        <td align="right" id="outstanding">-</td></tr>
+  </table>
+  <br>
+  <div class="oxi-toolbar">
+    <input type="text" id="search" placeholder="Search payment ID, PO, supplier, UTR...">
+    <select id="statusFilter">
+      <option value="">All statuses</option>
+      <option value="initiated">initiated</option>
+      <option value="confirmed">confirmed</option>
+      <option value="failed">failed</option>
+    </select>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Payment ID</th><th>PO</th><th>Supplier</th><th>Date</th><th>Amount (₹)</th><th>UTR</th><th>Status</th><th>GRN</th><th></th></tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="9">Loading...</td></tr></tbody>
+  </table>
+
+  <script src="common.js"></script>
+  <script>
+    async function load() {
+      const d = await api('/api/payment');
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      document.getElementById('paid').textContent = '₹' + money(d.total_paid);
+      document.getElementById('outstanding').innerHTML = '';
+      const b = document.createElement('b');
+      b.textContent = '₹' + money(d.outstanding_advances) + ' (' + d.outstanding_count + ' PO)';
+      document.getElementById('outstanding').appendChild(b);
+      if (d.payments.length === 0) { rows.innerHTML = '<tr><td colspan="9">No payments yet.</td></tr>'; return; }
+
+      d.payments.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.dataset.status = p.status;
+        addCell(tr, p.payment_id);
+        addLink(tr, p.po_number, 'po-detail.html?id=' + p.po_id);
+        addCell(tr, p.supplier_name);
+        addCell(tr, day(p.payment_date));
+        addCell(tr, money(p.amount));
+        addCell(tr, p.utr_number || '-');
+        addBadge(tr, p.status);
+        addCell(tr, p.grn_done ? 'received' : 'not yet');
+        const td = document.createElement('td');
+        if (p.status === 'initiated') {
+          const btn = document.createElement('button');
+          btn.textContent = 'Approve';
+          btn.onclick = async () => {
+            const r = await api('/api/payment/' + p.id + '/approve', 'PUT', {});
+            if (r.success) { show('Payment approved', true); load(); } else { show(r.error, false); }
+          };
+          td.appendChild(btn);
+        }
+        tr.appendChild(td);
+        rows.appendChild(tr);
+      });
+      attachListFilter({ tbodyId: 'rows', searchId: 'search', statusId: 'statusFilter' });
+    }
+    load();
+  </script>
+</body>
+</html>

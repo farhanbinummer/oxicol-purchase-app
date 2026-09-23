@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>All Purchase Orders</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="po-form.html">+ New PO</a></p>
+  <h1>All Purchase Orders</h1>
+  <p id="message"></p>
+
+  <div class="oxi-toolbar">
+    <input type="text" id="search" placeholder="Search PO number, supplier...">
+  </div>
+  <div class="oxi-chips" id="statusChips" style="margin-bottom:14px">
+    <button type="button" class="oxi-chip active" data-value="">All</button>
+    <button type="button" class="oxi-chip" data-value="created">Created</button>
+    <button type="button" class="oxi-chip" data-value="payment_pending">Payment pending</button>
+    <button type="button" class="oxi-chip" data-value="payment_done">Payment done</button>
+    <button type="button" class="oxi-chip" data-value="in_transit">In transit</button>
+    <button type="button" class="oxi-chip" data-value="delivered">Delivered</button>
+    <button type="button" class="oxi-chip" data-value="invoice_matched">Invoice matched</button>
+    <button type="button" class="oxi-chip" data-value="variance_flagged">Variance flagged</button>
+    <button type="button" class="oxi-chip" data-value="posted_to_tally">Posted to Tally</button>
+    <button type="button" class="oxi-chip" data-value="closed">Closed</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>PO number</th><th>Date</th><th>Supplier</th><th>Delivery</th><th>Total (₹)</th><th>Status</th></tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
+  </table>
+  <script src="common.js"></script>
+
+  <script>
+    // money() / day() / badge() / attachListFilter() come from common.js.
+    fetch('/api/po').then(r => r.json()).then(d => {
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '';
+      if (!d.success) { document.getElementById('message').textContent = d.error; return; }
+      if (d.pos.length === 0) { rows.innerHTML = '<tr><td colspan="6">No POs yet.</td></tr>'; return; }
+      d.pos.forEach(po => {
+        const tr = document.createElement('tr');
+        tr.dataset.status = po.status;
+        // Build cells with textContent so data can never inject HTML.
+        const link = document.createElement('a');
+        link.href = 'po-detail.html?id=' + po.id;
+        link.textContent = po.po_number;
+        const first = document.createElement('td'); first.appendChild(link);
+        tr.appendChild(first);
+        [day(po.po_date), po.supplier_name, day(po.delivery_date), money(po.total_amount)]
+          .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+        const statusTd = document.createElement('td');
+        statusTd.appendChild(badge(po.status));
+        tr.appendChild(statusTd);
+        rows.appendChild(tr);
+      });
+      attachListFilter({ tbodyId: 'rows', searchId: 'search', chipsId: 'statusChips' });
+    }).catch(() => { document.getElementById('message').textContent = 'Could not reach the server.'; });
+  </script>
+</body>
+</html>

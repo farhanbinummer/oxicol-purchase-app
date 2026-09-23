@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manage Users</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="permissions.html">View Permissions</a></p>
+  <h1>Manage Users</h1>
+  <p id="message"></p>
+
+  <table>
+    <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Branch</th><th>Status</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
+  </table>
+
+  <h3>Add a user</h3>
+  <form id="userForm">
+    <p><label>Username<br><input id="username" size="20" required placeholder="e.g. biju.store"></label></p>
+    <p><label>Full name<br><input id="name" size="30" required></label></p>
+    <p><label>Password<br><input id="password" type="password" required></label></p>
+    <p><label>Role<br>
+      <select id="role" required>
+        <option value="">-- Select role --</option>
+        <option value="branch">branch</option>
+        <option value="production">production</option>
+        <option value="store">store</option>
+        <option value="purchase">purchase</option>
+        <option value="accounts">accounts</option>
+        <option value="admin">admin</option>
+      </select></label></p>
+    <p id="branchField" hidden><label>Branch<br>
+      <select id="branch">
+        <option value="">-- Select branch --</option>
+        <option>Kannur</option><option>Thrissur</option><option>Trivandrum</option><option>Ernakulam</option>
+      </select></label></p>
+    <p><button type="submit" id="saveBtn">Create user</button></p>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    document.getElementById('role').addEventListener('change', (e) => {
+      document.getElementById('branchField').hidden = e.target.value !== 'branch';
+    });
+
+    async function load() {
+      const d = await api('/api/auth/users');
+      const rows = document.getElementById('rows');
+      rows.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      d.users.forEach(u => {
+        const tr = document.createElement('tr');
+        addCell(tr, u.username); addCell(tr, u.name); addCell(tr, u.role); addCell(tr, u.branch || '-');
+        addBadge(tr, u.active ? 'active' : 'disabled');
+        const td = document.createElement('td');
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.textContent = u.active ? 'Disable' : 'Enable';
+        toggleBtn.onclick = async () => {
+          const r = await api('/api/auth/users/' + u.id + '/active', 'PUT', { active: !u.active });
+          if (r.success) { show('Updated', true); load(); } else show(r.error, false);
+        };
+
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = 'Rename';
+        renameBtn.onclick = async () => {
+          const newUsername = prompt('New username (login) for ' + u.name + ':', u.username);
+          if (newUsername === null) return;
+          const newName = prompt('New display name:', u.name);
+          if (newName === null) return;
+          const r = await api('/api/auth/users/' + u.id, 'PUT', { username: newUsername, name: newName });
+          if (r.success) { show('Renamed - they must log in again with the new username', true); load(); }
+          else show(r.error, false);
+        };
+
+        const roleBtn = document.createElement('button');
+        roleBtn.textContent = 'Change role';
+        roleBtn.onclick = async () => {
+          const roles = ['branch', 'production', 'store', 'purchase', 'accounts', 'admin'];
+          const newRole = prompt('New role for ' + u.name + '.\nOne of: ' + roles.join(', '), u.role);
+          if (newRole === null) return;
+          if (!roles.includes(newRole)) { show('Role must be one of: ' + roles.join(', '), false); return; }
+          let branch = null;
+          if (newRole === 'branch') {
+            const branches = ['Kannur', 'Thrissur', 'Trivandrum', 'Ernakulam'];
+            branch = prompt('Which branch?\nOne of: ' + branches.join(', '), u.branch || '');
+            if (branch === null) return;
+            if (!branches.includes(branch)) { show('Branch must be one of: ' + branches.join(', '), false); return; }
+          }
+          const r = await api('/api/auth/users/' + u.id, 'PUT', { role: newRole, branch });
+          if (r.success) { show('Role changed - they must log in again', true); load(); }
+          else show(r.error, false);
+        };
+
+        const resetBtn = document.createElement('button');
+        resetBtn.textContent = 'Reset password';
+        resetBtn.onclick = async () => {
+          const pw = prompt('New password for ' + u.name + ' (at least 4 characters):');
+          if (pw === null) return;
+          const r = await api('/api/auth/users/' + u.id + '/password', 'PUT', { new_password: pw });
+          if (r.success) { show('Password reset for ' + u.name, true); } else show(r.error, false);
+        };
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.onclick = async () => {
+          if (!confirm('Delete the account "' + u.username + '"? This cannot be undone.')) return;
+          const r = await api('/api/auth/users/' + u.id, 'DELETE');
+          if (r.success) { show('Deleted', true); load(); } else show(r.error, false);
+        };
+
+        td.append(toggleBtn, renameBtn, roleBtn, resetBtn, deleteBtn);
+        tr.appendChild(td);
+        rows.appendChild(tr);
+      });
+    }
+
+    document.getElementById('userForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const role = document.getElementById('role').value;
+      const btn = document.getElementById('saveBtn'); btn.disabled = true;
+      const d = await api('/api/auth/users', 'POST', {
+        username: document.getElementById('username').value,
+        name: document.getElementById('name').value,
+        password: document.getElementById('password').value,
+        role,
+        branch: role === 'branch' ? document.getElementById('branch').value : null
+      });
+      btn.disabled = false;
+      if (d.success) {
+        show('User "' + d.username + '" created', true);
+        document.getElementById('userForm').reset();
+        document.getElementById('branchField').hidden = true;
+        load();
+      } else { show('Error: ' + d.error, false); }
+    });
+
+    load();
+  </script>
+</body>
+</html>
