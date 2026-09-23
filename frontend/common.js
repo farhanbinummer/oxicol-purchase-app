@@ -240,15 +240,20 @@ function svgIcon(name, size) {
       document.getElementById('oxiSearch').focus();
     });
 
-    document.addEventListener('click', () => {
+    // ---------- mobile sidebar toggle ----------
+    const menuBtn = document.getElementById('oxiMenuBtn');
+    menuBtn.onclick = () => document.body.classList.toggle('oxi-sidebar-open');
+
+    document.addEventListener('click', (e) => {
       profMenu.hidden = true;
       notifMenu.hidden = true;
       const cm = createWrap.querySelector('.oxi-menu'); if (cm) cm.hidden = true;
       searchWrap.classList.remove('oxi-search-active');
+      // Tapping anywhere outside the open mobile drawer closes it (it has no X button by design).
+      if (!sidebar.contains(e.target) && e.target !== menuBtn) {
+        document.body.classList.remove('oxi-sidebar-open');
+      }
     });
-
-    // ---------- mobile sidebar toggle ----------
-    document.getElementById('oxiMenuBtn').onclick = () => document.body.classList.toggle('oxi-sidebar-open');
 
     // ---------- dark mode toggle ----------
     const themeBtn = document.getElementById('oxiThemeToggle');

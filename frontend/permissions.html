@@ -77,6 +77,11 @@
           addCell(tr, row.action);
           d.roles.forEach(r => {
             const td = document.createElement('td');
+            const label = document.createElement('label');
+            label.className = 'oxi-perm-cell';
+            const roleSpan = document.createElement('span');
+            roleSpan.className = 'oxi-perm-role-label';
+            roleSpan.textContent = ROLE_LABEL[r];
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.checked = !!d.granted[r + '|' + row.key];
@@ -92,11 +97,18 @@
                 show(res.error, false);
               }
             });
-            td.appendChild(cb);
+            label.append(roleSpan, cb);
+            td.appendChild(label);
             tr.appendChild(td);
           });
           const tdAdmin = document.createElement('td');
-          tdAdmin.appendChild(badge('Yes'));
+          const adminWrap = document.createElement('span');
+          adminWrap.className = 'oxi-perm-cell';
+          const adminSpan = document.createElement('span');
+          adminSpan.className = 'oxi-perm-role-label';
+          adminSpan.textContent = 'Admin';
+          adminWrap.append(adminSpan, badge('Yes'));
+          tdAdmin.appendChild(adminWrap);
           tr.appendChild(tdAdmin);
           tbody.appendChild(tr);
         });

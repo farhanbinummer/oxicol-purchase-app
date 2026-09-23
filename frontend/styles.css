@@ -444,6 +444,11 @@ table[style*="width:auto"], table[style*="width: auto"] {
 }
 table[style*="width:auto"] td, table[style*="width: auto"] td { border: none; padding: 4px 14px 4px 0; }
 
+/* Permission matrix checkboxes: the role name is in the column header on desktop,
+   so this per-cell label stays hidden there and only appears in the mobile card layout below. */
+.oxi-perm-cell { display: contents; }
+.oxi-perm-role-label { display: none; }
+
 form { padding: 16px; border: 1px solid var(--border); margin-bottom: 18px; }
 label { font-weight: 600; font-size: 0.86rem; color: var(--text-muted); display: inline-block; }
 input, select, textarea {
@@ -536,6 +541,35 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   }
   .oxi-search.oxi-search-active input { width: 100%; flex: 1 1 auto; opacity: 1; }
+
+  /* Wide tables (PO list, payments, GRNs...) were forcing the whole page to scroll
+     sideways on a phone. Scoping the scroll to just the table keeps everything else
+     - the header, filters, chips - locked in place; only the table itself pans. */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+
+  /* Permissions matrix: 6 role columns of tiny checkboxes were unreadable on a phone.
+     Each action becomes its own card, with every role's toggle labeled and full-width
+     instead of a squeezed grid. */
+  #matrixBox table, #matrixBox thead, #matrixBox tbody, #matrixBox tr, #matrixBox th, #matrixBox td {
+    display: block; width: 100%;
+  }
+  #matrixBox table { overflow-x: visible; border: none; background: transparent; box-shadow: none; }
+  #matrixBox thead { display: none; }
+  #matrixBox tr {
+    background: var(--glass-bg-soft); border: 1px solid var(--glass-border); border-radius: var(--card-radius);
+    padding: 0 16px; margin-bottom: 12px; box-shadow: 0 4px 16px rgba(30, 41, 59, 0.05);
+  }
+  #matrixBox tr td:first-child {
+    font-weight: 700; font-size: 1rem; padding: 14px 0 10px; border-bottom: 1px solid var(--border);
+  }
+  #matrixBox td { padding: 0; border: none; }
+  #matrixBox .oxi-perm-cell {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  #matrixBox tr td:last-child .oxi-perm-cell { border-bottom: none; }
+  #matrixBox .oxi-perm-role-label { display: inline; font-size: 0.92rem; color: var(--text); }
+  #matrixBox input[type="checkbox"] { width: 22px; height: 22px; flex: none; }
 }
 
 /* ============================================================
