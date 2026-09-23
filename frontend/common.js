@@ -112,7 +112,9 @@ function svgIcon(name, size) {
     const sidebar = document.createElement('aside');
     sidebar.className = 'oxi-sidebar';
     sidebar.innerHTML =
-      '<a href="index.html" class="oxi-brand-mark" title="Oxicol - Dashboard">O</a>' +
+      '<a href="index.html" class="oxi-brand-mark" title="Oxicol - Dashboard">' +
+        '<span class="oxi-brand-icon">O</span><span class="oxi-nav-label">Oxicol</span>' +
+      '</a>' +
       '<nav class="oxi-sidenav"></nav>' +
       '<button class="oxi-theme-toggle" id="oxiThemeToggle" title="Toggle dark mode"></button>';
     const sidenav = sidebar.querySelector('.oxi-sidenav');
@@ -121,7 +123,7 @@ function svgIcon(name, size) {
       const a = document.createElement('a');
       a.href = item.href;
       a.title = item.label;
-      a.innerHTML = svgIcon(item.icon, 19);
+      a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
       if (page === item.href) a.className = 'active';
       sidenav.appendChild(a);
     });
@@ -242,7 +244,7 @@ function svgIcon(name, size) {
     const themeBtn = document.getElementById('oxiThemeToggle');
     function paintThemeBtn() {
       const t = document.documentElement.getAttribute('data-theme');
-      themeBtn.innerHTML = svgIcon(t === 'dark' ? 'sun' : 'moon', 16) + '<span>' + (t === 'dark' ? 'Light mode' : 'Dark mode') + '</span>';
+      themeBtn.innerHTML = svgIcon(t === 'dark' ? 'sun' : 'moon', 16) + '<span class="oxi-nav-label">' + (t === 'dark' ? 'Light mode' : 'Dark mode') + '</span>';
     }
     paintThemeBtn();
     themeBtn.onclick = () => {

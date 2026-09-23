@@ -97,32 +97,54 @@ a:hover { text-decoration: underline; }
 /* sidebar is position:fixed (out of flow), so this only stacks the topbar above the content. */
 body.oxi-shell { display: flex; flex-direction: column; }
 
-/* Slim icon-only sidebar: a frosted pale strip of circular buttons, not a labeled menu. */
+/* Slim icon-only sidebar that expands on hover to reveal each item's full label.
+   Collapsed width matches --sidebar-w exactly (circular buttons); on hover it widens
+   and floats over the content (it's position:fixed, so nothing else needs to move). */
 .oxi-sidebar {
   position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w);
   background: var(--sidebar-bg); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
   border-right: 1px solid var(--glass-border);
-  display: flex; flex-direction: column; align-items: center; padding: 18px 0;
-  z-index: 30; transition: transform 0.2s ease;
+  display: flex; flex-direction: column; align-items: stretch; padding: 18px 0;
+  z-index: 30; overflow: hidden;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s ease;
 }
+.oxi-sidebar:hover { width: 216px; box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12); }
+
 .oxi-brand-mark {
+  display: flex; align-items: center; margin: 0 0 20px 17px; flex: none; overflow: hidden;
+}
+.oxi-brand-icon {
   width: 38px; height: 38px; border-radius: 50%; background: var(--primary);
   color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 700;
-  margin-bottom: 20px; flex: none;
+  flex: none;
 }
-.oxi-sidenav { display: flex; flex-direction: column; gap: 8px; flex: 1; align-items: center; overflow-y: auto; }
+.oxi-brand-mark .oxi-nav-label { color: var(--sidebar-text); font-weight: 700; font-size: 0.95rem; }
+
+.oxi-sidenav { display: flex; flex-direction: column; gap: 8px; flex: 1; align-items: stretch; overflow-y: auto; overflow-x: hidden; }
 .oxi-sidenav a {
-  width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  color: var(--sidebar-text); flex: none;
+  height: 42px; margin: 0 15px; border-radius: 21px; padding: 0 11.5px;
+  display: flex; align-items: center;
+  color: var(--sidebar-text); flex: none; overflow: hidden; white-space: nowrap;
 }
+.oxi-sidenav a svg { flex: none; }
 .oxi-sidenav a:hover { background: rgba(54, 43, 107, 0.08); text-decoration: none; color: var(--primary); }
 .oxi-sidenav a.active { background: var(--sidebar-active); color: #fff; }
 
-.oxi-theme-toggle {
-  width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  background: transparent; border: 1px solid var(--border); color: var(--sidebar-text); margin-top: 10px; padding: 0;
+/* Labels: 0-width and invisible while collapsed, so they add no layout space; the
+   sidebar's own width transition (above) is what makes the reveal feel smooth. */
+.oxi-nav-label {
+  display: inline-block; max-width: 0; margin-left: 0; opacity: 0; overflow: hidden;
+  font-size: 0.88rem; font-weight: 500; white-space: nowrap;
+  transition: max-width 0.22s ease, opacity 0.15s ease, margin-left 0.22s ease;
 }
-.oxi-theme-toggle span { display: none; } /* icon only, to match the minimal sidebar */
+.oxi-sidebar:hover .oxi-nav-label { max-width: 160px; margin-left: 14px; opacity: 1; }
+
+.oxi-theme-toggle {
+  height: 42px; margin: 10px 15px 0; border-radius: 21px; padding: 0 11.5px;
+  display: flex; align-items: center;
+  background: transparent; border: 1px solid var(--border); color: var(--sidebar-text);
+  flex: none; overflow: hidden; white-space: nowrap;
+}
 .oxi-theme-toggle:hover { background: rgba(54, 43, 107, 0.08); }
 
 .oxi-topbar {
@@ -480,7 +502,9 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
    ============================================================ */
 @media (max-width: 900px) {
   .oxi-sidebar { transform: translateX(-100%); box-shadow: 0 0 0 100vmax rgba(0,0,0,0); }
-  body.oxi-sidebar-open .oxi-sidebar { transform: translateX(0); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.35); }
+  /* Touch screens can't hover to reveal labels, so the tap-open drawer opens pre-expanded. */
+  body.oxi-sidebar-open .oxi-sidebar { transform: translateX(0); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.35); width: 216px; }
+  body.oxi-sidebar-open .oxi-nav-label { max-width: 160px; margin-left: 14px; opacity: 1; }
   .oxi-topbar, .oxi-content { margin-left: 0; }
   .oxi-menu-btn { display: inline-flex; }
   .oxi-profile-text, .oxi-company-label { display: none; }
