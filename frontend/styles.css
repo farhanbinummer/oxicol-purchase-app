@@ -162,6 +162,10 @@ body.oxi-shell { display: flex; flex-direction: column; }
   box-shadow: 0 4px 16px rgba(30,41,59,0.06);
 }
 .oxi-icon-btn:hover { border-color: var(--primary); color: var(--primary); }
+/* Without this, the bare <svg> inside these flex buttons (menu, bell, print) shrinks
+   to 0 width - a flexbox default the search/profile icons avoid because they're
+   already wrapped in their own flex:none rule. */
+.oxi-icon-btn svg { flex: none; }
 .oxi-notif-dot {
   position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger);
 }
