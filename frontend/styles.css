@@ -154,7 +154,7 @@ body.oxi-shell { display: flex; flex-direction: column; }
   background: transparent;
   margin-left: var(--sidebar-w);
 }
-.oxi-menu-btn { display: none; }
+.oxi-icon-btn.oxi-menu-btn { display: none; } /* phones only; needs the extra class to beat .oxi-icon-btn's display */
 .oxi-icon-btn {
   position: relative; background: var(--glass-bg); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border); color: var(--text-muted);
@@ -515,7 +515,7 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   body.oxi-sidebar-open .oxi-sidebar { transform: translateX(0); box-shadow: 0 0 0 100vmax rgba(0,0,0,0.35); width: 216px; }
   body.oxi-sidebar-open .oxi-nav-label { max-width: 160px; margin-left: 14px; opacity: 1; }
   .oxi-topbar, .oxi-content { margin-left: 0; }
-  .oxi-menu-btn { display: inline-flex; }
+  .oxi-icon-btn.oxi-menu-btn { display: inline-flex; }
   .oxi-profile-text, .oxi-company-label { display: none; }
   .oxi-search { max-width: none; }
 }
