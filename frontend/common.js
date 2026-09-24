@@ -457,3 +457,40 @@ function addLink(tr, text, href) {
   tr.appendChild(td);
   return td;
 }
+
+// ---------- phone card layout for list tables ----------
+// On a phone each table row becomes a card (see "table.oxi-cards" in styles.css). Rows are
+// filled in after the page loads, so this labels every cell from its column header
+// and re-labels whenever the rows change.
+(function () {
+  const CARD_PAGES = ['branch-request-list.html', 'production-indent-list.html', 'po-list.html',
+    'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html'];
+  const page = location.pathname.split('/').pop() || 'index.html';
+  if (!CARD_PAGES.includes(page)) return;
+
+  function decorate() {
+    document.querySelectorAll('table').forEach(table => {
+      const heads = table.querySelectorAll('thead th');
+      if (!heads.length || table.style.width === 'auto') return;
+      table.classList.add('oxi-cards');
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        [...tr.children].forEach((td, i) => {
+          if (td.colSpan > 1) { td.classList.add('oxi-card-full'); return; }
+          const label = heads[i] ? heads[i].textContent.trim() : '';
+          if (td.dataset.label !== label) td.dataset.label = label;
+          if (!label) td.classList.add('oxi-card-action');
+        });
+      });
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    decorate();
+    let queued = false;
+    new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; decorate(); });
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+})();
