@@ -9,6 +9,9 @@
   document.documentElement.setAttribute('data-theme', theme);
 })();
 
+// Lets phones offer "Install app" / build an APK; sw.js only passes requests through to the network.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
 // Small inline icon set (no external font/CDN, so the app still looks right with no internet).
 const OXI_ICONS = {
   dashboard: '<path d="M4 13h6V4H4v9zm0 7h6v-5H4v5zm10 0h6V11h-6v9zm0-16v5h6V4h-6z"/>',

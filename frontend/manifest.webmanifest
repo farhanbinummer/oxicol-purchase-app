@@ -1,0 +1,16 @@
+{
+  "name": "Oxicol Purchase App",
+  "short_name": "Oxicol",
+  "description": "Purchase orders, payments and goods receipts for Oxicol Car Care Products",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#362b6b",
+  "theme_color": "#362b6b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
