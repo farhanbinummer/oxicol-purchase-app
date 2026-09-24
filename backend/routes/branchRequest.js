@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { pool } = require('../database');
+const { notify } = require('../notify');
 const { fail, isValidDate, todayISO, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -55,6 +56,7 @@ router.post('/create', requirePermission(KEYS.BRANCH_REQUEST_CREATE), async (req
         [id, String(it.item_name).trim(), Number(it.quantity), String(it.unit).trim()]);
     }
     await client.query('COMMIT');
+    notify({ roles: ['store'], subject: 'New branch request ' + reqNumber, text: `New stock request ${reqNumber} from ${branch} needs approval.`, path: 'branch-request-detail.html?id=' + id });
     res.status(201).json({ success: true, request_id: id, request_number: reqNumber, status: 'pending' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -107,12 +109,13 @@ router.put('/:id/approve', requirePermission(KEYS.BRANCH_REQUEST_APPROVE), async
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid request id');
   try {
-    const cur = await pool.query('SELECT status FROM branch_stock_requests WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT status, request_number, branch FROM branch_stock_requests WHERE id = $1', [id]);
     if (cur.rowCount === 0) return fail(res, 404, 'Branch request not found');
     if (cur.rows[0].status !== 'pending') {
       return fail(res, 400, `Only "pending" requests can be approved (this one is "${cur.rows[0].status}")`);
     }
     await pool.query("UPDATE branch_stock_requests SET status = 'approved' WHERE id = $1", [id]);
+    notify({ roles: ['branch', 'purchase'], branch: cur.rows[0].branch, subject: 'Request approved', text: `Stock request ${cur.rows[0].request_number} (${cur.rows[0].branch}) was approved and is ready for purchase planning.`, path: 'branch-request-detail.html?id=' + id });
     res.json({ success: true, request_id: id, status: 'approved' });
   } catch (err) {
     console.error(err);

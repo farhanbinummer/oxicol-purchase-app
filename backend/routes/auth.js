@@ -85,7 +85,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
 router.get('/users', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const r = await pool.query(
-      'SELECT id, username, name, role, branch, active, created_at FROM users ORDER BY id');
+      'SELECT id, username, name, role, branch, active, email, phone, created_at FROM users ORDER BY id');
     res.json({ success: true, users: r.rows });
   } catch (err) {
     console.error(err);
@@ -116,6 +116,24 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
     if (err.code === '23505') return fail(res, 400, 'That username is already taken');
     console.error('Create user failed:', err);
     fail(res, 500, 'Could not create user');
+  }
+});
+
+// Where alerts for this login are sent. Blank clears it. Admin only.
+router.put('/users/:id/contact', requireAuth, requireRole('admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid user id');
+  const email = req.body && req.body.email ? String(req.body.email).trim() : '';
+  const phone = req.body && req.body.phone ? String(req.body.phone).trim() : '';
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, 'That does not look like an email address');
+  if (phone && !/^\+?[0-9 ()-]{8,20}$/.test(phone)) return fail(res, 400, 'WhatsApp number should be digits with the country code, e.g. 919876543210');
+  try {
+    const r = await pool.query('UPDATE users SET email = $1, phone = $2 WHERE id = $3 RETURNING id', [email || null, phone || null, id]);
+    if (r.rowCount === 0) return fail(res, 404, 'User not found');
+    res.json({ success: true, user_id: id });
+  } catch (err) {
+    console.error(err);
+    fail(res, 500, 'Could not save contact details');
   }
 });
 

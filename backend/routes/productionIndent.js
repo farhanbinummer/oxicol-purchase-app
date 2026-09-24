@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { pool } = require('../database');
+const { notify } = require('../notify');
 const { fail, isValidDate, todayISO, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -54,6 +55,7 @@ router.post('/create', requirePermission(KEYS.PRODUCTION_INDENT_CREATE), async (
          it.required_by || null, it.priority || 'normal']);
     }
     await client.query('COMMIT');
+    notify({ roles: ['store'], subject: 'New production indent ' + indentNumber, text: `New production indent ${indentNumber} needs approval.`, path: 'production-indent-detail.html?id=' + id });
     res.status(201).json({ success: true, indent_id: id, indent_number: indentNumber, status: 'pending' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -100,12 +102,13 @@ router.put('/:id/approve', requirePermission(KEYS.PRODUCTION_INDENT_APPROVE), as
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid indent id');
   try {
-    const cur = await pool.query('SELECT status FROM production_indents WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT status, indent_number FROM production_indents WHERE id = $1', [id]);
     if (cur.rowCount === 0) return fail(res, 404, 'Production indent not found');
     if (cur.rows[0].status !== 'pending') {
       return fail(res, 400, `Only "pending" indents can be approved (this one is "${cur.rows[0].status}")`);
     }
     await pool.query("UPDATE production_indents SET status = 'approved' WHERE id = $1", [id]);
+    notify({ roles: ['production', 'purchase'], subject: 'Indent approved', text: `Production indent ${cur.rows[0].indent_number} was approved and is ready for purchase planning.`, path: 'production-indent-detail.html?id=' + id });
     res.json({ success: true, indent_id: id, status: 'approved' });
   } catch (err) {
     console.error(err);

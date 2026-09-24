@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { pool } = require('../database');
+const { notify } = require('../notify');
 const { fail, todayISO, isValidDate, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -132,6 +133,7 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
     await client.query('COMMIT');
 
     const short = lines.filter(l => l.variance < 0);
+    notify({ roles: ['purchase', 'accounts'], subject: 'Goods received ' + grnNumber, text: `Goods received against ${po.rows[0].po_number} (${grnNumber})` + (lines.some(l => l.variance !== 0) ? ' - with a quantity difference, please check.' : '.'), path: 'grn-detail.html?id=' + grnId });
     res.status(201).json({
       success: true,
       grn_id: grnId,
@@ -231,7 +233,7 @@ router.put('/:id/approve', requirePermission(KEYS.GRN_APPROVE), async (req, res)
   const b = req.body || {};
   const approved = !(b.approved === false || b.approved === 'false');
   try {
-    const cur = await pool.query('SELECT status FROM grn_notes WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT status, grn_number FROM grn_notes WHERE id = $1', [id]);
     if (cur.rowCount === 0) return fail(res, 404, 'GRN not found');
     if (cur.rows[0].status !== 'pending_qc') {
       return fail(res, 400, `Only "pending_qc" GRNs can be decided (this one is "${cur.rows[0].status}")`);
@@ -240,6 +242,7 @@ router.put('/:id/approve', requirePermission(KEYS.GRN_APPROVE), async (req, res)
     await pool.query(
       'UPDATE grn_notes SET status = $1, qc_notes = COALESCE($2, qc_notes) WHERE id = $3',
       [status, b.qc_notes ? String(b.qc_notes).trim() : null, id]);
+    notify({ roles: ['purchase', 'accounts'], subject: 'GRN ' + status, text: `GRN ${cur.rows[0].grn_number} was ${status} at quality check.`, path: 'grn-detail.html?id=' + id });
     res.json({ success: true, grn_id: id, status });
   } catch (err) {
     console.error(err);

@@ -6,6 +6,7 @@
 
 const express = require('express');
 const { pool } = require('../database');
+const { notify } = require('../notify');
 const { fail, todayISO, isValidDate, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -74,6 +75,9 @@ router.post('/advance', requirePermission(KEYS.PAYMENT_CREATE), async (req, res)
       [approved ? 'payment_done' : 'payment_pending', poId]);
 
     await client.query('COMMIT');
+    notify(approved
+      ? { roles: ['purchase', 'store'], subject: 'Advance paid for ' + p.po_number, text: `Advance payment ${paymentId} for ${p.po_number} is confirmed.`, path: 'po-detail.html?id=' + poId }
+      : { roles: ['accounts'], subject: 'Payment needs confirmation', text: `Payment ${paymentId} for ${p.po_number} was recorded and needs confirmation.`, path: 'payment-list.html' });
     res.status(201).json({
       success: true,
       payment_id: paymentId,
@@ -179,6 +183,7 @@ router.put('/:id/approve', requirePermission(KEYS.PAYMENT_APPROVE), async (req, 
       "UPDATE purchase_orders SET status = 'payment_done' WHERE id = $1 AND status IN ('created','payment_pending')",
       [cur.rows[0].po_id]);
     await client.query('COMMIT');
+    notify({ roles: ['purchase', 'store'], subject: 'Payment confirmed', text: 'A supplier advance payment was confirmed by Accounts.', path: 'po-detail.html?id=' + cur.rows[0].po_id });
     res.json({ success: true, payment_id: id, status: 'confirmed' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

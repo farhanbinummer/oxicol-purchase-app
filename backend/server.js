@@ -7,6 +7,7 @@ const bodyParser = require('body-parser');
 const rateLimit = require('express-rate-limit');
 const { testConnection } = require('./database');
 const { requireAuth } = require('./auth');
+const { ensureSchema, emailOn, whatsappOn } = require('./notify');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -87,6 +88,8 @@ app.listen(PORT, async () => {
   try {
     await testConnection();
     console.log('PostgreSQL connected (database: ' + process.env.DB_NAME + ')');
+    await ensureSchema();
+    console.log('Alerts: email ' + (emailOn() ? 'ON' : 'off') + ', WhatsApp ' + (whatsappOn() ? 'ON' : 'off'));
   } catch (err) {
     console.error('PostgreSQL connection FAILED:', err.message || err.code || 'connection refused');
     console.error('Check your .env file and that PostgreSQL is running.');

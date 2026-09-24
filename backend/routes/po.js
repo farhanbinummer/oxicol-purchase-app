@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { pool } = require('../database');
+const { notify } = require('../notify');
 const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -106,6 +107,7 @@ router.post('/create', requirePermission(KEYS.PO_CREATE), async (req, res) => {
     }
 
     await client.query('COMMIT');
+    notify({ roles: ['accounts', 'store'], subject: 'New purchase order ' + po.rows[0].po_number, text: `Purchase order ${po.rows[0].po_number} was created (total Rs ${total}). Accounts: advance payment is due.`, path: 'po-detail.html?id=' + poId });
     res.status(201).json({
       success: true,
       po_id: poId,

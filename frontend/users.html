@@ -107,6 +107,18 @@
           if (r.success) { show('Password reset for ' + u.name, true); } else show(r.error, false);
         };
 
+        const contactBtn = document.createElement('button');
+        contactBtn.textContent = 'Alerts';
+        contactBtn.title = 'Email / WhatsApp for alerts';
+        contactBtn.onclick = async () => {
+          const email = prompt('Email for alerts to ' + u.name + ' (leave blank for none):', u.email || '');
+          if (email === null) return;
+          const phone = prompt('WhatsApp number for ' + u.name + ', digits with country code, e.g. 919876543210 (leave blank for none):', u.phone || '');
+          if (phone === null) return;
+          const r = await api('/api/auth/users/' + u.id + '/contact', 'PUT', { email, phone });
+          if (r.success) { show('Alert contact saved for ' + u.name, true); load(); } else show(r.error, false);
+        };
+
         const deleteBtn = document.createElement('button');
         deleteBtn.textContent = 'Delete';
         deleteBtn.onclick = async () => {
@@ -115,7 +127,7 @@
           if (r.success) { show('Deleted', true); load(); } else show(r.error, false);
         };
 
-        td.append(toggleBtn, renameBtn, roleBtn, resetBtn, deleteBtn);
+        td.append(toggleBtn, renameBtn, roleBtn, resetBtn, contactBtn, deleteBtn);
         tr.appendChild(td);
         rows.appendChild(tr);
       });
