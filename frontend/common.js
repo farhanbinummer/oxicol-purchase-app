@@ -253,7 +253,7 @@ function svgIcon(name, size) {
       const cm = createWrap.querySelector('.oxi-menu'); if (cm) cm.hidden = true;
       searchWrap.classList.remove('oxi-search-active');
       // Tapping anywhere outside the open mobile drawer closes it (it has no X button by design).
-      if (!sidebar.contains(e.target) && e.target !== menuBtn) {
+      if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
         document.body.classList.remove('oxi-sidebar-open');
       }
     });
