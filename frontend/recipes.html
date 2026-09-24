@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recipes (BOM)</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="material-plan.html">Material planning</a></p>
+  <h1>Recipes (Bill of Materials)</h1>
+  <p class="oxi-page-sub">What raw materials one unit of each finished product uses, including normal wastage. Material planning multiplies these by the quantity a branch asks for.</p>
+  <p id="message"></p>
+
+  <div class="oxi-toolbar">
+    <select id="product" aria-label="Product"><option value="">Loading products...</option></select>
+    <input type="text" id="find" placeholder="Filter products...">
+  </div>
+
+  <div id="recipe" hidden>
+    <h3 id="recipeTitle"></h3>
+    <table>
+      <thead><tr><th>Material</th><th>Code</th><th>Qty per unit</th><th>Unit</th><th></th></tr></thead>
+      <tbody id="lines"></tbody>
+    </table>
+    <div id="editBox" hidden>
+      <h3>Add or change a material in this recipe</h3>
+      <div class="oxi-toolbar">
+        <select id="addMaterial" aria-label="Material"></select>
+        <input type="number" id="addQty" min="0" step="any" placeholder="Qty per unit">
+        <button type="button" id="addBtn">Save line</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="adminBox" hidden>
+    <h3>Add a new product or raw material</h3>
+    <div class="oxi-toolbar">
+      <input type="text" id="newProduct" placeholder="New product name">
+      <button type="button" id="newProductBtn">Add product</button>
+    </div>
+    <div class="oxi-toolbar">
+      <input type="text" id="newCode" placeholder="Material code">
+      <input type="text" id="newName" placeholder="Material name">
+      <select id="newUnit"><option>Kg</option><option>Litre</option><option>Nos</option><option>Box</option><option>Drum</option></select>
+      <button type="button" id="newMaterialBtn">Add material</button>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    let user = null; try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+    const isAdmin = user && user.role === 'admin';
+    const qtyText = (n) => Number(Number(n).toFixed(6)).toString();
+    let products = [], materials = [], current = null;
+
+    async function loadProducts(keepId) {
+      const d = await api('/api/bom/products');
+      if (!d.success) { show(d.error, false); return; }
+      products = d.products; renderProducts(keepId);
+    }
+    function renderProducts(keepId) {
+      const q = document.getElementById('find').value.trim().toLowerCase();
+      const sel = document.getElementById('product'); const keep = keepId || sel.value;
+      sel.innerHTML = '<option value="">-- Select a product (' + products.length + ') --</option>';
+      products.filter(p => !q || p.name.toLowerCase().includes(q)).forEach(p => {
+        const o = document.createElement('option'); o.value = p.id; o.textContent = p.name + ' (' + p.materials + ' materials)'; sel.appendChild(o);
+      });
+      if (keep) sel.value = keep;
+    }
+
+    async function showRecipe(pid) {
+      const box = document.getElementById('recipe');
+      if (!pid) { box.hidden = true; return; }
+      const d = await api('/api/bom/products/' + pid);
+      if (!d.success) { show(d.error, false); return; }
+      current = d.product; box.hidden = false;
+      document.getElementById('recipeTitle').textContent = d.product.name + ' - per 1 unit';
+      const tb = document.getElementById('lines'); tb.innerHTML = '';
+      d.lines.forEach(l => {
+        const tr = document.createElement('tr');
+        addCell(tr, l.name); addCell(tr, l.code); addCell(tr, qtyText(l.qty_per_unit)); addCell(tr, l.unit);
+        const td = document.createElement('td');
+        if (isAdmin) {
+          const edit = document.createElement('button'); edit.textContent = 'Edit';
+          edit.onclick = () => { document.getElementById('addMaterial').value = l.material_id; document.getElementById('addQty').value = l.qty_per_unit; document.getElementById('addQty').focus(); };
+          const del = document.createElement('button'); del.textContent = 'Remove';
+          del.onclick = async () => { if (!confirm('Remove ' + l.name + ' from this recipe?')) return; const r = await api('/api/bom/lines/' + l.id, 'DELETE'); if (r.success) { show('Removed', true); showRecipe(pid); loadProducts(pid); } else show(r.error, false); };
+          td.append(edit, del);
+        }
+        tr.appendChild(td); tb.appendChild(tr);
+      });
+      if (!d.lines.length) tb.innerHTML = '<tr><td colspan="5">No materials yet.</td></tr>';
+    }
+
+    async function loadMaterials() {
+      const d = await api('/api/bom/materials'); if (!d.success) return;
+      materials = d.materials;
+      const sel = document.getElementById('addMaterial'); sel.innerHTML = '';
+      materials.forEach(m => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name + ' (' + m.code + ', ' + m.unit + ')'; sel.appendChild(o); });
+    }
+
+    document.getElementById('product').addEventListener('change', (e) => showRecipe(e.target.value));
+    document.getElementById('find').addEventListener('input', () => renderProducts());
+
+    if (isAdmin) {
+      document.getElementById('editBox').hidden = false; document.getElementById('adminBox').hidden = false;
+      document.getElementById('addBtn').onclick = async () => {
+        const r = await api('/api/bom/lines', 'PUT', { product_id: current.id, material_id: document.getElementById('addMaterial').value, qty_per_unit: document.getElementById('addQty').value });
+        if (r.success) { show('Saved', true); document.getElementById('addQty').value = ''; showRecipe(current.id); loadProducts(current.id); } else show(r.error, false);
+      };
+      document.getElementById('newProductBtn').onclick = async () => {
+        const r = await api('/api/bom/products', 'POST', { name: document.getElementById('newProduct').value });
+        if (r.success) { show('Product added - now add its materials', true); document.getElementById('newProduct').value = ''; await loadProducts(r.product_id); showRecipe(r.product_id); } else show(r.error, false);
+      };
+      document.getElementById('newMaterialBtn').onclick = async () => {
+        const r = await api('/api/bom/materials', 'POST', { code: document.getElementById('newCode').value, name: document.getElementById('newName').value, unit: document.getElementById('newUnit').value });
+        if (r.success) { show('Material added', true); document.getElementById('newCode').value = ''; document.getElementById('newName').value = ''; loadMaterials(); } else show(r.error, false);
+      };
+    }
+    loadProducts(); loadMaterials();
+  </script>
+</body>
+</html>

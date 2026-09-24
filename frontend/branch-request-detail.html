@@ -91,6 +91,10 @@
           if (x.success) location.href = 'branch-request-list.html'; else show(x.error, false); };
         actions.append(ok, del);
       }
+      let me = null; try { me = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+      if (me && ['production', 'store', 'admin'].includes(me.role) && ['approved', 'po_raised'].includes(r.status)) {
+        const p = document.createElement('a'); p.href = 'material-plan.html?id=' + r.id; p.className = 'oxi-view-btn'; p.textContent = 'Plan raw materials'; actions.appendChild(p);
+      }
       document.getElementById('detail').hidden = false;
     }
     load();

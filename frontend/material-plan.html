@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Material Planning</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="material-plan.html" id="backLink">Material planning</a> | <a href="recipes.html">Recipes (BOM)</a></p>
+  <h1 id="title">Material planning</h1>
+  <p class="oxi-page-sub" id="sub">Approved branch requests, and the raw materials production needs to make them.</p>
+  <p id="message"></p>
+
+  <div id="listView" hidden>
+    <table>
+      <thead><tr><th>Request</th><th>Branch</th><th>Priority</th><th>Needed by</th><th>Items</th><th>Planning</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="7">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div id="planView" hidden>
+    <div class="oxi-meta-chips" id="chips"></div>
+    <div class="oxi-info-grid" id="tiles"></div>
+    <div id="warn"></div>
+
+    <h3>Finished products requested</h3>
+    <div id="items"></div>
+
+    <h3>Total raw materials needed</h3>
+    <table>
+      <thead><tr><th>Material</th><th>Code</th><th>Quantity needed</th><th>Unit</th></tr></thead>
+      <tbody id="totals"></tbody>
+    </table>
+    <p class="oxi-page-sub">Quantities are worked out from your recipes (Bill of Materials), which already include normal wastage. Stock on hand is not subtracted.</p>
+    <div class="oxi-actions" id="actions"></div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+    const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+    const qtyText = (n) => Number(n.toFixed(4)).toLocaleString('en-IN', { maximumFractionDigits: 4 });
+    const tile = (label, value) => { const d = document.createElement('div'); d.className = 'oxi-info-tile';
+      const s = document.createElement('small'); s.textContent = label; const b = document.createElement('b'); b.textContent = value;
+      d.append(s, b); return d; };
+
+    async function loadList() {
+      document.getElementById('listView').hidden = false;
+      const d = await api('/api/bom/plan');
+      const rows = document.getElementById('rows'); rows.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      if (d.requests.length === 0) { rows.innerHTML = '<tr><td colspan="7">No approved branch requests yet.</td></tr>'; return; }
+      d.requests.forEach(r => {
+        const tr = document.createElement('tr');
+        addLink(tr, r.request_number, 'material-plan.html?id=' + r.id);
+        addCell(tr, r.branch); addCell(tr, cap(r.priority)); addCell(tr, day(r.delivery_needed_by) || '-'); addCell(tr, r.items);
+        const td = document.createElement('td');
+        if (r.planned_indent_id) { const a = document.createElement('a'); a.href = 'production-indent-detail.html?id=' + r.planned_indent_id; a.textContent = r.indent_number; td.appendChild(a); }
+        else td.appendChild(badge('pending'));
+        tr.appendChild(td);
+        const act = document.createElement('td');
+        const v = document.createElement('a'); v.href = 'material-plan.html?id=' + r.id; v.className = 'oxi-view-btn'; v.textContent = r.planned_indent_id ? 'View' : 'Plan materials';
+        act.appendChild(v); tr.appendChild(act);
+        rows.appendChild(tr);
+      });
+    }
+
+    async function loadPlan() {
+      const d = await api('/api/bom/plan/' + encodeURIComponent(id));
+      if (!d.success) { show(d.error, false); return; }
+      const r = d.request;
+      document.getElementById('title').textContent = 'Materials for ' + r.request_number;
+      document.getElementById('sub').textContent = 'The raw materials production needs to make what ' + r.branch + ' asked for.';
+      document.getElementById('planView').hidden = false;
+
+      const chips = document.getElementById('chips'); chips.innerHTML = '';
+      const st = document.createElement('span'); st.appendChild(badge(r.status)); chips.appendChild(st);
+      const c = document.createElement('span'); c.className = 'oxi-meta-chip'; c.textContent = d.totals.length + ' raw materials'; chips.appendChild(c);
+      const tiles = document.getElementById('tiles'); tiles.innerHTML = '';
+      tiles.append(tile('Branch', r.branch), tile('Priority', cap(r.priority)), tile('Needed by', day(r.delivery_needed_by) || '-'));
+
+      const warn = document.getElementById('warn'); warn.innerHTML = '';
+      if (d.unmatched.length) {
+        const w = document.createElement('div'); w.className = 'oxi-note-card';
+        w.textContent = 'No recipe found for: ' + d.unmatched.join(', ') + '. Those items are not included below. Check the spelling against the product list, or ask an admin to add the recipe.';
+        warn.appendChild(w);
+      }
+
+      const box = document.getElementById('items'); box.innerHTML = '';
+      d.items.forEach(it => {
+        const h = document.createElement('h4'); h.style.margin = '14px 0 6px';
+        h.textContent = it.item_name + ' × ' + qtyText(it.quantity) + (it.product ? '' : '  (no recipe)');
+        box.appendChild(h);
+        if (!it.lines.length) return;
+        const t = document.createElement('table'); t.innerHTML = '<thead><tr><th>Material</th><th>Per unit</th><th>Needed</th><th>Unit</th></tr></thead>';
+        const tb = document.createElement('tbody');
+        it.lines.forEach(l => { const tr = document.createElement('tr'); addCell(tr, l.name); addCell(tr, qtyText(l.qty_per_unit)); addCell(tr, qtyText(l.needed)); addCell(tr, l.unit); tb.appendChild(tr); });
+        t.appendChild(tb); box.appendChild(t);
+      });
+
+      const tot = document.getElementById('totals'); tot.innerHTML = '';
+      if (!d.totals.length) tot.innerHTML = '<tr><td colspan="4">Nothing to calculate: none of the items has a recipe.</td></tr>';
+      d.totals.forEach(t => { const tr = document.createElement('tr'); addCell(tr, t.name); addCell(tr, t.code); addCell(tr, qtyText(t.qty)); addCell(tr, t.unit); tot.appendChild(tr); });
+
+      const actions = document.getElementById('actions'); actions.innerHTML = '';
+      if (r.planned_indent_id) {
+        const a = document.createElement('a'); a.href = 'production-indent-detail.html?id=' + r.planned_indent_id; a.className = 'oxi-view-btn';
+        a.textContent = 'Indent ' + r.indent_number + ' already created'; actions.appendChild(a);
+      } else if (d.totals.length) {
+        const b = document.createElement('button'); b.textContent = 'Create draft production indent';
+        b.onclick = async () => {
+          if (!confirm('Create a production indent with these ' + d.totals.length + ' raw materials?')) return;
+          b.disabled = true;
+          const x = await api('/api/bom/plan/' + r.id + '/draft-indent', 'POST', {});
+          if (x.success) { show(x.indent_number + ' created with ' + x.materials + ' materials - waiting for Store approval', true); loadPlan(); }
+          else { show(x.error, false); b.disabled = false; }
+        };
+        actions.appendChild(b);
+      }
+    }
+
+    if (id) { document.getElementById('backLink').textContent = '← All requests to plan'; loadPlan(); } else loadList();
+  </script>
+</body>
+</html>

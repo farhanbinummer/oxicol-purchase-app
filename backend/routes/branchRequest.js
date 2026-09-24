@@ -116,7 +116,7 @@ router.put('/:id/approve', requirePermission(KEYS.BRANCH_REQUEST_APPROVE), async
       return fail(res, 400, `Only "pending" requests can be approved (this one is "${cur.rows[0].status}")`);
     }
     await pool.query("UPDATE branch_stock_requests SET status = 'approved' WHERE id = $1", [id]);
-    notify({ roles: ['branch', 'purchase'], branch: cur.rows[0].branch, subject: 'Request approved', text: `Stock request ${cur.rows[0].request_number} (${cur.rows[0].branch}) was approved and is ready for purchase planning.`, path: 'branch-request-detail.html?id=' + id });
+    notify({ roles: ['branch', 'purchase', 'production'], branch: cur.rows[0].branch, subject: 'Request approved', text: `Stock request ${cur.rows[0].request_number} (${cur.rows[0].branch}) was approved. Production: open Material planning to see the raw materials needed.`, path: 'material-plan.html?id=' + id });
     res.json({ success: true, request_id: id, status: 'approved' });
   } catch (err) {
     console.error(err);

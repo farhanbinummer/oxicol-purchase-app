@@ -36,11 +36,14 @@
 
   <script src="common.js"></script>
   <script>
+    // Suggest your finished products so item names match their recipes (free text is still allowed).
+    const dl = document.createElement('datalist'); dl.id = 'productList'; document.body.appendChild(dl);
+    api('/api/bom/product-names').then(d => { if (d.success) d.products.forEach(p => { const o = document.createElement('option'); o.value = p.name; dl.appendChild(o); }); });
     const tbody = document.querySelector('#items tbody');
     function addRow() {
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><input class="name" size="26"></td>' +
+        '<td><input class="name" size="26" list="productList" autocomplete="off"></td>' +
         '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
         '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
         '<td><button type="button" class="del">X</button></td>';

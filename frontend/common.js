@@ -46,6 +46,7 @@ const OXI_ICONS = {
   house: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   clipboardlist: '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
   cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
+  calculator: '<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01"/>',
   userround: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>'
 };
 function svgIcon(name, size) {
@@ -87,6 +88,7 @@ function svgIcon(name, size) {
     { label: 'Dashboard', href: 'index.html', roles: '*', icon: 'dashboard' },
     { label: 'Branch Requests', href: 'branch-request-list.html', roles: 'branch,store', icon: 'branch' },
     { label: 'Production Indents', href: 'production-indent-list.html', roles: 'production,store', icon: 'production' },
+    { label: 'Material Planning', href: 'material-plan.html', roles: 'production,store', icon: 'calculator' },
     { label: 'Consolidate', href: 'consolidate.html', roles: 'purchase', icon: 'consolidate' },
     { label: 'Purchase Orders', href: 'po-list.html', roles: 'store,purchase,accounts', icon: 'po' },
     { label: 'Payments', href: 'payment-list.html', roles: 'purchase,accounts', icon: 'payment' },
@@ -226,6 +228,10 @@ function svgIcon(name, size) {
       if (['production', 'store', 'admin'].includes(user.role)) {
         const d = await api('/api/production-indent?status=pending');
         if (d.success) d.indents.forEach(r => items.push({ label: r.indent_number + ' needs approval', href: 'production-indent-list.html' }));
+      }
+      if (['production', 'store', 'admin'].includes(user.role)) {
+        const d = await api('/api/bom/plan');
+        if (d.success) d.requests.filter(r => !r.planned_indent_id).forEach(r => items.push({ label: r.request_number + ' (' + r.branch + ') needs material planning', href: 'material-plan.html?id=' + r.id }));
       }
       if (['store', 'admin'].includes(user.role)) {
         const d = await api('/api/grn?discrepancies=false');
@@ -522,7 +528,7 @@ function addLink(tr, text, href) {
 (function () {
   const CARD_PAGES = ['branch-request-list.html', 'production-indent-list.html', 'po-list.html',
     'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html',
-    'branch-request-detail.html', 'production-indent-detail.html', 'po-detail.html', 'grn-detail.html'];
+    'branch-request-detail.html', 'production-indent-detail.html', 'po-detail.html', 'grn-detail.html', 'material-plan.html', 'recipes.html'];
   const FORM_PAGES = ['po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
   const isForm = FORM_PAGES.includes(page);
