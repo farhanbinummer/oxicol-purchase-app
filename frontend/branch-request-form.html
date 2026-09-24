@@ -36,14 +36,75 @@
 
   <script src="common.js"></script>
   <script>
-    // Suggest your finished products so item names match their recipes (free text is still allowed).
-    const dl = document.createElement('datalist'); dl.id = 'productList'; document.body.appendChild(dl);
-    api('/api/bom/product-names').then(d => { if (d.success) d.products.forEach(p => { const o = document.createElement('option'); o.value = p.name; dl.appendChild(o); }); });
+    // ---------- finished-product autocomplete: filters as you type, tap/Enter to pick ----------
+    let products = [];
+    api('/api/bom/product-names').then(d => { if (d.success) products = d.products.map(p => p.name); });
+    const dd = document.createElement('div'); dd.className = 'oxi-ac'; dd.setAttribute('role', 'listbox'); dd.hidden = true; document.body.appendChild(dd);
+    let acInput = null, acIdx = -1, acList = [];
+    const norm = (v) => String(v || '').trim().toLowerCase().replace(/s+/g, ' ');
+    function matches(q) {
+      const words = norm(q).split(' ').filter(Boolean);
+      if (!words.length) return [];
+      return products.filter(p => words.every(w => p.toLowerCase().includes(w))).slice(0, 8);
+    }
+    function paintHint(input) {
+      const td = input.closest('td'); let h = td.querySelector('.oxi-ac-hint');
+      const v = norm(input.value), ok = !v || products.some(p => norm(p) === v);
+      if (!h) { h = document.createElement('small'); h.className = 'oxi-ac-hint'; td.appendChild(h); }
+      h.textContent = ok ? '' : 'Not in your product list - no recipe for material planning';
+    }
+    function closeAc() { dd.hidden = true; acInput = null; acIdx = -1; }
+    function openAc(input) {
+      if (dd.parentNode !== document.body) document.body.appendChild(dd); // the page shell wraps content in a glass panel, which would skew fixed positioning
+      acInput = input; acList = matches(input.value); acIdx = -1; dd.innerHTML = '';
+      if (!acList.length) { if (norm(input.value)) { const n = document.createElement('div'); n.className = 'oxi-ac-none'; n.textContent = 'No matching product'; dd.appendChild(n); } else { dd.hidden = true; return; } }
+      acList.forEach((name, i) => {
+        const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option'); b.textContent = name;
+        b.addEventListener('pointerdown', (e) => e.preventDefault());
+        b.addEventListener('click', () => pick(name));
+        dd.appendChild(b);
+      });
+      dd.hidden = false; placeAc();
+    }
+    // Keeps the list attached to its field, even if the page scrolls or the keyboard resizes the screen.
+    function placeAc() {
+      if (dd.hidden || !acInput) return;
+      const r = acInput.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) { closeAc(); return; }
+      dd.style.left = r.left + 'px'; dd.style.width = Math.max(r.width, 220) + 'px';
+      const below = window.innerHeight - r.bottom;
+      if (below < 200 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+      else { dd.style.bottom = 'auto'; dd.style.top = (r.bottom + 4) + 'px'; }
+    }
+    function pick(name) {
+      if (!acInput) return;
+      acInput.value = name;
+      const tr = acInput.closest('tr'); const unit = tr && tr.querySelector('.unit'); if (unit) unit.value = 'Nos';
+      paintHint(acInput); const next = tr && tr.querySelector('.qty'); closeAc(); if (next) next.focus();
+    }
+    function moveAc(d) {
+      const opts = [...dd.querySelectorAll('button')]; if (!opts.length) return;
+      acIdx = (acIdx + d + opts.length) % opts.length;
+      opts.forEach((o, i) => o.classList.toggle('active', i === acIdx)); opts[acIdx].scrollIntoView({ block: 'nearest' });
+    }
+    document.addEventListener('input', (e) => { if (e.target.matches('#items .name')) openAc(e.target); });
+    document.addEventListener('focusin', (e) => { if (e.target.matches('#items .name') && e.target.value) openAc(e.target); });
+    document.addEventListener('focusout', (e) => { if (e.target.matches('#items .name')) { paintHint(e.target); setTimeout(() => { if (document.activeElement !== e.target) closeAc(); }, 120); } });
+    document.addEventListener('keydown', (e) => {
+      if (dd.hidden || !e.target.matches('#items .name')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveAc(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); moveAc(-1); }
+      else if (e.key === 'Enter' && acIdx >= 0) { e.preventDefault(); pick(acList[acIdx]); }
+      else if (e.key === 'Escape') closeAc();
+    });
+    window.addEventListener('scroll', placeAc, true);
+    window.addEventListener('resize', placeAc);
+
     const tbody = document.querySelector('#items tbody');
     function addRow() {
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><input class="name" size="26" list="productList" autocomplete="off"></td>' +
+        '<td><input class="name" size="26" autocomplete="off" placeholder="Start typing a product..." aria-label="Finished product name"></td>' +
         '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
         '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
         '<td><button type="button" class="del">X</button></td>';
