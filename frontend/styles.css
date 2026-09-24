@@ -714,3 +714,14 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   form label select, form label input[type="date"], form label input[type="text"], form label input[type="number"],
   form label input[type="password"], form label input:not([type]) { width: 100%; }
 }
+
+/* Key/value tables on PO and GRN detail pages become a grid of info tiles. */
+table.oxi-kv[style] { display: block; width: 100% !important; margin: 0 0 18px; }
+table.oxi-kv tbody { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+table.oxi-kv tr { display: block; background: var(--neutral-bg); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+table.oxi-kv tbody tr:hover { background: var(--neutral-bg); }
+table.oxi-kv td { display: block; padding: 0; border: none; overflow-wrap: anywhere; }
+table.oxi-kv td:first-child {
+  margin-bottom: 3px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+}
+table.oxi-kv td:last-child { font-weight: 700; }

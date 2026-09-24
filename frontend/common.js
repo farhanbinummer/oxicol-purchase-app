@@ -465,7 +465,7 @@ function addLink(tr, text, href) {
 (function () {
   const CARD_PAGES = ['branch-request-list.html', 'production-indent-list.html', 'po-list.html',
     'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html',
-    'branch-request-detail.html', 'production-indent-detail.html'];
+    'branch-request-detail.html', 'production-indent-detail.html', 'po-detail.html', 'grn-detail.html'];
   const FORM_PAGES = ['po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
   const isForm = FORM_PAGES.includes(page);
