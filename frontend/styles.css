@@ -694,3 +694,23 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   table.oxi-rowcards td.oxi-card-action a, table.oxi-rowcards td.oxi-card-action button { flex: 1; margin: 0; }
   table.oxi-rowcards td.oxi-card-action a.oxi-view-btn { background: #fff; color: #241d49; border: none; }
 }
+
+/* Forms on phones: entry rows become stacked cards with full-width fields, and nothing
+   may be wider than the screen (fields had fixed pixel widths). */
+@media (max-width: 640px) {
+  input, select, textarea { max-width: 100%; }
+  form textarea { width: 100%; }
+  form label { display: block; }
+  table.oxi-formcards td:first-child {
+    grid-column: 1 / -1; background: var(--neutral-bg); padding: 10px 12px; font-size: 0.92rem; font-weight: 600; border-radius: 12px;
+  }
+  table.oxi-formcards td:first-child::before { display: block; }
+  table.oxi-formcards td input, table.oxi-formcards td select { width: 100% !important; min-width: 0; margin: 4px 0 0; }
+  table.oxi-formcards td input[type="checkbox"] { width: 22px !important; height: 22px; margin: 0; }
+  table.oxi-formcards td.oxi-card-action button { margin: 0; background: var(--danger-bg); color: var(--danger); border: none; }
+  table.oxi-formcards td.oxi-card-action:has(input[type="checkbox"]) { grid-column: 1 / -1; padding: 0; }
+}
+@media (max-width: 640px) {
+  form label select, form label input[type="date"], form label input[type="text"], form label input[type="number"],
+  form label input[type="password"], form label input:not([type]) { width: 100%; }
+}

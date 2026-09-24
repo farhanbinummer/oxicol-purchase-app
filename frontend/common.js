@@ -466,14 +466,17 @@ function addLink(tr, text, href) {
   const CARD_PAGES = ['branch-request-list.html', 'production-indent-list.html', 'po-list.html',
     'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html',
     'branch-request-detail.html', 'production-indent-detail.html'];
+  const FORM_PAGES = ['po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
-  if (!CARD_PAGES.includes(page)) return;
+  const isForm = FORM_PAGES.includes(page);
+  if (!CARD_PAGES.includes(page) && !isForm) return;
 
   function decorate() {
     document.querySelectorAll('table').forEach(table => {
       const heads = table.querySelectorAll('thead th');
       if (!heads.length || table.style.width === 'auto') return;
       table.classList.add('oxi-rowcards');
+      if (isForm) table.classList.add('oxi-formcards');
       table.querySelectorAll('tbody tr').forEach(tr => {
         [...tr.children].forEach((td, i) => {
           if (td.colSpan > 1) { td.classList.add('oxi-card-full'); return; }
