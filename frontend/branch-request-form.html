@@ -23,6 +23,7 @@
       </select></label></p>
     <p><label>Requested by<br><input id="by" size="30" required></label></p>
     <p><label>Delivery needed by<br><input type="date" id="deadline"></label></p>
+    <p><label>Priority<br><select id="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></label></p>
 
     <h3>Items needed</h3>
     <table id="items">
@@ -61,6 +62,7 @@
         branch: document.getElementById('branch').value,
         requested_by: document.getElementById('by').value,
         delivery_needed_by: document.getElementById('deadline').value,
+        priority: document.getElementById('priority').value,
         items
       });
       btn.disabled = false;

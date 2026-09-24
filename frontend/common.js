@@ -12,6 +12,15 @@
 // Lets phones offer "Install app" / build an APK; sw.js only passes requests through to the network.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
+// Short bottom-of-screen message that slides up and fades out (used by the phone shell).
+function oxiToast(text) {
+  let el = document.getElementById('oxiToast');
+  if (!el) { el = document.createElement('div'); el.id = 'oxiToast'; el.className = 'oxi-toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  el.textContent = text;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
 // Small inline icon set (no external font/CDN, so the app still looks right with no internet).
 const OXI_ICONS = {
   dashboard: '<path d="M4 13h6V4H4v9zm0 7h6v-5H4v5zm10 0h6V11h-6v9zm0-16v5h6V4h-6z"/>',
@@ -33,7 +42,11 @@ const OXI_ICONS = {
   chevron: '<path d="M6 9l6 6 6-6"/>',
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
-  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4"/>'
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4"/>',
+  house: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  clipboardlist: '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
+  cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
+  userround: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>'
 };
 function svgIcon(name, size) {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + (size || 18) + '" height="' + (size || 18) +
@@ -149,6 +162,48 @@ function svgIcon(name, size) {
       '<div class="oxi-dropdown" id="oxiProfileWrap"></div>';
     document.body.append(sidebar, topbar, content);
     document.body.classList.add('oxi-shell');
+
+    // ---------- phone bottom navigation: Home | Requests | New | Orders | Profile ----------
+    // Five equal grid columns; the raised New button sits in the middle column (see styles.css).
+    const REQ_BY_ROLE = { branch: 'branch-request-list.html', production: 'production-indent-list.html', store: 'branch-request-list.html',
+      purchase: 'consolidate.html', accounts: 'payment-list.html', admin: 'branch-request-list.html' };
+    const reqHref = REQ_BY_ROLE[user.role] || 'index.html';
+    const reqLabel = { accounts: 'Payments', purchase: 'Consolidate' }[user.role] || 'Requests';
+    const ordersOk = allowedFor(user, 'store,purchase,accounts');
+    const createLinks = CREATE_LINKS.filter(c => allowedFor(user, c.roles));
+    const bn = document.createElement('nav');
+    bn.className = 'oxi-bottomnav';
+    bn.setAttribute('aria-label', 'Main');
+    const bnItem = (href, icon, label, active, extra) =>
+      '<a class="oxi-bn-item' + (active ? ' active' : '') + (extra || '') + '" href="' + href + '"' + (active ? ' aria-current="page"' : '') + '>' +
+      '<span class="oxi-bn-icon">' + svgIcon(icon, 22) + '</span><span class="oxi-bn-label">' + label + '</span></a>';
+    const newLabel = createLinks.length ? createLinks[0].label : 'request';
+    bn.innerHTML =
+      bnItem('index.html', 'house', 'Home', page === 'index.html') +
+      bnItem(reqHref, 'clipboardlist', reqLabel, page === reqHref) +
+      '<a class="oxi-bn-item oxi-bn-new" id="oxiBnNew" href="' + (createLinks.length ? createLinks[0].href : 'index.html') + '" aria-label="Create new ' + newLabel.toLowerCase() + '">' +
+        '<span class="oxi-bn-plus"><span class="oxi-bn-plus-icon">' + svgIcon('plus', 24) + '</span></span>' +
+        '<span class="oxi-bn-icon"></span><span class="oxi-bn-label">New</span></a>' +
+      (ordersOk ? bnItem('po-list.html', 'cart', 'Orders', page === 'po-list.html')
+                : '<span class="oxi-bn-item oxi-bn-off" aria-disabled="true"><span class="oxi-bn-icon">' + svgIcon('cart', 22) + '</span><span class="oxi-bn-label">Orders</span></span>') +
+      bnItem('account.html', 'userround', 'Profile', page === 'account.html');
+    document.body.appendChild(bn);
+
+    // Roles with several create screens (admin) get a small menu; everyone else goes straight to theirs.
+    const sheet = document.createElement('div');
+    sheet.className = 'oxi-bn-sheet'; sheet.hidden = true;
+    createLinks.forEach(c => { const a = document.createElement('a'); a.href = c.href; a.textContent = c.label; sheet.appendChild(a); });
+    document.body.appendChild(sheet);
+    document.getElementById('oxiBnNew').addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const plus = e.currentTarget.querySelector('.oxi-bn-plus');
+      plus.classList.remove('go'); void plus.offsetWidth; plus.classList.add('go');
+      if (createLinks.length > 1) { sheet.hidden = !sheet.hidden; return; }
+      oxiToast('Opening new ' + newLabel.toLowerCase());
+      const href = e.currentTarget.getAttribute('href');
+      setTimeout(() => { location.href = href; }, 420);
+    });
+    document.addEventListener('click', () => { sheet.hidden = true; });
     document.getElementById('oxiPrintBtn').onclick = () => window.print();
 
     // ---------- notifications: real pending items this role can act on, not a fake counter ----------
@@ -213,7 +268,9 @@ function svgIcon(name, size) {
     const profWrap = document.getElementById('oxiProfileWrap');
     const profBtn = document.createElement('button');
     profBtn.className = 'oxi-profile-btn';
-    profBtn.innerHTML = svgIcon('user', 20) +
+    const initials = (user.name || '?').split(/s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    profBtn.setAttribute('aria-label', 'Account menu');
+    profBtn.innerHTML = '<span class="oxi-avatar">' + initials + '</span>' + svgIcon('user', 20) +
       '<span class="oxi-profile-text">' + user.name + '<small>' + user.role + (user.branch ? ', ' + user.branch : '') + '</small></span>' +
       svgIcon('chevron', 14);
     const profMenu = document.createElement('div');

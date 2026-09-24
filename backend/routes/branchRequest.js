@@ -22,6 +22,7 @@ function validate(body) {
   if (body.delivery_needed_by && !isValidDate(body.delivery_needed_by)) {
     return 'Delivery needed by must be a valid date (YYYY-MM-DD)';
   }
+  if (body.priority && !['normal', 'urgent'].includes(body.priority)) return 'Priority must be normal or urgent';
   if (!Array.isArray(body.items) || body.items.length === 0) return 'Add at least one item';
   for (let i = 0; i < body.items.length; i++) {
     const it = body.items[i];
@@ -46,9 +47,9 @@ router.post('/create', requirePermission(KEYS.BRANCH_REQUEST_CREATE), async (req
     await client.query('BEGIN');
     const reqNumber = await nextNumber(client, 'branch_stock_requests', 'request_number', `REQ-${stamp(todayISO())}-`);
     const r = await client.query(
-      `INSERT INTO branch_stock_requests (request_number, branch, requested_by, delivery_needed_by, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [reqNumber, branch, String(requested_by).trim(), delivery_needed_by || null, req.user.id]);
+      `INSERT INTO branch_stock_requests (request_number, branch, requested_by, delivery_needed_by, created_by, priority)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [reqNumber, branch, String(requested_by).trim(), delivery_needed_by || null, req.user.id, req.body.priority || 'normal']);
     const id = r.rows[0].id;
     for (const it of items) {
       await client.query(
@@ -56,7 +57,7 @@ router.post('/create', requirePermission(KEYS.BRANCH_REQUEST_CREATE), async (req
         [id, String(it.item_name).trim(), Number(it.quantity), String(it.unit).trim()]);
     }
     await client.query('COMMIT');
-    notify({ roles: ['store'], subject: 'New branch request ' + reqNumber, text: `New stock request ${reqNumber} from ${branch} needs approval.`, path: 'branch-request-detail.html?id=' + id });
+    notify({ roles: ['store'], subject: 'New branch request ' + reqNumber, text: `New ${req.body.priority === 'urgent' ? 'URGENT ' : ''}stock request ${reqNumber} from ${branch} needs approval.`, path: 'branch-request-detail.html?id=' + id });
     res.status(201).json({ success: true, request_id: id, request_number: reqNumber, status: 'pending' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

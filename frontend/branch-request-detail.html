@@ -63,7 +63,7 @@
 
       const tiles = document.getElementById('tiles'); tiles.innerHTML = '';
       tiles.append(tile('Branch', r.branch), tile('Requested by', r.requested_by),
-        tile('Needed by', day(r.delivery_needed_by) || '-'), tile('Created', day(r.created_at)));
+        tile('Needed by', day(r.delivery_needed_by) || '-'), tile('Priority', r.priority || 'normal'), tile('Created', day(r.created_at)));
 
       const body = document.getElementById('items'); body.innerHTML = '';
       d.items.forEach(i => { const tr = document.createElement('tr');

@@ -10,11 +10,12 @@
   <link rel="icon" href="icons/icon-192.png">
 </head>
 <body>
-  <p><a href="index.html">&larr; Home</a> | <a href="branch-request-form.html">+ New request</a></p>
-  <h1>Branch Stock Requests</h1>
-  <p class="oxi-page-sub">Track branch requirements, approvals, and needed dates in one clean view.</p>
+  <!-- Desktop view (hidden on phones) -->
+  <p class="oxi-desk-only"><a href="index.html">&larr; Home</a> | <a href="branch-request-form.html">+ New request</a></p>
+  <h1 class="oxi-desk-only">Branch Stock Requests</h1>
+  <p class="oxi-page-sub oxi-desk-only">Track branch requirements, approvals, and needed dates in one clean view.</p>
   <p id="message"></p>
-  <div class="oxi-toolbar">
+  <div class="oxi-toolbar oxi-desk-only">
     <input type="text" id="search" placeholder="Search request number, branch...">
     <select id="statusFilter">
       <option value="">All statuses</option>
@@ -24,18 +25,119 @@
       <option value="rejected">rejected</option>
     </select>
   </div>
-  <table>
+  <table class="oxi-desk-only">
     <thead><tr><th>Request</th><th>Branch</th><th>Requested by</th><th>Needed by</th><th>Status</th><th></th></tr></thead>
     <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
   </table>
 
+  <!-- Phone view (hidden on desktop) -->
+  <section class="oxi-m-only oxi-mreq" aria-labelledby="mTitle">
+    <nav class="oxi-crumb" aria-label="Breadcrumb"><a href="index.html">Home</a><span aria-hidden="true">&rsaquo;</span><span aria-current="page">Stock requests</span></nav>
+    <div class="oxi-m-head">
+      <div>
+        <h1 id="mTitle">Branch stock requests</h1>
+        <p>Review and move branch requirements forward.</p>
+      </div>
+      <span class="oxi-count" id="mCount" aria-live="polite">&nbsp;</span>
+    </div>
+    <label class="oxi-m-search">
+      <span class="oxi-m-search-icon" id="mSearchIcon" aria-hidden="true"></span>
+      <input type="search" id="mSearch" placeholder="Search request or branch" autocomplete="off" aria-label="Search stock requests by request number, branch or requester">
+    </label>
+    <div class="oxi-m-filters" role="group" aria-label="Filter requests by status">
+      <button type="button" class="active" data-f="all" aria-pressed="true">All</button>
+      <button type="button" data-f="pending" aria-pressed="false">Pending</button>
+      <button type="button" data-f="approved" aria-pressed="false">Approved</button>
+      <button type="button" data-f="urgent" aria-pressed="false">Urgent</button>
+    </div>
+    <div id="mList" class="oxi-m-list" aria-live="polite" aria-busy="true">
+      <div class="oxi-skel-card" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="oxi-skel-card" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    </div>
+  </section>
+
   <script src="common.js"></script>
   <script>
+    let all = [];
+    let filter = 'all';
+    let term = '';
+
+    const STATUS = {
+      pending:   { cls: 'warn', label: 'Pending',   note: 'Waiting for approval' },
+      approved:  { cls: 'ok',   label: 'Approved',  note: 'Ready for planning' },
+      po_raised: { cls: 'info', label: 'PO raised', note: 'Purchase order raised' },
+      rejected:  { cls: 'bad',  label: 'Rejected',  note: 'Not approved' }
+    };
+    const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+    const fmt = (v) => { const s = String(v || '').slice(0, 10); if (!s) return '-';
+      const p = s.split('-'); if (p.length !== 3) return s; return Number(p[2]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1]) - 1] + ' ' + p[0]; };
+
+    function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+    function card(r, i) {
+      const st = STATUS[r.status] || { cls: 'info', label: cap(r.status), note: '' };
+      const c = el('article', 'oxi-req-card'); c.style.animationDelay = (i * 45) + 'ms';
+      const head = el('header', 'oxi-req-head');
+      const t = el('div', 'oxi-req-title'); t.append(el('h2', '', r.request_number), el('p', '', 'Branch stock request'));
+      const badgeEl = el('span', 'oxi-status ' + st.cls); badgeEl.append(el('i'), document.createTextNode(st.label));
+      head.append(t, badgeEl);
+      const grid = el('dl', 'oxi-req-grid');
+      [['Branch', r.branch], ['Requested by', cap(r.requested_by)], ['Needed by', fmt(r.delivery_needed_by)], ['Priority', cap(r.priority || 'normal')]]
+        .forEach(([k, v]) => { const d = el('div'); d.append(el('dt', '', k), el('dd', '', v)); grid.appendChild(d); });
+      const foot = el('footer', 'oxi-req-foot');
+      const view = el('a', 'oxi-req-view', 'View details'); view.href = 'branch-request-detail.html?id=' + r.id;
+      view.setAttribute('aria-label', 'View details for ' + r.request_number);
+      foot.append(el('span', '', st.note), view);
+      c.append(head, grid, foot);
+      return c;
+    }
+
+    function renderMobile(animate) {
+      const list = document.getElementById('mList');
+      const q = term.trim().toLowerCase();
+      const shown = all.filter(r =>
+        (filter === 'all' || (filter === 'urgent' ? r.priority === 'urgent' : r.status === filter)) &&
+        (!q || [r.request_number, r.branch, r.requested_by].some(v => String(v || '').toLowerCase().includes(q))));
+      list.setAttribute('aria-busy', 'false');
+      list.innerHTML = '';
+      if (all.length === 0) {
+        const e = el('div', 'oxi-empty-card'); e.append(el('b', '', 'No requests yet'), el('span', '', 'Tap New below to create the first stock request.')); list.appendChild(e);
+      } else if (shown.length === 0) {
+        const e = el('div', 'oxi-empty-card'); e.append(el('b', '', 'Nothing matches'), el('span', '', 'Try a different search or filter.')); list.appendChild(e);
+      } else shown.forEach((r, i) => list.appendChild(card(r, i)));
+      if (animate) { list.classList.remove('oxi-swap'); void list.offsetWidth; list.classList.add('oxi-swap'); }
+    }
+
+    function mobileError(text) {
+      const list = document.getElementById('mList');
+      list.setAttribute('aria-busy', 'false'); list.innerHTML = '';
+      const e = el('div', 'oxi-empty-card oxi-error-card'); e.setAttribute('role', 'alert');
+      const b = el('button', '', 'Try again'); b.type = 'button'; b.onclick = () => { showSkeleton(); load(); };
+      e.append(el('b', '', 'Could not load requests'), el('span', '', text || 'Check your connection and try again.'), b);
+      list.appendChild(e);
+    }
+    function showSkeleton() {
+      const list = document.getElementById('mList'); list.setAttribute('aria-busy', 'true');
+      list.innerHTML = '<div class="oxi-skel-card" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="oxi-skel-card" aria-hidden="true"><i></i><i></i><i></i><i></i></div>';
+    }
+
+    document.getElementById('mSearchIcon').innerHTML = svgIcon('search', 18);
+    document.getElementById('mSearch').addEventListener('input', (e) => { term = e.target.value; renderMobile(false); });
+    document.querySelectorAll('.oxi-m-filters button').forEach(b => b.addEventListener('click', () => {
+      filter = b.dataset.f;
+      document.querySelectorAll('.oxi-m-filters button').forEach(x => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-pressed', on); });
+      renderMobile(true);
+    }));
+
     async function load() {
-      const d = await api('/api/branch-request');
+      let d;
+      try { d = await api('/api/branch-request'); } catch (e) { d = { success: false, error: 'Network problem' }; }
       const rows = document.getElementById('rows');
       rows.innerHTML = '';
-      if (!d.success) { show(d.error, false); return; }
+      if (!d.success) { show(d.error, false); mobileError(d.error); return; }
+      all = d.requests;
+      document.getElementById('mCount').textContent = all.length + ' total';
+      renderMobile(false);
       if (d.requests.length === 0) { rows.innerHTML = '<tr><td colspan="6">No requests yet.</td></tr>'; return; }
       d.requests.forEach(r => {
         const tr = document.createElement('tr');

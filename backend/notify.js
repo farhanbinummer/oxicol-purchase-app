@@ -36,6 +36,7 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE users
     ADD COLUMN IF NOT EXISTS email VARCHAR(150),
     ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`);
+  await pool.query("ALTER TABLE branch_stock_requests ADD COLUMN IF NOT EXISTS priority VARCHAR(10) NOT NULL DEFAULT 'normal'");
 }
 
 async function recipients(roles, branch) {
