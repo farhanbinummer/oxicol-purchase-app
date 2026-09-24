@@ -464,7 +464,8 @@ function addLink(tr, text, href) {
 // and re-labels whenever the rows change.
 (function () {
   const CARD_PAGES = ['branch-request-list.html', 'production-indent-list.html', 'po-list.html',
-    'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html'];
+    'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html',
+    'branch-request-detail.html', 'production-indent-detail.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
   if (!CARD_PAGES.includes(page)) return;
 

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Branch Request</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="branch-request-list.html">&larr; All requests</a></p>
+
+  <div class="oxi-print-letterhead">
+    <h2>Oxicol Car Care Products</h2>
+    <div class="addr">Malappuram, Kerala</div>
+    <div class="doc-title">BRANCH STOCK REQUEST</div>
+  </div>
+
+  <h1 id="title">Branch request</h1>
+  <p class="oxi-page-sub">Stock a branch has asked for, with its approval status and the purchase order raised from it.</p>
+  <p id="message"></p>
+
+  <div id="detail" hidden>
+    <div class="oxi-meta-chips" id="chips"></div>
+    <div class="oxi-info-grid" id="tiles"></div>
+
+    <h3>Items requested</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Quantity</th><th>Unit</th></tr></thead>
+      <tbody id="items"></tbody>
+    </table>
+
+    <div id="poBox"></div>
+    <div class="oxi-actions" id="actions"></div>
+
+    <div class="oxi-print-signatures">
+      <div>Requested by (Branch)</div>
+      <div>Approved by (Store)</div>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+    const tile = (label, value) => { const d = document.createElement('div'); d.className = 'oxi-info-tile';
+      const s = document.createElement('small'); s.textContent = label; const b = document.createElement('b'); b.textContent = value;
+      d.append(s, b); return d; };
+
+    async function load() {
+      const d = await api('/api/branch-request/' + encodeURIComponent(id));
+      if (!d.success) { show(d.error, false); return; }
+      const r = d.request;
+      document.getElementById('title').textContent = r.request_number;
+
+      const chips = document.getElementById('chips'); chips.innerHTML = '';
+      const st = document.createElement('span'); st.appendChild(badge(r.status)); chips.appendChild(st);
+      const c1 = document.createElement('span'); c1.className = 'oxi-meta-chip';
+      c1.textContent = d.items.length + (d.items.length === 1 ? ' item' : ' items'); chips.appendChild(c1);
+      if (r.delivery_needed_by) { const c2 = document.createElement('span'); c2.className = 'oxi-meta-chip';
+        c2.textContent = 'Needed by ' + day(r.delivery_needed_by); chips.appendChild(c2); }
+
+      const tiles = document.getElementById('tiles'); tiles.innerHTML = '';
+      tiles.append(tile('Branch', r.branch), tile('Requested by', r.requested_by),
+        tile('Needed by', day(r.delivery_needed_by) || '-'), tile('Created', day(r.created_at)));
+
+      const body = document.getElementById('items'); body.innerHTML = '';
+      d.items.forEach(i => { const tr = document.createElement('tr');
+        addCell(tr, i.item_name); addCell(tr, Number(i.quantity)); addCell(tr, i.unit); body.appendChild(tr); });
+
+      const poBox = document.getElementById('poBox'); poBox.innerHTML = '';
+      if (d.linked_pos.length) {
+        const h = document.createElement('h3'); h.textContent = 'Purchase order raised'; poBox.appendChild(h);
+        d.linked_pos.forEach(p => { const a = document.createElement('a'); a.href = 'po-detail.html?id=' + p.id;
+          a.textContent = p.po_number; a.style.marginRight = '12px'; poBox.appendChild(a); });
+      } else if (r.status === 'approved') {
+        const n = document.createElement('div'); n.className = 'oxi-note-card';
+        n.textContent = 'Approved and ready for purchase planning. The purchase team can add it to a PO from Consolidate.';
+        poBox.appendChild(n);
+      }
+
+      const actions = document.getElementById('actions'); actions.innerHTML = '';
+      if (r.status === 'pending') {
+        const ok = document.createElement('button'); ok.textContent = 'Approve';
+        ok.onclick = async () => { const x = await api('/api/branch-request/' + r.id + '/approve', 'PUT', {});
+          if (x.success) { show('Approved', true); load(); } else show(x.error, false); };
+        const del = document.createElement('button'); del.textContent = 'Delete';
+        del.onclick = async () => { if (!confirm('Delete this request?')) return;
+          const x = await api('/api/branch-request/' + r.id, 'DELETE');
+          if (x.success) location.href = 'branch-request-list.html'; else show(x.error, false); };
+        actions.append(ok, del);
+      }
+      document.getElementById('detail').hidden = false;
+    }
+    load();
+  </script>
+</body>
+</html>

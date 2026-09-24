@@ -661,3 +661,36 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   .oxi-print-signatures { display: flex; justify-content: space-between; margin-top: 48px; }
   .oxi-print-signatures div { width: 40%; border-top: 1px solid #000; padding-top: 6px; font-size: 0.82rem; text-align: center; }
 }
+
+/* ============================================================
+   Detail-page pieces (mockup style): subtitle, summary chips, info tiles, action row
+   ============================================================ */
+.oxi-page-sub { color: var(--text-muted); margin: -2px 0 14px; max-width: 640px; }
+.oxi-meta-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
+.oxi-meta-chip {
+  display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 600;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text);
+}
+.oxi-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 20px; }
+.oxi-info-tile { background: var(--neutral-bg); border-radius: 12px; padding: 12px 14px; min-width: 0; overflow-wrap: anywhere; }
+.oxi-info-tile small {
+  display: block; margin-bottom: 3px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted);
+}
+.oxi-info-tile b { font-size: 0.98rem; }
+.oxi-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.oxi-note-card {
+  border: 1px dashed var(--border); border-radius: var(--card-radius); padding: 14px 16px; color: var(--text-muted);
+  font-size: 0.9rem; margin: 14px 0;
+}
+
+.oxi-view-btn {
+  display: inline-block; padding: 6px 14px; margin-right: 6px; border-radius: 999px; font-size: 0.85rem; font-weight: 600;
+  border: 1px solid var(--border); background: var(--card); color: var(--primary);
+}
+.oxi-view-btn:hover { border-color: var(--primary); text-decoration: none; }
+@media (max-width: 640px) {
+  table.oxi-rowcards td.oxi-card-action { display: flex; gap: 8px; }
+  table.oxi-rowcards td.oxi-card-action a, table.oxi-rowcards td.oxi-card-action button { flex: 1; margin: 0; }
+  table.oxi-rowcards td.oxi-card-action a.oxi-view-btn { background: #fff; color: #241d49; border: none; }
+}
