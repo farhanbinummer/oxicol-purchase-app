@@ -554,34 +554,34 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   /* List pages: each table row becomes a card - title on top, labeled tiles below, and the
      action button (View, etc.) along the bottom. common.js adds data-label to each cell. */
   .oxi-toolbar input[type="text"], .oxi-toolbar input[type="search"], .oxi-toolbar select { flex: 1 1 100%; min-width: 0; width: 100%; }
-  table.oxi-cards { overflow: visible; border: none; background: transparent; box-shadow: none; margin: 8px 0 12px; }
-  table.oxi-cards thead { display: none; }
-  table.oxi-cards tbody { display: grid; gap: 14px; }
-  table.oxi-cards tbody tr {
+  table.oxi-rowcards { overflow: visible; border: none; background: transparent; box-shadow: none; margin: 8px 0 12px; }
+  table.oxi-rowcards thead { display: none; }
+  table.oxi-rowcards tbody { display: grid; gap: 14px; }
+  table.oxi-rowcards tbody tr {
     display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px;
     background: var(--glass-bg-soft); border: 1px solid var(--glass-border); border-radius: var(--card-radius);
     box-shadow: 0 4px 16px rgba(30, 41, 59, 0.06);
   }
-  table.oxi-cards tbody tr:hover { background: var(--glass-bg-soft); }
-  table.oxi-cards td {
+  table.oxi-rowcards tbody tr:hover { background: var(--glass-bg-soft); }
+  table.oxi-rowcards td {
     display: block; border: none; min-width: 0; overflow-wrap: anywhere;
     padding: 10px 12px; border-radius: 12px; background: var(--neutral-bg);
     font-size: 0.92rem; font-weight: 600;
   }
-  table.oxi-cards td::before {
+  table.oxi-rowcards td::before {
     content: attr(data-label); display: block; margin-bottom: 3px;
     font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
   }
-  table.oxi-cards td:first-child {
+  table.oxi-rowcards td:first-child {
     grid-column: 1 / -1; background: none; padding: 0 0 2px; font-size: 1.05rem; font-weight: 700;
   }
-  table.oxi-cards td:first-child::before { display: none; }
-  table.oxi-cards td.oxi-card-full, table.oxi-cards td.oxi-card-action {
+  table.oxi-rowcards td:first-child::before { display: none; }
+  table.oxi-rowcards td.oxi-card-full, table.oxi-rowcards td.oxi-card-action {
     grid-column: 1 / -1; background: none; padding: 2px 0 0;
   }
-  table.oxi-cards td.oxi-card-action:empty { display: none; }
-  table.oxi-cards td.oxi-card-full::before, table.oxi-cards td.oxi-card-action::before { display: none; }
-  table.oxi-cards td.oxi-card-action a, table.oxi-cards td.oxi-card-action button {
+  table.oxi-rowcards td.oxi-card-action:empty { display: none; }
+  table.oxi-rowcards td.oxi-card-full::before, table.oxi-rowcards td.oxi-card-action::before { display: none; }
+  table.oxi-rowcards td.oxi-card-action a, table.oxi-rowcards td.oxi-card-action button {
     display: block; width: 100%; text-align: center; padding: 10px 14px; border-radius: 999px; margin: 0;
     background: var(--primary); color: #fff; font-weight: 600; text-decoration: none;
   }

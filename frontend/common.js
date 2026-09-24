@@ -459,7 +459,7 @@ function addLink(tr, text, href) {
 }
 
 // ---------- phone card layout for list tables ----------
-// On a phone each table row becomes a card (see "table.oxi-cards" in styles.css). Rows are
+// On a phone each table row becomes a card (see "table.oxi-rowcards" in styles.css). Rows are
 // filled in after the page loads, so this labels every cell from its column header
 // and re-labels whenever the rows change.
 (function () {
@@ -472,7 +472,7 @@ function addLink(tr, text, href) {
     document.querySelectorAll('table').forEach(table => {
       const heads = table.querySelectorAll('thead th');
       if (!heads.length || table.style.width === 'auto') return;
-      table.classList.add('oxi-cards');
+      table.classList.add('oxi-rowcards');
       table.querySelectorAll('tbody tr').forEach(tr => {
         [...tr.children].forEach((td, i) => {
           if (td.colSpan > 1) { td.classList.add('oxi-card-full'); return; }
