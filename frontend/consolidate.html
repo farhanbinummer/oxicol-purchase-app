@@ -11,15 +11,15 @@
 </head>
 <body>
   <p><a href="index.html">&larr; Home</a></p>
-  <h1>Consolidate Orders</h1>
-  <p class="oxi-page-sub">Merge approved branch and production requests into one purchase order.</p>
-  <p>Combines every open branch request and production indent, so 3 branches wanting Paint Thinner become one line.</p>
+  <h1>Consolidation</h1>
+  <p class="oxi-page-sub">Turn approved demand into one purchase order. Only approved requests and indents are listed, and a request that has been planned into a production indent is bought through that indent - never twice.</p>
+  <div id="held"></div>
   <p id="message"></p>
 
-  <h3>Open branch requests</h3>
+  <h3>Approved branch requests</h3>
   <table><thead><tr><th></th><th>Request</th><th>Branch</th><th>Items</th></tr></thead><tbody id="branchRows"></tbody></table>
 
-  <h3>Open production indents</h3>
+  <h3>Approved production indents</h3>
   <table><thead><tr><th></th><th>Indent</th><th>Head</th><th>Items</th></tr></thead><tbody id="indentRows"></tbody></table>
 
   <h3>Consolidated items</h3>
@@ -48,6 +48,12 @@
       data = await api('/api/consolidate/all');
       if (!data.success) { show(data.error, false); return; }
 
+      const held = document.getElementById('held'); held.innerHTML = '';
+      if (data.held_back && data.held_back.length) {
+        const n = document.createElement('div'); n.className = 'oxi-note-card';
+        n.textContent = 'Held back to avoid buying the same demand twice: ' + data.held_back.map(h => h.request_number + ' (' + h.branch + ') is planned in ' + h.indent_number).join('; ') + '. Buy its raw materials through that indent once it is approved.';
+        held.appendChild(n);
+      }
       const bRows = document.getElementById('branchRows'); bRows.innerHTML = '';
       data.branch_requests.forEach(r => {
         const tr = document.createElement('tr');

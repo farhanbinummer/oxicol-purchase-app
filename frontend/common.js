@@ -47,6 +47,12 @@ const OXI_ICONS = {
   clipboardlist: '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
   cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
   calculator: '<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01"/>',
+  panel: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
+  book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  tag: '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5"/>',
   userround: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>'
 };
 function svgIcon(name, size) {
@@ -83,19 +89,34 @@ function svgIcon(name, size) {
     return res;
   };
 
-  // Sidebar links. roles:'*' shows to everyone; admin always sees all.
-  const NAV_LINKS = [
-    { label: 'Dashboard', href: 'index.html', roles: '*', icon: 'dashboard' },
-    { label: 'Branch Requests', href: 'branch-request-list.html', roles: 'branch,store', icon: 'branch' },
-    { label: 'Production Indents', href: 'production-indent-list.html', roles: 'production,store', icon: 'production' },
-    { label: 'Material Planning', href: 'material-plan.html', roles: 'production,store', icon: 'calculator' },
-    { label: 'Consolidate', href: 'consolidate.html', roles: 'purchase', icon: 'consolidate' },
-    { label: 'Purchase Orders', href: 'po-list.html', roles: 'store,purchase,accounts', icon: 'po' },
-    { label: 'Payments', href: 'payment-list.html', roles: 'purchase,accounts', icon: 'payment' },
-    { label: 'GRNs', href: 'grn-list.html', roles: 'store,purchase,accounts', icon: 'grn' },
-    { label: 'Variance Report', href: 'variance-report.html', roles: 'store,purchase,accounts', icon: 'variance' },
-    { label: 'Users', href: 'users.html', roles: 'admin', icon: 'users' },
-    { label: 'Permissions', href: 'permissions.html', roles: 'admin', icon: 'shield' }
+  // Sidebar, grouped by what people are doing. An entry shows only when this login holds its permission -
+  // the list comes from the server (/api/auth/my-permissions), the same rules the server enforces on every call.
+  // 'perm' is a permission key, 'admin' means administrators only, 'always' means everyone signed in.
+  const NAV_GROUPS = [
+    { title: 'Workspace', items: [
+      { label: 'Dashboard', href: 'index.html', always: true, icon: 'dashboard' } ] },
+    { title: 'Demand & Planning', items: [
+      { label: 'Branch Requests', href: 'branch-request-list.html', perm: 'branch_request.view', icon: 'branch', also: ['branch-request-detail.html', 'branch-request-form.html'] },
+      { label: 'Production Requirements', href: 'production-indent-list.html', perm: 'production_indent.view', icon: 'production', also: ['production-indent-detail.html', 'production-indent-form.html'] },
+      { label: 'Material Planning', href: 'material-plan.html', perm: 'production_indent.view', icon: 'calculator' } ] },
+    { title: 'Purchasing', items: [
+      { label: 'Consolidation', href: 'consolidate.html', perm: 'consolidate.view', icon: 'consolidate' },
+      { label: 'Purchase Orders', href: 'po-list.html', perm: 'po.view', icon: 'po', also: ['po-detail.html', 'po-form.html'] } ] },
+    { title: 'Warehouse', items: [
+      { label: 'Goods Receipts', href: 'grn-list.html', perm: 'grn.view', icon: 'grn', also: ['grn-detail.html', 'grn-form.html'] } ] },
+    { title: 'Finance', items: [
+      { label: 'Payments', href: 'payment-list.html', perm: 'payment.view_all', icon: 'payment', also: ['payment-form.html'] } ] },
+    { title: 'Reports', items: [
+      { label: 'Variances', href: 'variance-report.html', perm: 'dashboard.view', icon: 'variance' } ] },
+    { title: 'Master Data', items: [
+      { label: 'Finished Products', href: 'catalog.html', perm: 'catalog.view', icon: 'tag' },
+      { label: 'Recipes / Bill of Materials', href: 'recipes.html', perm: 'production_indent.view', icon: 'book' },
+      { label: 'Catalogue Review', href: 'catalog-review.html', perm: 'catalog.map_items', icon: 'link' } ] },
+    { title: 'Administration', items: [
+      { label: 'Users', href: 'users.html', admin: true, icon: 'users' },
+      { label: 'Roles & Permissions', href: 'permissions.html', admin: true, icon: 'shield' },
+      { label: 'Audit History', href: 'audit.html', admin: true, icon: 'history' },
+      { label: 'System Status', href: 'system.html', admin: true, icon: 'server' } ] }
   ];
 
   // "+ New" quick-create menu, role-aware (same idea as the sidebar).
@@ -134,17 +155,49 @@ function svgIcon(name, size) {
         '<span class="oxi-brand-icon">O</span><span class="oxi-nav-label">Oxicol</span>' +
       '</a>' +
       '<nav class="oxi-sidenav"></nav>' +
+      '<button class="oxi-nav-toggle" id="oxiNavToggle" title="Collapse or expand the menu" aria-label="Collapse or expand the menu">' + svgIcon('panel', 19) + '<span class="oxi-nav-label">Collapse menu</span></button>' +
       '<button class="oxi-theme-toggle" id="oxiThemeToggle" title="Toggle dark mode"></button>';
     const sidenav = sidebar.querySelector('.oxi-sidenav');
-    NAV_LINKS.forEach(item => {
-      if (!allowedFor(user, item.roles)) return;
-      const a = document.createElement('a');
-      a.href = item.href;
-      a.title = item.label;
-      a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
-      if (page === item.href) a.className = 'active';
-      sidenav.appendChild(a);
-    });
+
+    // Pinned (labels always visible) is the default on desktop; the toggle collapses it to icons, and the choice is remembered.
+    const wide = () => window.matchMedia('(min-width: 1101px)').matches;
+    const setPinned = (on) => { document.body.classList.toggle('oxi-nav-pinned', on && wide()); };
+    let pinned = localStorage.getItem('oxicol_nav') !== 'collapsed';
+    setPinned(pinned);
+    window.addEventListener('resize', () => setPinned(pinned));
+    const navToggle = sidebar.querySelector('#oxiNavToggle');
+    navToggle.onclick = () => {
+      pinned = !pinned; localStorage.setItem('oxicol_nav', pinned ? 'open' : 'collapsed'); setPinned(pinned);
+      navToggle.setAttribute('aria-expanded', String(pinned));
+    };
+    navToggle.setAttribute('aria-expanded', String(pinned));
+
+    // Permissions come from the server; the last answer is cached so the menu doesn't flicker between pages.
+    const permKey = 'oxicol_perms_' + user.id;
+    let perms = null;
+    try { perms = JSON.parse(localStorage.getItem(permKey) || 'null'); } catch (e) {}
+    const can = (item) => item.always || (perms && (item.admin ? perms.admin : (perms.admin || perms.list.includes(item.perm))));
+    function renderNav() {
+      sidenav.innerHTML = '';
+      NAV_GROUPS.forEach(g => {
+        const items = g.items.filter(can);
+        if (!items.length) return;
+        const h = document.createElement('div'); h.className = 'oxi-nav-group'; h.textContent = g.title; sidenav.appendChild(h);
+        items.forEach(item => {
+          const a = document.createElement('a');
+          a.href = item.href; a.title = item.label;
+          a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
+          if (page === item.href || (item.also || []).includes(page)) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
+          sidenav.appendChild(a);
+        });
+      });
+    }
+    renderNav();
+    fetch('/api/auth/my-permissions').then(r => r.json()).then(d => {
+      if (!d.success) return;
+      const next = { admin: !!d.admin, list: d.permissions };
+      if (JSON.stringify(next) !== JSON.stringify(perms)) { perms = next; localStorage.setItem(permKey, JSON.stringify(next)); renderNav(); }
+    }).catch(() => {});
 
     // ---------- top bar ----------
     const topbar = document.createElement('header');
@@ -366,6 +419,23 @@ function svgIcon(name, size) {
 
 // Returns a colored <span class="badge"> for a status word, so lists read at a glance.
 // Unrecognised words fall back to a plain neutral pill rather than looking broken.
+// Plain-language names for the internal status values, so people never read 'pending_qc' or 'po_raised'.
+const STATUS_LABELS = {
+  pending: 'Pending', approved: 'Approved', rejected: 'Rejected', po_raised: 'PO created',
+  created: 'Created', payment_pending: 'Payment pending', payment_done: 'Payment done', in_transit: 'In transit',
+  delivered: 'Delivered', invoice_matched: 'Invoice matched', variance_flagged: 'Variance flagged',
+  posted_to_tally: 'Tally log recorded (test mode)', closed: 'Closed', pending_qc: 'Awaiting quality check',
+  initiated: 'Awaiting confirmation', confirmed: 'Confirmed', uploaded: 'Invoice received', matched: 'Matched',
+  mismatch: 'Mismatch', variance: 'Variance', needs_review: 'Needs review', mapped: 'Linked',
+  good: 'Good', damaged: 'Damaged', short: 'Short', active: 'Active', disabled: 'Disabled'
+};
+function statusLabel(v) {
+  const k = String(v == null ? '' : v).trim();
+  if (!k) return '-';
+  if (STATUS_LABELS[k.toLowerCase()]) return STATUS_LABELS[k.toLowerCase()];
+  return k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' ');
+}
+
 function badge(status) {
   const s = document.createElement('span');
   const text = String(status || '-');
@@ -376,7 +446,7 @@ function badge(status) {
   const cls = GOOD.includes(key) ? 'badge-good' : BAD.includes(key) ? 'badge-bad'
             : WARN.includes(key) ? 'badge-warn' : 'badge-neutral';
   s.className = 'badge ' + cls;
-  s.textContent = text;
+  s.textContent = statusLabel(text);
   return s;
 }
 
@@ -561,3 +631,8 @@ function addLink(tr, text, href) {
     }).observe(document.body, { childList: true, subtree: true });
   });
 })();
+
+// ---------- friendly status filters: show 'Awaiting quality check', keep the real value underneath ----------
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('select#statusFilter option').forEach(o => { if (o.value) o.textContent = statusLabel(o.value); });
+});

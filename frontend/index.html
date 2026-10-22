@@ -12,7 +12,6 @@
 <body>
   <div class="oxi-hero">
     <h1 id="greeting">Good day</h1>
-    <p id="status">Checking server...</p>
   </div>
   <p id="message"></p>
 
@@ -20,7 +19,7 @@
     <div class="oxi-action-cards" id="actionCards"></div>
     <div class="oxi-insight-card" id="insightCard">
       <div class="oxi-insight-label">Today</div>
-      <div class="oxi-insight-value" id="insightValue">Checking...</div>
+      <div class="oxi-insight-value" id="insightValue" aria-busy="true">Loading...</div>
       <div class="oxi-insight-note" id="insightNote"></div>
     </div>
   </div>
@@ -42,11 +41,6 @@
     try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
     const isAllowed = (roles) => !user || user.role === 'admin' || roles.split(',').includes(user.role);
     document.getElementById('cmdIcon').innerHTML = svgIcon('search', 18);
-
-    fetch('/api/health').then(r => r.json()).then(d => {
-      document.getElementById('status').textContent =
-        d.success ? 'Server OK, database connected.' : 'Problem: ' + d.error;
-    }).catch(() => { document.getElementById('status').textContent = 'Server not reachable.'; });
 
     document.querySelectorAll('[data-roles]').forEach(el => { if (!isAllowed(el.dataset.roles)) el.remove(); });
 
@@ -120,6 +114,7 @@
 
       // ---------- insight card: one real, honest highlight ----------
       const iv = document.getElementById('insightValue'), ino = document.getElementById('insightNote');
+      try {
       if (['store', 'accounts', 'admin'].includes(user.role)) {
         const pending = await pendingApprovals();
         if (pending.length > 0) {
@@ -142,6 +137,12 @@
         iv.textContent = 'Welcome';
         ino.textContent = '';
       }
+      } catch (e) {
+        iv.textContent = 'Could not load this';
+        ino.textContent = '';
+        const b = document.createElement('button'); b.textContent = 'Try again'; b.onclick = () => location.reload(); ino.appendChild(b);
+      }
+      iv.removeAttribute('aria-busy');
     })();
 
     // ---------- KPI chips (real numbers only - no fabricated "low stock" metric) ----------

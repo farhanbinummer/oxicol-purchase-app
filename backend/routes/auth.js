@@ -59,6 +59,16 @@ router.post('/logout', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+// Which actions this login may use - the navigation menu is built from this, so it can never show a link the
+// server would refuse. (The server still checks every request on its own; this is only for display.)
+router.get('/my-permissions', requireAuth, async (req, res) => {
+  try {
+    if (req.user.role === 'admin') return res.json({ success: true, admin: true, permissions: CATALOG.map(c => c.key) });
+    const r = await pool.query('SELECT permission_key FROM role_permissions WHERE role = $1', [req.user.role]);
+    res.json({ success: true, admin: false, permissions: r.rows.map(x => x.permission_key) });
+  } catch (err) { console.error(err); fail(res, 500, 'Could not load permissions'); }
+});
+
 router.get('/me', requireAuth, (req, res) => {
   res.json({ success: true, user: req.user });
 });

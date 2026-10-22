@@ -6,9 +6,10 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const rateLimit = require('express-rate-limit');
 const { testConnection } = require('./database');
-const { requireAuth } = require('./auth');
+const { requireAuth, requireRole } = require('./auth');
 const { ensureSchema, emailOn, whatsappOn } = require('./notify');
 const { ensureBomSchema } = require('./bom');
+const { runMigrations } = require('./migrate');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,6 +68,8 @@ app.use('/api/invoice', require('./routes/invoice'));
 app.use('/api/three-way-match', require('./routes/threeWayMatch'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/bom', require('./routes/bom'));
+app.use('/api/catalog', require('./routes/catalog'));
+app.use('/api/admin', requireRole('admin'), require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
 
 // ---------- Error handling ----------
@@ -92,6 +95,7 @@ app.listen(PORT, async () => {
     console.log('PostgreSQL connected (database: ' + process.env.DB_NAME + ')');
     await ensureSchema();
     await ensureBomSchema();
+    await runMigrations();
     console.log('Alerts: email ' + (emailOn() ? 'ON' : 'off') + ', WhatsApp ' + (whatsappOn() ? 'ON' : 'off'));
   } catch (err) {
     console.error('PostgreSQL connection FAILED:', err.message || err.code || 'connection refused');

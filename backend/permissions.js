@@ -48,7 +48,10 @@ const KEYS = {
   TALLY_SYNC: 'tally.sync',
   TALLY_VIEW_LOG: 'tally.view_log',
 
-  DASHBOARD_VIEW: 'dashboard.view'
+  DASHBOARD_VIEW: 'dashboard.view',
+
+  CATALOG_VIEW: 'catalog.view',
+  CATALOG_MAP_ITEMS: 'catalog.map_items'
 };
 
 const CATALOG = [
@@ -89,27 +92,30 @@ const CATALOG = [
   { key: KEYS.TALLY_SYNC, module: 'Tally Sync', action: 'Sync a PO to Tally (mock log)' },
   { key: KEYS.TALLY_VIEW_LOG, module: 'Tally Sync', action: 'View the Tally sync log' },
 
-  { key: KEYS.DASHBOARD_VIEW, module: 'Dashboard & Reports', action: 'Dashboard, charts, activity, variance report' }
+  { key: KEYS.DASHBOARD_VIEW, module: 'Dashboard & Reports', action: 'Dashboard, charts, activity, variance report' },
+
+  { key: KEYS.CATALOG_VIEW, module: 'Product Catalogue', action: 'Search and view finished products' },
+  { key: KEYS.CATALOG_MAP_ITEMS, module: 'Product Catalogue', action: 'Link older free-text request items to catalogue products' }
 ];
 
 // The exact behaviour the app already had before this system existed. Seeded once;
 // after that, the role_permissions table in the database is the only source of truth.
 const DEFAULTS = {
-  branch: [KEYS.BRANCH_REQUEST_CREATE, KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_DELETE],
-  production: [KEYS.PRODUCTION_INDENT_CREATE, KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_DELETE],
+  branch: [KEYS.BRANCH_REQUEST_CREATE, KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_DELETE, KEYS.CATALOG_VIEW],
+  production: [KEYS.PRODUCTION_INDENT_CREATE, KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_DELETE, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS],
   store: [
     KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE,
     KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_APPROVE,
     KEYS.PO_VIEW, KEYS.PAYMENT_VIEW_BY_PO,
     KEYS.GRN_CREATE, KEYS.GRN_VIEW, KEYS.GRN_APPROVE,
-    KEYS.DASHBOARD_VIEW
+    KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS
   ],
   purchase: [
     KEYS.CONSOLIDATE_VIEW, KEYS.CONSOLIDATE_CREATE_PO,
     KEYS.PO_CREATE, KEYS.PO_VIEW, KEYS.PO_UPDATE_STATUS, KEYS.PO_DELETE,
     KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW,
-    KEYS.SUPPLIERS_VIEW, KEYS.DASHBOARD_VIEW
+    KEYS.SUPPLIERS_VIEW, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW
   ],
   accounts: [
     KEYS.PO_VIEW,
@@ -118,7 +124,7 @@ const DEFAULTS = {
     KEYS.INVOICE_UPLOAD, KEYS.INVOICE_VIEW, KEYS.INVOICE_MATCH, KEYS.THREE_WAY_MATCH_VIEW,
     KEYS.SUPPLIERS_VIEW,
     KEYS.TALLY_SYNC, KEYS.TALLY_VIEW_LOG,
-    KEYS.DASHBOARD_VIEW
+    KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW
   ]
 };
 

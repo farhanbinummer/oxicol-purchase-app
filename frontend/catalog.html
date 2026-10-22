@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finished Products</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; Master Data &rsaquo; Finished Products</p>
+  <h1>Finished Products</h1>
+  <p class="oxi-page-sub">The product catalogue every request is built from. Each product has a permanent code, a pack size, and a recipe that decides which raw materials it needs.</p>
+  <p id="message"></p>
+
+  <div class="oxi-toolbar">
+    <input type="search" id="find" placeholder="Search by name, code or alias" aria-label="Search products">
+    <label><input type="checkbox" id="showInactive"> Show inactive</label>
+    <span id="count" class="oxi-page-sub" style="margin:0"></span>
+  </div>
+
+  <div id="state" role="status" aria-live="polite"></div>
+  <table id="grid" hidden>
+    <thead><tr><th>Code</th><th>Product</th><th>Category</th><th>Pack size</th><th>Unit</th><th>Recipe</th><th>Status</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div id="editPanel" hidden>
+    <h3 id="editTitle">Edit product</h3>
+    <div class="oxi-toolbar">
+      <label>Name<br><input type="text" id="eName" size="34"></label>
+      <label>Category<br><input type="text" id="eCategory" size="18"></label>
+      <label>Pack size<br><input type="text" id="ePack" size="10" placeholder="e.g. 5 KG"></label>
+      <label><input type="checkbox" id="eActive"> Active (can be chosen on new requests)</label>
+    </div>
+    <div class="oxi-actions"><button type="button" id="saveBtn">Save changes</button> <button type="button" id="closeBtn">Close</button></div>
+    <h3>Aliases</h3>
+    <p class="oxi-page-sub">Other names people type for this product. Searching an alias finds this product. An alias can belong to only one product.</p>
+    <div id="aliasList"></div>
+    <div class="oxi-toolbar"><input type="text" id="newAlias" placeholder="New alias, e.g. car shampoo conc"><button type="button" id="addAlias">Add alias</button></div>
+    <p><a id="recipeLink" href="recipes.html">Open this product's recipe</a></p>
+  </div>
+
+  <div id="adminBox" hidden>
+    <h3>Add a product</h3>
+    <div class="oxi-toolbar">
+      <input type="text" id="nName" placeholder="Product name (required)" size="34">
+      <input type="text" id="nCategory" placeholder="Category" value="Finished goods" size="16">
+      <input type="text" id="nPack" placeholder="Pack size, e.g. 5 KG" size="14">
+      <button type="button" id="nAdd">Add product</button>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    let me = null; try { me = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+    const isAdmin = me && me.role === 'admin';
+    let all = [], editing = null;
+    const $ = (id) => document.getElementById(id);
+    const norm = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+    function setState(kind, text, retry) {
+      const s = $('state'); s.innerHTML = '';
+      if (!kind) return;
+      const d = document.createElement('div'); d.className = 'oxi-note-card'; d.textContent = text;
+      if (retry) { const b = document.createElement('button'); b.textContent = 'Try again'; b.onclick = retry; d.append(' ', b); }
+      s.appendChild(d);
+    }
+
+    async function load() {
+      setState('loading', 'Loading products...');
+      let d; try { d = await api('/api/catalog/products'); } catch (e) { d = { success: false, error: 'Network problem' }; }
+      if (!d.success) { setState('error', 'Could not load products: ' + d.error, load); return; }
+      all = d.products; render();
+    }
+
+    function render() {
+      const words = norm($('find').value).split(' ').filter(Boolean);
+      const inactive = $('showInactive').checked;
+      const list = all.filter(p => (inactive || p.active) &&
+        words.every(w => norm([p.name, p.code, p.category, ...(p.aliases || [])].join(' ')).includes(w)));
+      $('count').textContent = list.length + ' of ' + all.length + ' products';
+      const rows = $('rows'); rows.innerHTML = '';
+      $('grid').hidden = list.length === 0;
+      setState(null);
+      if (!list.length) { setState('empty', all.length ? 'No products match your search.' : 'No products yet.'); return; }
+      list.forEach(p => {
+        const tr = document.createElement('tr');
+        addCell(tr, p.code).style.whiteSpace = 'nowrap'; addCell(tr, p.name); addCell(tr, p.category); addCell(tr, p.pack_size || '-'); addCell(tr, p.base_unit);
+        const r = document.createElement('td'); r.appendChild(p.has_recipe ? badge('active') : (function () { const b = badge('needs_review'); b.className = 'badge badge-warn'; b.textContent = 'Recipe missing'; return b; })()); tr.appendChild(r);
+        const st = document.createElement('td'); const sb = badge(p.active ? 'active' : 'disabled'); if (!p.active) sb.textContent = 'Inactive'; st.appendChild(sb); tr.appendChild(st);
+        const act = document.createElement('td'); act.className = 'oxi-card-action-cell';
+        const v = document.createElement('a'); v.className = 'oxi-view-btn'; v.href = 'recipes.html?product=' + p.id; v.textContent = 'Recipe'; act.appendChild(v);
+        if (isAdmin) { const e = document.createElement('button'); e.textContent = 'Edit'; e.onclick = () => openEdit(p); act.appendChild(e); }
+        tr.appendChild(act); rows.appendChild(tr);
+      });
+    }
+
+    function openEdit(p) {
+      editing = p; $('editPanel').hidden = false;
+      $('editTitle').textContent = 'Edit ' + p.code + ' - ' + p.name;
+      $('eName').value = p.name; $('eCategory').value = p.category; $('ePack').value = p.pack_size || ''; $('eActive').checked = p.active;
+      $('recipeLink').href = 'recipes.html?product=' + p.id;
+      renderAliases(); $('editPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    function renderAliases() {
+      const box = $('aliasList'); box.innerHTML = '';
+      const list = editing.aliases || [];
+      if (!list.length) { box.textContent = 'No aliases yet.'; return; }
+      list.forEach(a => { const c = document.createElement('span'); c.className = 'oxi-meta-chip'; c.textContent = a; box.appendChild(c); });
+    }
+
+    $('find').addEventListener('input', render); $('showInactive').addEventListener('change', render);
+
+    if (isAdmin) {
+      $('adminBox').hidden = false;
+      $('saveBtn').onclick = async () => {
+        const r = await api('/api/catalog/products/' + editing.id, 'PUT', { name: $('eName').value, category: $('eCategory').value, pack_size: $('ePack').value, active: $('eActive').checked });
+        if (r.success) { show('Saved', true); await load(); openEdit(all.find(x => x.id === editing.id)); } else show(r.error, false);
+      };
+      $('closeBtn').onclick = () => { $('editPanel').hidden = true; editing = null; };
+      $('addAlias').onclick = async () => {
+        const r = await api('/api/catalog/products/' + editing.id + '/aliases', 'POST', { alias: $('newAlias').value });
+        if (r.success) { $('newAlias').value = ''; show('Alias added', true); await load(); openEdit(all.find(x => x.id === editing.id)); } else show(r.error, false);
+      };
+      $('nAdd').onclick = async () => {
+        const r = await api('/api/catalog/products', 'POST', { name: $('nName').value, category: $('nCategory').value, pack_size: $('nPack').value });
+        if (r.success) { show('Product added. Add its recipe so it can be planned.', true); $('nName').value = ''; $('nPack').value = ''; load(); } else show(r.error, false);
+      };
+    }
+    load();
+  </script>
+</body>
+</html>

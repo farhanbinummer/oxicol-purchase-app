@@ -10,86 +10,104 @@
   <link rel="icon" href="icons/icon-192.png">
 </head>
 <body>
-  <p><a href="index.html">&larr; Home</a> | <a href="branch-request-list.html">All requests</a></p>
-  <h1>Branch Stock Request</h1>
-  <p class="oxi-page-sub">Ask the store for the stock your branch needs, and by when.</p>
-  <p id="message"></p>
+  <p><a href="index.html">Home</a> &rsaquo; <a href="branch-request-list.html">Branch Requests</a> &rsaquo; New request</p>
+  <h1>New Branch Stock Request</h1>
+  <p class="oxi-page-sub">Ask the store for the finished products your branch needs. Pick each product from the catalogue so the right recipe and pack size are used.</p>
+  <p id="message" role="status"></p>
 
-  <form id="reqForm">
+  <form id="reqForm" novalidate>
     <p><label>Branch<br>
       <select id="branch" required>
         <option value="">-- Select branch --</option>
         <option>Kannur</option><option>Thrissur</option><option>Trivandrum</option><option>Ernakulam</option>
       </select></label></p>
-    <p><label>Requested by<br><input id="by" size="30" required></label></p>
+    <p>Requested by: <b id="who"></b> <small>(recorded automatically from your login)</small></p>
     <p><label>Delivery needed by<br><input type="date" id="deadline"></label></p>
     <p><label>Priority<br><select id="priority"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></label></p>
 
     <h3>Items needed</h3>
     <table id="items">
-      <thead><tr><th>Item name</th><th>Qty</th><th>Unit</th><th></th></tr></thead>
+      <thead><tr><th>Finished product</th><th>Qty</th><th>Unit</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <p><button type="button" id="addRow">+ Add item</button></p>
+    <p id="formError" class="error" role="alert" hidden></p>
     <p><button type="submit" id="saveBtn">Submit request</button></p>
   </form>
 
   <script src="common.js"></script>
   <script>
-    // ---------- finished-product autocomplete: filters as you type, tap/Enter to pick ----------
-    let products = [];
-    api('/api/bom/product-names').then(d => { if (d.success) products = d.products.map(p => p.name); });
+    const $ = (id) => document.getElementById(id);
+    let me = null; try { me = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+    $('who').textContent = me ? me.name : '';
+    if (me && me.role === 'branch' && me.branch) { $('branch').value = me.branch; $('branch').disabled = true; }
+
+    // ---------- catalogue picker: the server searches, the person chooses; the chosen product's ID is what is saved ----------
     const dd = document.createElement('div'); dd.className = 'oxi-ac'; dd.setAttribute('role', 'listbox'); dd.hidden = true; document.body.appendChild(dd);
-    let acInput = null, acIdx = -1, acList = [];
-    const norm = (v) => String(v || '').trim().toLowerCase().replace(/s+/g, ' ');
-    function matches(q) {
-      const words = norm(q).split(' ').filter(Boolean);
-      if (!words.length) return [];
-      return products.filter(p => words.every(w => p.toLowerCase().includes(w))).slice(0, 8);
-    }
-    function paintHint(input) {
-      const td = input.closest('td'); let h = td.querySelector('.oxi-ac-hint');
-      const v = norm(input.value), ok = !v || products.some(p => norm(p) === v);
-      if (!h) { h = document.createElement('small'); h.className = 'oxi-ac-hint'; td.appendChild(h); }
-      h.textContent = ok ? '' : 'Not in your product list - no recipe for material planning';
-    }
+    let acInput = null, acIdx = -1, acList = [], acTimer = null, acSeq = 0;
+    const tbody = document.querySelector('#items tbody');
+
     function closeAc() { dd.hidden = true; acInput = null; acIdx = -1; }
-    function openAc(input) {
-      if (dd.parentNode !== document.body) document.body.appendChild(dd); // the page shell wraps content in a glass panel, which would skew fixed positioning
-      acInput = input; acList = matches(input.value); acIdx = -1; dd.innerHTML = '';
-      if (!acList.length) { if (norm(input.value)) { const n = document.createElement('div'); n.className = 'oxi-ac-none'; n.textContent = 'No matching product'; dd.appendChild(n); } else { dd.hidden = true; return; } }
-      acList.forEach((name, i) => {
-        const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option'); b.textContent = name;
-        b.addEventListener('pointerdown', (e) => e.preventDefault());
-        b.addEventListener('click', () => pick(name));
-        dd.appendChild(b);
-      });
-      dd.hidden = false; placeAc();
-    }
-    // Keeps the list attached to its field, even if the page scrolls or the keyboard resizes the screen.
     function placeAc() {
       if (dd.hidden || !acInput) return;
       const r = acInput.getBoundingClientRect();
       if (r.bottom < 0 || r.top > window.innerHeight) { closeAc(); return; }
-      dd.style.left = r.left + 'px'; dd.style.width = Math.max(r.width, 220) + 'px';
+      dd.style.left = r.left + 'px'; dd.style.width = Math.max(r.width, 260) + 'px';
       const below = window.innerHeight - r.bottom;
-      if (below < 200 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+      if (below < 220 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
       else { dd.style.bottom = 'auto'; dd.style.top = (r.bottom + 4) + 'px'; }
     }
-    function pick(name) {
+    function paint(items, query) {
+      if (dd.parentNode !== document.body) document.body.appendChild(dd); // the page shell wraps content in a glass panel, which would skew fixed positioning
+      acList = items; acIdx = -1; dd.innerHTML = '';
+      if (!items.length) { const n = document.createElement('div'); n.className = 'oxi-ac-none'; n.textContent = query ? 'No matching product in the catalogue' : 'Start typing a product name or code'; dd.appendChild(n); }
+      items.forEach(p => {
+        const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option');
+        const name = document.createElement('span'); name.textContent = p.name;
+        const meta = document.createElement('small'); meta.style.cssText = 'display:block;color:var(--text-muted)';
+        meta.textContent = p.code + (p.pack_size ? ' - ' + p.pack_size : '') + (p.has_recipe ? '' : ' - no recipe yet');
+        b.append(name, meta);
+        b.addEventListener('pointerdown', (e) => e.preventDefault());
+        b.addEventListener('click', () => pick(p));
+        dd.appendChild(b);
+      });
+      dd.hidden = false; placeAc();
+    }
+    async function search(input) {
+      const seq = ++acSeq; acInput = input;
+      const q = input.value.trim();
+      let d; try { d = await api('/api/catalog/products/search?limit=8&q=' + encodeURIComponent(q)); } catch (e) { return; }
+      if (seq !== acSeq || acInput !== input) return; // a newer keystroke superseded this answer
+      if (d.success) paint(d.products, q);
+    }
+    function pick(p) {
       if (!acInput) return;
-      acInput.value = name;
-      const tr = acInput.closest('tr'); const unit = tr && tr.querySelector('.unit'); if (unit) unit.value = 'Nos';
-      paintHint(acInput); const next = tr && tr.querySelector('.qty'); closeAc(); if (next) next.focus();
+      const tr = acInput.closest('tr');
+      acInput.value = p.name; acInput.dataset.productId = p.id;
+      tr.querySelector('.unit').textContent = p.base_unit;
+      markRow(tr, null); closeAc();
+      const q = tr.querySelector('.qty'); if (q) q.focus();
+    }
+    function markRow(tr, text) {
+      let h = tr.querySelector('.oxi-ac-hint');
+      if (!h) { h = document.createElement('small'); h.className = 'oxi-ac-hint'; tr.querySelector('td').appendChild(h); }
+      h.textContent = text || '';
     }
     function moveAc(d) {
       const opts = [...dd.querySelectorAll('button')]; if (!opts.length) return;
       acIdx = (acIdx + d + opts.length) % opts.length;
       opts.forEach((o, i) => o.classList.toggle('active', i === acIdx)); opts[acIdx].scrollIntoView({ block: 'nearest' });
     }
-    document.addEventListener('input', (e) => { if (e.target.matches('#items .name')) openAc(e.target); });
-    document.addEventListener('focusin', (e) => { if (e.target.matches('#items .name') && e.target.value) openAc(e.target); });
-    document.addEventListener('focusout', (e) => { if (e.target.matches('#items .name')) { paintHint(e.target); setTimeout(() => { if (document.activeElement !== e.target) closeAc(); }, 120); } });
+    document.addEventListener('input', (e) => {
+      if (!e.target.matches('#items .name')) return;
+      delete e.target.dataset.productId; e.target.closest('tr').querySelector('.unit').textContent = '-';
+      clearTimeout(acTimer); acTimer = setTimeout(() => search(e.target), 150);
+    });
+    document.addEventListener('focusin', (e) => { if (e.target.matches('#items .name')) search(e.target); });
+    document.addEventListener('focusout', (e) => {
+      if (!e.target.matches('#items .name')) return;
+      setTimeout(() => { if (document.activeElement !== e.target) closeAc(); }, 150);
+    });
     document.addEventListener('keydown', (e) => {
       if (dd.hidden || !e.target.matches('#items .name')) return;
       if (e.key === 'ArrowDown') { e.preventDefault(); moveAc(1); }
@@ -97,44 +115,50 @@
       else if (e.key === 'Enter' && acIdx >= 0) { e.preventDefault(); pick(acList[acIdx]); }
       else if (e.key === 'Escape') closeAc();
     });
-    window.addEventListener('scroll', placeAc, true);
-    window.addEventListener('resize', placeAc);
+    window.addEventListener('scroll', placeAc, true); window.addEventListener('resize', placeAc);
 
-    const tbody = document.querySelector('#items tbody');
     function addRow() {
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><input class="name" size="26" autocomplete="off" placeholder="Start typing a product..." aria-label="Finished product name"></td>' +
-        '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
-        '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
-        '<td><button type="button" class="del">X</button></td>';
+        '<td><input class="name" size="28" autocomplete="off" placeholder="Search product name or code" aria-label="Finished product"></td>' +
+        '<td><input class="qty" type="number" min="0" step="any" inputmode="decimal" aria-label="Quantity"></td>' +
+        '<td class="unit" aria-label="Unit">-</td>' +
+        '<td><button type="button" class="del" aria-label="Remove this item">X</button></td>';
       tbody.appendChild(tr);
       tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) tr.remove(); };
     }
-    document.getElementById('addRow').onclick = addRow;
+    $('addRow').onclick = addRow;
     addRow();
 
-    document.getElementById('reqForm').addEventListener('submit', async (e) => {
+    // ---------- submit: validate beside the field, keep everything typed on failure, block double submits ----------
+    let submitting = false;
+    $('reqForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const items = [...tbody.rows].map(tr => ({
-        item_name: tr.querySelector('.name').value,
-        quantity: tr.querySelector('.qty').value,
-        unit: tr.querySelector('.unit').value
-      }));
-      const btn = document.getElementById('saveBtn'); btn.disabled = true;
-      const d = await api('/api/branch-request/create', 'POST', {
-        branch: document.getElementById('branch').value,
-        requested_by: document.getElementById('by').value,
-        delivery_needed_by: document.getElementById('deadline').value,
-        priority: document.getElementById('priority').value,
-        items
+      if (submitting) return;
+      const err = $('formError'); err.hidden = true;
+      let bad = false;
+      const items = [...tbody.rows].map(tr => {
+        const input = tr.querySelector('.name'), qty = tr.querySelector('.qty');
+        const productId = Number(input.dataset.productId || 0);
+        if (!productId) { markRow(tr, 'Choose a product from the list'); bad = true; } else markRow(tr, null);
+        if (!(Number(qty.value) > 0)) { bad = true; markRow(tr, (tr.querySelector('.oxi-ac-hint').textContent ? tr.querySelector('.oxi-ac-hint').textContent + '. ' : '') + 'Enter a quantity above 0'); }
+        return { product_id: productId, quantity: qty.value };
       });
-      btn.disabled = false;
+      if (!$('branch').value && !$('branch').disabled) { err.textContent = 'Select the branch.'; err.hidden = false; return; }
+      if (bad) { err.textContent = 'Please fix the highlighted items. Nothing has been submitted.'; err.hidden = false; return; }
+      submitting = true; const btn = $('saveBtn'); btn.disabled = true; btn.textContent = 'Submitting...';
+      let d;
+      try {
+        d = await api('/api/branch-request/create', 'POST', {
+          branch: $('branch').value || (me && me.branch), delivery_needed_by: $('deadline').value, priority: $('priority').value, items
+        });
+      } catch (ex) { d = { success: false, error: 'Network problem - your entries are still here, please try again.' }; }
+      submitting = false; btn.disabled = false; btn.textContent = 'Submit request';
       if (d.success) {
-        show(d.request_number + ' submitted (status: pending)', true);
-        document.getElementById('reqForm').reset();
+        show(d.request_number + ' submitted - waiting for store approval', true);
+        $('reqForm').reset(); if (me && me.role === 'branch' && me.branch) $('branch').value = me.branch;
         tbody.innerHTML = ''; addRow();
-      } else { show('Error: ' + d.error, false); }
+      } else { err.textContent = d.error; err.hidden = false; show('Error: ' + d.error, false); }
     });
   </script>
 </body>

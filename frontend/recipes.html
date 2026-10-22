@@ -10,27 +10,44 @@
   <link rel="icon" href="icons/icon-192.png">
 </head>
 <body>
-  <p><a href="index.html">&larr; Home</a> | <a href="material-plan.html">Material planning</a></p>
-  <h1>Recipes (Bill of Materials)</h1>
-  <p class="oxi-page-sub">What raw materials one unit of each finished product uses, including normal wastage. Material planning multiplies these by the quantity a branch asks for.</p>
-  <p id="message"></p>
+  <p><a href="index.html">Home</a> &rsaquo; Master Data &rsaquo; Recipes / Bill of Materials</p>
+  <h1>Recipes / Bill of Materials</h1>
+  <p class="oxi-page-sub">What raw materials and packaging one unit of each finished product uses. Material planning multiplies these by the quantity a branch asks for.</p>
+  <p id="message" role="status"></p>
 
   <div class="oxi-toolbar">
     <select id="product" aria-label="Product"><option value="">Loading products...</option></select>
-    <input type="text" id="find" placeholder="Filter products...">
+    <input type="search" id="find" placeholder="Filter products..." aria-label="Filter products">
+    <label><input type="checkbox" id="onlyMissing"> Only products with no recipe</label>
   </div>
 
   <div id="recipe" hidden>
     <h3 id="recipeTitle"></h3>
-    <table>
+    <div class="oxi-meta-chips" id="recipeMeta"></div>
+    <div id="noRecipe" class="oxi-note-card" hidden></div>
+    <table id="linesTable">
       <thead><tr><th>Material</th><th>Code</th><th>Qty per unit</th><th>Unit</th><th></th></tr></thead>
       <tbody id="lines"></tbody>
     </table>
+
+    <div id="settingsBox" hidden>
+      <h3>Recipe settings</h3>
+      <p class="oxi-page-sub">Quantities above are for the "output quantity" below. Tick "already includes wastage" when the quantities came from real usage (as your BOM sheet's did) - the allowance is then NOT added again.</p>
+      <div class="oxi-toolbar">
+        <label>Output quantity<br><input type="number" id="sOut" min="0" step="any"></label>
+        <label>Effective from<br><input type="date" id="sFrom"></label>
+        <label>Wastage %<br><input type="number" id="sPct" min="0" step="any"></label>
+        <label><input type="checkbox" id="sIncl"> Quantities already include wastage</label>
+        <button type="button" id="sSave">Save settings</button>
+      </div>
+    </div>
+
     <div id="editBox" hidden>
       <h3>Add or change a material in this recipe</h3>
+      <p class="oxi-page-sub">If a purchase plan has already used this recipe, saving creates a new version so the earlier plan keeps the figures it was based on.</p>
       <div class="oxi-toolbar">
         <select id="addMaterial" aria-label="Material"></select>
-        <input type="number" id="addQty" min="0" step="any" placeholder="Qty per unit">
+        <input type="number" id="addQty" min="0" step="any" placeholder="Qty per unit" aria-label="Quantity per unit">
         <button type="button" id="addBtn">Save line</button>
       </div>
     </div>
@@ -54,74 +71,97 @@
   <script>
     let user = null; try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
     const isAdmin = user && user.role === 'admin';
+    const $ = (id) => document.getElementById(id);
     const qtyText = (n) => Number(Number(n).toFixed(6)).toString();
-    let products = [], materials = [], current = null;
+    let products = [], current = null;
+    const wanted = Number(new URLSearchParams(location.search).get('product')) || 0;
 
     async function loadProducts(keepId) {
-      const d = await api('/api/bom/products');
+      let d; try { d = await api('/api/bom/products'); } catch (e) { d = { success: false, error: 'Network problem' }; }
       if (!d.success) { show(d.error, false); return; }
       products = d.products; renderProducts(keepId);
     }
     function renderProducts(keepId) {
-      const q = document.getElementById('find').value.trim().toLowerCase();
-      const sel = document.getElementById('product'); const keep = keepId || sel.value;
+      const q = $('find').value.trim().toLowerCase(), only = $('onlyMissing').checked;
+      const sel = $('product'); const keep = keepId || sel.value;
       sel.innerHTML = '<option value="">-- Select a product (' + products.length + ') --</option>';
-      products.filter(p => !q || p.name.toLowerCase().includes(q)).forEach(p => {
-        const o = document.createElement('option'); o.value = p.id; o.textContent = p.name + ' (' + p.materials + ' materials)'; sel.appendChild(o);
+      products.filter(p => (!q || (p.name + ' ' + p.code).toLowerCase().includes(q)) && (!only || !p.version)).forEach(p => {
+        const o = document.createElement('option'); o.value = p.id;
+        o.textContent = p.code + '  ' + p.name + (p.version ? ' (' + p.materials + ' materials)' : '  - NO RECIPE');
+        sel.appendChild(o);
       });
       if (keep) sel.value = keep;
     }
 
     async function showRecipe(pid) {
-      const box = document.getElementById('recipe');
+      const box = $('recipe');
       if (!pid) { box.hidden = true; return; }
-      const d = await api('/api/bom/products/' + pid);
+      let d; try { d = await api('/api/bom/products/' + pid); } catch (e) { d = { success: false, error: 'Network problem' }; }
       if (!d.success) { show(d.error, false); return; }
       current = d.product; box.hidden = false;
-      document.getElementById('recipeTitle').textContent = d.product.name + ' - per 1 unit';
-      const tb = document.getElementById('lines'); tb.innerHTML = '';
+      $('recipeTitle').textContent = d.product.code + ' - ' + d.product.name;
+      const meta = $('recipeMeta'); meta.innerHTML = '';
+      const none = $('noRecipe');
+      if (!d.recipe) {
+        none.hidden = false; none.textContent = 'Recipe missing. Branch requests for this product cannot be planned until a recipe exists.' + (isAdmin ? ' Add its materials below to create version 1.' : ' Ask an administrator to add it.');
+        $('linesTable').hidden = true; $('settingsBox').hidden = true;
+      } else {
+        none.hidden = true; $('linesTable').hidden = false;
+        const chip = (t) => { const c = document.createElement('span'); c.className = 'oxi-meta-chip'; c.textContent = t; meta.appendChild(c); };
+        chip('Version ' + d.recipe.version); chip('Effective ' + day(d.recipe.effective_from)); chip('Per ' + qtyText(d.recipe.base_output_qty) + ' ' + d.recipe.base_output_unit);
+        chip(d.recipe.wastage_included ? 'Quantities include wastage' : 'Wastage allowance ' + d.recipe.wastage_pct + '%');
+        if (d.versions.length > 1) chip(d.versions.length + ' versions on record');
+        $('sOut').value = d.recipe.base_output_qty; $('sFrom').value = String(d.recipe.effective_from).slice(0, 10);
+        $('sPct').value = d.recipe.wastage_pct; $('sIncl').checked = d.recipe.wastage_included;
+        $('settingsBox').hidden = !isAdmin;
+      }
+      const tb = $('lines'); tb.innerHTML = '';
       d.lines.forEach(l => {
         const tr = document.createElement('tr');
         addCell(tr, l.name); addCell(tr, l.code); addCell(tr, qtyText(l.qty_per_unit)); addCell(tr, l.unit);
         const td = document.createElement('td');
         if (isAdmin) {
           const edit = document.createElement('button'); edit.textContent = 'Edit';
-          edit.onclick = () => { document.getElementById('addMaterial').value = l.material_id; document.getElementById('addQty').value = l.qty_per_unit; document.getElementById('addQty').focus(); };
+          edit.onclick = () => { $('addMaterial').value = l.material_id; $('addQty').value = l.qty_per_unit; $('addQty').focus(); };
           const del = document.createElement('button'); del.textContent = 'Remove';
-          del.onclick = async () => { if (!confirm('Remove ' + l.name + ' from this recipe?')) return; const r = await api('/api/bom/lines/' + l.id, 'DELETE'); if (r.success) { show('Removed', true); showRecipe(pid); loadProducts(pid); } else show(r.error, false); };
+          del.onclick = async () => { if (!confirm('Remove ' + l.name + ' from this recipe?')) return; const r = await api('/api/bom/lines/' + l.id, 'DELETE'); if (r.success) { show('Removed (recipe v' + r.version + ')', true); showRecipe(pid); loadProducts(pid); } else show(r.error, false); };
           td.append(edit, del);
         }
         tr.appendChild(td); tb.appendChild(tr);
       });
-      if (!d.lines.length) tb.innerHTML = '<tr><td colspan="5">No materials yet.</td></tr>';
+      if (d.recipe && !d.lines.length) tb.innerHTML = '<tr><td colspan="5">No materials yet.</td></tr>';
     }
 
     async function loadMaterials() {
       const d = await api('/api/bom/materials'); if (!d.success) return;
-      materials = d.materials;
-      const sel = document.getElementById('addMaterial'); sel.innerHTML = '';
-      materials.forEach(m => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name + ' (' + m.code + ', ' + m.unit + ')'; sel.appendChild(o); });
+      const sel = $('addMaterial'); sel.innerHTML = '';
+      d.materials.forEach(m => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.name + ' (' + m.code + ', ' + m.unit + ', ' + m.category + ')'; sel.appendChild(o); });
     }
 
-    document.getElementById('product').addEventListener('change', (e) => showRecipe(e.target.value));
-    document.getElementById('find').addEventListener('input', () => renderProducts());
+    $('product').addEventListener('change', (e) => showRecipe(e.target.value));
+    $('find').addEventListener('input', () => renderProducts());
+    $('onlyMissing').addEventListener('change', () => renderProducts());
 
     if (isAdmin) {
-      document.getElementById('editBox').hidden = false; document.getElementById('adminBox').hidden = false;
-      document.getElementById('addBtn').onclick = async () => {
-        const r = await api('/api/bom/lines', 'PUT', { product_id: current.id, material_id: document.getElementById('addMaterial').value, qty_per_unit: document.getElementById('addQty').value });
-        if (r.success) { show('Saved', true); document.getElementById('addQty').value = ''; showRecipe(current.id); loadProducts(current.id); } else show(r.error, false);
+      $('editBox').hidden = false; $('adminBox').hidden = false;
+      $('addBtn').onclick = async () => {
+        const r = await api('/api/bom/lines', 'PUT', { product_id: current.id, material_id: $('addMaterial').value, qty_per_unit: $('addQty').value });
+        if (r.success) { show(r.new_version ? 'Saved as new recipe version ' + r.version : 'Saved (recipe v' + r.version + ')', true); $('addQty').value = ''; showRecipe(current.id); loadProducts(current.id); } else show(r.error, false);
       };
-      document.getElementById('newProductBtn').onclick = async () => {
-        const r = await api('/api/bom/products', 'POST', { name: document.getElementById('newProduct').value });
-        if (r.success) { show('Product added - now add its materials', true); document.getElementById('newProduct').value = ''; await loadProducts(r.product_id); showRecipe(r.product_id); } else show(r.error, false);
+      $('sSave').onclick = async () => {
+        const r = await api('/api/bom/recipes/' + current.id, 'PUT', { base_output_qty: $('sOut').value, effective_from: $('sFrom').value || undefined, wastage_pct: $('sPct').value, wastage_included: $('sIncl').checked });
+        if (r.success) { show('Settings saved (recipe v' + r.version + ')', true); showRecipe(current.id); } else show(r.error, false);
       };
-      document.getElementById('newMaterialBtn').onclick = async () => {
-        const r = await api('/api/bom/materials', 'POST', { code: document.getElementById('newCode').value, name: document.getElementById('newName').value, unit: document.getElementById('newUnit').value });
-        if (r.success) { show('Material added', true); document.getElementById('newCode').value = ''; document.getElementById('newName').value = ''; loadMaterials(); } else show(r.error, false);
+      $('newProductBtn').onclick = async () => {
+        const r = await api('/api/catalog/products', 'POST', { name: $('newProduct').value });
+        if (r.success) { show('Product added - now add its materials', true); $('newProduct').value = ''; await loadProducts(r.product_id); showRecipe(r.product_id); } else show(r.error, false);
+      };
+      $('newMaterialBtn').onclick = async () => {
+        const r = await api('/api/bom/materials', 'POST', { code: $('newCode').value, name: $('newName').value, unit: $('newUnit').value });
+        if (r.success) { show('Material added', true); $('newCode').value = ''; $('newName').value = ''; loadMaterials(); } else show(r.error, false);
       };
     }
-    loadProducts(); loadMaterials();
+    (async () => { await loadProducts(wanted || undefined); loadMaterials(); if (wanted) showRecipe(wanted); })();
   </script>
 </body>
 </html>

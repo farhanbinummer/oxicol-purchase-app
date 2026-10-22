@@ -7,8 +7,9 @@
 const express = require('express');
 const { pool } = require('../database');
 const { notify } = require('../notify');
+const { audit } = require('../audit');
 const { fail, todayISO, isValidDate, stamp, nextNumber } = require('../utils');
-const { requirePermission } = require('../auth');
+const { requirePermission, hasPermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const router = express.Router();
 
@@ -34,8 +35,11 @@ router.post('/advance', requirePermission(KEYS.PAYMENT_CREATE), async (req, res)
   const paymentDate = b.payment_date || todayISO();
   if (!isValidDate(paymentDate)) return fail(res, 400, 'Payment date must be a valid date (YYYY-MM-DD)');
 
-  const approved = b.approved === true || b.approved === 'true';
-  const approvedBy = b.approved_by ? String(b.approved_by).trim() : null;
+  // A payment is only recorded as confirmed when the SIGNED-IN person holds the approve power. The name stored is
+  // theirs - a typed 'approved by' or a ticked box alone proves nothing.
+  const wantsApproval = b.approved === true || b.approved === 'true';
+  const approved = wantsApproval && await hasPermission(req.user, KEYS.PAYMENT_APPROVE);
+  const approvedBy = approved ? req.user.name : null;
   const notes = b.notes ? String(b.notes).trim() : null;
 
   const client = await pool.connect();
@@ -74,6 +78,7 @@ router.post('/advance', requirePermission(KEYS.PAYMENT_CREATE), async (req, res)
     await client.query('UPDATE purchase_orders SET status = $1 WHERE id = $2',
       [approved ? 'payment_done' : 'payment_pending', poId]);
 
+    await audit(client, req, { action: approved ? 'payment.create_confirmed' : 'payment.create', entity: 'payment', summary: `${paymentId} for ${p.po_number}: Rs ${p.total_amount}, UTR ${utr}`, after: { po_id: poId, amount: Number(p.total_amount), status } });
     await client.query('COMMIT');
     notify(approved
       ? { roles: ['purchase', 'store'], subject: 'Advance paid for ' + p.po_number, text: `Advance payment ${paymentId} for ${p.po_number} is confirmed.`, path: 'po-detail.html?id=' + poId }
@@ -165,7 +170,7 @@ router.get('/', requirePermission(KEYS.PAYMENT_VIEW_ALL), async (req, res) => {
 router.put('/:id/approve', requirePermission(KEYS.PAYMENT_APPROVE), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid payment id');
-  const approvedBy = req.body && req.body.approved_by ? String(req.body.approved_by).trim() : null;
+  const approvedBy = req.user.name; // the signed-in approver, never a typed name
 
   const client = await pool.connect();
   try {
@@ -182,6 +187,7 @@ router.put('/:id/approve', requirePermission(KEYS.PAYMENT_APPROVE), async (req, 
     await client.query(
       "UPDATE purchase_orders SET status = 'payment_done' WHERE id = $1 AND status IN ('created','payment_pending')",
       [cur.rows[0].po_id]);
+    await audit(client, req, { action: 'payment.confirm', entity: 'payment', id, summary: `Payment ${id} confirmed`, before: { status: 'initiated' }, after: { status: 'confirmed' } });
     await client.query('COMMIT');
     notify({ roles: ['purchase', 'store'], subject: 'Payment confirmed', text: 'A supplier advance payment was confirmed by Accounts.', path: 'po-detail.html?id=' + cur.rows[0].po_id });
     res.json({ success: true, payment_id: id, status: 'confirmed' });

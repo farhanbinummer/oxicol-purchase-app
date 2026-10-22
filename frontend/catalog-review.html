@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalogue Review</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; Master Data &rsaquo; Catalogue Review</p>
+  <h1>Catalogue Review</h1>
+  <p class="oxi-page-sub">Older request items were typed as free text. They are not linked to a catalogue product, so their recipes cannot be found. Nothing is matched automatically - choose the right product for each one.</p>
+  <p id="message"></p>
+  <div id="state" role="status" aria-live="polite"></div>
+  <div id="list"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; };
+
+    async function link(itemId, productId, label) {
+      if (!confirm('Link this item to ' + label + '?')) return;
+      const r = await api('/api/catalog/map-item', 'PUT', { item_id: itemId, product_id: productId });
+      if (r.success) { show('Linked', true); load(); } else show(r.error, false);
+    }
+
+    function card(it) {
+      const c = el('article', 'oxi-note-card');
+      c.style.borderStyle = 'solid';
+      c.appendChild(el('b', '', it.request_number + ' (' + it.branch + ') - "' + it.item_name + '" x ' + it.quantity + ' ' + it.unit));
+      const sug = el('div', 'oxi-actions');
+      if (it.suggestions.length) {
+        it.suggestions.forEach(s => { const b = el('button', '', s.code + '  ' + s.name); b.onclick = () => link(it.item_id, s.id, s.name); sug.appendChild(b); });
+      } else sug.appendChild(el('span', '', 'No close matches. Search the catalogue below.'));
+      c.appendChild(sug);
+      const row = el('div', 'oxi-toolbar');
+      const input = el('input'); input.type = 'search'; input.placeholder = 'Search another product'; input.setAttribute('aria-label', 'Search the catalogue');
+      const out = el('div', 'oxi-actions');
+      let t = null;
+      input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(async () => {
+        out.innerHTML = ''; if (!input.value.trim()) return;
+        const d = await api('/api/catalog/products/search?q=' + encodeURIComponent(input.value));
+        (d.products || []).forEach(p => { const b = el('button', '', p.code + '  ' + p.name); b.onclick = () => link(it.item_id, p.id, p.name); out.appendChild(b); });
+        if (d.success && !d.products.length) out.appendChild(el('span', '', 'No match'));
+      }, 200); });
+      row.appendChild(input); c.append(row, out);
+      return c;
+    }
+
+    async function load() {
+      $('state').textContent = 'Loading...'; $('list').innerHTML = '';
+      let d; try { d = await api('/api/catalog/unmapped'); } catch (e) { d = { success: false, error: 'Network problem' }; }
+      $('state').textContent = '';
+      if (!d.success) { const n = el('div', 'oxi-note-card', 'Could not load: ' + d.error + ' '); const b = el('button', '', 'Try again'); b.onclick = load; n.appendChild(b); $('state').appendChild(n); return; }
+      if (!d.items.length) { $('state').appendChild(el('div', 'oxi-note-card', 'Nothing to review. Every request item is linked to a catalogue product.')); return; }
+      $('state').appendChild(el('p', 'oxi-page-sub', d.items.length + ' item' + (d.items.length === 1 ? '' : 's') + ' waiting for review.'));
+      d.items.forEach(it => $('list').appendChild(card(it)));
+    }
+    load();
+  </script>
+</body>
+</html>

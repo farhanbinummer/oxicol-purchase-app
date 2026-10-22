@@ -8,6 +8,7 @@
 const express = require('express');
 const { pool } = require('../database');
 const { notify } = require('../notify');
+const { audit } = require('../audit');
 const { fail, todayISO, isValidDate, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -32,8 +33,7 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
   const poId = Number(b.po_id);
   if (!Number.isInteger(poId) || poId <= 0) return fail(res, 400, 'Please select a PO');
 
-  const receivedBy = String(b.received_by || '').trim();
-  if (!receivedBy) return fail(res, 400, 'Received by is required');
+  const receivedBy = req.user.name; // the signed-in receiver, recorded automatically
 
   const grnDate = b.grn_date || todayISO();
   if (!isValidDate(grnDate)) return fail(res, 400, 'GRN date must be a valid date (YYYY-MM-DD)');
@@ -130,6 +130,7 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
       await client.query("UPDATE purchase_orders SET status = 'delivered' WHERE id = $1", [poId]);
     }
 
+    await audit(client, req, { action: 'grn.create', entity: 'grn', id: grnId, summary: `${grnNumber} against ${po.rows[0].po_number}`, after: { status, condition } });
     await client.query('COMMIT');
 
     const short = lines.filter(l => l.variance < 0);
@@ -242,6 +243,7 @@ router.put('/:id/approve', requirePermission(KEYS.GRN_APPROVE), async (req, res)
     await pool.query(
       'UPDATE grn_notes SET status = $1, qc_notes = COALESCE($2, qc_notes) WHERE id = $3',
       [status, b.qc_notes ? String(b.qc_notes).trim() : null, id]);
+    await audit(pool, req, { action: 'grn.qc_' + status, entity: 'grn', id, summary: `${cur.rows[0].grn_number} ${status} at quality check`, before: { status: 'pending_qc' }, after: { status }, reason: b.qc_notes ? String(b.qc_notes).trim() : undefined });
     notify({ roles: ['purchase', 'accounts'], subject: 'GRN ' + status, text: `GRN ${cur.rows[0].grn_number} was ${status} at quality check.`, path: 'grn-detail.html?id=' + id });
     res.json({ success: true, grn_id: id, status });
   } catch (err) {

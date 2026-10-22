@@ -69,6 +69,14 @@ function requireRole(...roles) {
  * route is registered), not silently at request time, so a mistyped key can never turn
  * into a silent security hole.
  */
+/** True when this user may use the permission (admin always can). Used where one endpoint serves two powers. */
+async function hasPermission(user, key) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const r = await pool.query('SELECT 1 FROM role_permissions WHERE role = $1 AND permission_key = $2', [user.role, key]);
+  return r.rowCount > 0;
+}
+
 function requirePermission(key) {
   if (!VALID_KEYS.has(key)) {
     throw new Error(`requirePermission("${key}") is not in permissions.js's CATALOG - fix the route file.`);
@@ -88,4 +96,4 @@ function requirePermission(key) {
   };
 }
 
-module.exports = { createSession, requireAuth, requireRole, requirePermission, SESSION_HOURS };
+module.exports = { createSession, requireAuth, requireRole, requirePermission, SESSION_HOURS, hasPermission };

@@ -10,120 +10,154 @@
   <link rel="icon" href="icons/icon-192.png">
 </head>
 <body>
-  <p><a href="index.html">&larr; Home</a> | <a href="material-plan.html" id="backLink">Material planning</a> | <a href="recipes.html">Recipes (BOM)</a></p>
-  <h1 id="title">Material planning</h1>
+  <p><a href="index.html">Home</a> &rsaquo; Demand &amp; Planning &rsaquo; <a href="material-plan.html" id="crumb">Material Planning</a></p>
+  <h1 id="title">Material Planning</h1>
   <p class="oxi-page-sub" id="sub">Approved branch requests, and the raw materials production needs to make them.</p>
-  <p id="message"></p>
+  <p id="message" role="status"></p>
+  <div id="state" role="status" aria-live="polite"></div>
 
   <div id="listView" hidden>
     <table>
       <thead><tr><th>Request</th><th>Branch</th><th>Priority</th><th>Needed by</th><th>Items</th><th>Planning</th><th></th></tr></thead>
-      <tbody id="rows"><tr><td colspan="7">Loading...</td></tr></tbody>
+      <tbody id="rows"></tbody>
     </table>
   </div>
 
   <div id="planView" hidden>
     <div class="oxi-meta-chips" id="chips"></div>
     <div class="oxi-info-grid" id="tiles"></div>
-    <div id="warn"></div>
+    <div id="blocked"></div>
 
     <h3>Finished products requested</h3>
     <div id="items"></div>
 
-    <h3>Total raw materials needed</h3>
+    <h3>Raw materials and packaging</h3>
+    <div class="oxi-note-card" id="basis"></div>
     <table>
-      <thead><tr><th>Material</th><th>Code</th><th>Quantity needed</th><th>Unit</th></tr></thead>
+      <thead><tr><th>Material</th><th>Code</th><th>Gross requirement</th><th>Unit</th><th>Required by</th></tr></thead>
       <tbody id="totals"></tbody>
     </table>
-    <p class="oxi-page-sub">Quantities are worked out from your recipes (Bill of Materials), which already include normal wastage. Stock on hand is not subtracted.</p>
     <div class="oxi-actions" id="actions"></div>
   </div>
 
   <script src="common.js"></script>
   <script>
     const id = new URLSearchParams(location.search).get('id');
+    const $ = (x) => document.getElementById(x);
+    let me = null; try { me = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
+    const isAdmin = me && me.role === 'admin';
     const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
-    const qtyText = (n) => Number(n.toFixed(4)).toLocaleString('en-IN', { maximumFractionDigits: 4 });
-    const tile = (label, value) => { const d = document.createElement('div'); d.className = 'oxi-info-tile';
-      const s = document.createElement('small'); s.textContent = label; const b = document.createElement('b'); b.textContent = value;
-      d.append(s, b); return d; };
+    const qtyText = (n) => Number(Number(n).toFixed(4)).toLocaleString('en-IN', { maximumFractionDigits: 4 });
+    const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; };
+    const tile = (label, value) => { const d = el('div', 'oxi-info-tile'); d.append(el('small', '', label), el('b', '', value)); return d; };
+
+    function state(text, retry) {
+      const s = $('state'); s.innerHTML = '';
+      if (!text) return;
+      const d = el('div', 'oxi-note-card', text);
+      if (retry) { const b = el('button', '', 'Try again'); b.onclick = retry; d.append(' ', b); }
+      s.appendChild(d);
+    }
 
     async function loadList() {
-      document.getElementById('listView').hidden = false;
-      const d = await api('/api/bom/plan');
-      const rows = document.getElementById('rows'); rows.innerHTML = '';
-      if (!d.success) { show(d.error, false); return; }
-      if (d.requests.length === 0) { rows.innerHTML = '<tr><td colspan="7">No approved branch requests yet.</td></tr>'; return; }
+      state('Loading requests...');
+      let d; try { d = await api('/api/bom/plan'); } catch (e) { d = { success: false, error: 'Network problem' }; }
+      if (!d.success) { state('Could not load: ' + d.error, loadList); return; }
+      state(null); $('listView').hidden = false;
+      const rows = $('rows'); rows.innerHTML = '';
+      if (!d.requests.length) { state('No approved branch requests are waiting for planning.'); $('listView').hidden = true; return; }
       d.requests.forEach(r => {
         const tr = document.createElement('tr');
         addLink(tr, r.request_number, 'material-plan.html?id=' + r.id);
         addCell(tr, r.branch); addCell(tr, cap(r.priority)); addCell(tr, day(r.delivery_needed_by) || '-'); addCell(tr, r.items);
         const td = document.createElement('td');
-        if (r.planned_indent_id) { const a = document.createElement('a'); a.href = 'production-indent-detail.html?id=' + r.planned_indent_id; a.textContent = r.indent_number; td.appendChild(a); }
+        if (r.planned_indent_id) { const a = el('a', '', r.indent_number); a.href = 'production-indent-detail.html?id=' + r.planned_indent_id; td.appendChild(a); }
+        else if (r.unlinked > 0) { const b = badge('needs_review'); b.textContent = 'Blocked: ' + r.unlinked + ' item' + (r.unlinked > 1 ? 's' : '') + ' not linked'; td.appendChild(b); }
         else td.appendChild(badge('pending'));
         tr.appendChild(td);
         const act = document.createElement('td');
-        const v = document.createElement('a'); v.href = 'material-plan.html?id=' + r.id; v.className = 'oxi-view-btn'; v.textContent = r.planned_indent_id ? 'View' : 'Plan materials';
-        act.appendChild(v); tr.appendChild(act);
-        rows.appendChild(tr);
+        const v = el('a', 'oxi-view-btn', r.planned_indent_id ? 'View' : 'Plan materials'); v.href = 'material-plan.html?id=' + r.id;
+        act.appendChild(v); tr.appendChild(act); rows.appendChild(tr);
       });
     }
 
-    async function loadPlan() {
-      const d = await api('/api/bom/plan/' + encodeURIComponent(id));
-      if (!d.success) { show(d.error, false); return; }
-      const r = d.request;
-      document.getElementById('title').textContent = 'Materials for ' + r.request_number;
-      document.getElementById('sub').textContent = 'The raw materials production needs to make what ' + r.branch + ' asked for.';
-      document.getElementById('planView').hidden = false;
+    function blockedPanel(d) {
+      const box = $('blocked'); box.innerHTML = '';
+      if (!d.blocked.length) return;
+      const p = el('div', 'oxi-note-card'); p.style.cssText = 'border-style:solid;border-color:var(--danger)'; p.setAttribute('role', 'alert');
+      const t = el('b', '', 'Planning blocked: ' + d.blocked.length + ' item' + (d.blocked.length > 1 ? 's' : '') + ' cannot be calculated');
+      t.style.color = 'var(--danger)'; p.appendChild(t);
+      p.appendChild(el('p', '', 'This request stays unplanned until every item below is resolved. The demand remains visible here and is not dropped.'));
+      d.blocked.forEach(b => {
+        const row = el('div', 'oxi-actions');
+        row.appendChild(el('span', '', b.item_name + ' x ' + qtyText(b.quantity) + ' - ' + b.reason_text));
+        if (b.reason === 'unmapped') {
+          const a = el('a', 'oxi-view-btn', 'Link to a catalogue product'); a.href = 'catalog-review.html'; row.appendChild(a);
+        } else if (isAdmin) {
+          const a = el('a', 'oxi-view-btn', b.reason === 'recipe_missing' ? 'Create the recipe' : 'Add materials to the recipe'); a.href = 'recipes.html?product=' + b.product_id; row.appendChild(a);
+        } else row.appendChild(el('small', '', 'Ask an administrator to add the recipe.'));
+        p.appendChild(row);
+      });
+      box.appendChild(p);
+    }
 
-      const chips = document.getElementById('chips'); chips.innerHTML = '';
-      const st = document.createElement('span'); st.appendChild(badge(r.status)); chips.appendChild(st);
-      const c = document.createElement('span'); c.className = 'oxi-meta-chip'; c.textContent = d.totals.length + ' raw materials'; chips.appendChild(c);
-      const tiles = document.getElementById('tiles'); tiles.innerHTML = '';
+    async function loadPlan() {
+      state('Calculating...');
+      let d; try { d = await api('/api/bom/plan/' + encodeURIComponent(id)); } catch (e) { d = { success: false, error: 'Network problem' }; }
+      if (!d.success) { state('Could not calculate: ' + d.error, loadPlan); return; }
+      state(null);
+      const r = d.request;
+      $('title').textContent = 'Materials for ' + r.request_number;
+      $('sub').textContent = 'The raw materials and packaging production needs to make what ' + r.branch + ' asked for.';
+      $('crumb').textContent = 'All requests to plan'; $('planView').hidden = false;
+
+      const chips = $('chips'); chips.innerHTML = '';
+      const st = el('span'); st.appendChild(badge(r.status)); chips.appendChild(st);
+      chips.appendChild(el('span', 'oxi-meta-chip', d.complete ? 'Ready to plan' : 'Planning blocked'));
+      chips.appendChild(el('span', 'oxi-meta-chip', d.totals.length + ' materials'));
+      const tiles = $('tiles'); tiles.innerHTML = '';
       tiles.append(tile('Branch', r.branch), tile('Priority', cap(r.priority)), tile('Needed by', day(r.delivery_needed_by) || '-'));
 
-      const warn = document.getElementById('warn'); warn.innerHTML = '';
-      if (d.unmatched.length) {
-        const w = document.createElement('div'); w.className = 'oxi-note-card';
-        w.textContent = 'No recipe found for: ' + d.unmatched.join(', ') + '. Those items are not included below. Check the spelling against the product list, or ask an admin to add the recipe.';
-        warn.appendChild(w);
-      }
+      blockedPanel(d);
 
-      const box = document.getElementById('items'); box.innerHTML = '';
+      const box = $('items'); box.innerHTML = '';
       d.items.forEach(it => {
-        const h = document.createElement('h4'); h.style.margin = '14px 0 6px';
-        h.textContent = it.item_name + ' × ' + qtyText(it.quantity) + (it.product ? '' : '  (no recipe)');
-        box.appendChild(h);
+        const h = el('h4', '', it.item_name + ' x ' + qtyText(it.quantity) + (it.recipe ? '   (recipe v' + it.recipe.version + ')' : '   (cannot be calculated)'));
+        h.style.margin = '14px 0 6px'; box.appendChild(h);
         if (!it.lines.length) return;
-        const t = document.createElement('table'); t.innerHTML = '<thead><tr><th>Material</th><th>Per unit</th><th>Needed</th><th>Unit</th></tr></thead>';
+        const t = document.createElement('table'); t.innerHTML = '<thead><tr><th>Material</th><th>Per pack</th><th>Needed</th><th>Unit</th></tr></thead>';
         const tb = document.createElement('tbody');
         it.lines.forEach(l => { const tr = document.createElement('tr'); addCell(tr, l.name); addCell(tr, qtyText(l.qty_per_unit)); addCell(tr, qtyText(l.needed)); addCell(tr, l.unit); tb.appendChild(tr); });
         t.appendChild(tb); box.appendChild(t);
       });
 
-      const tot = document.getElementById('totals'); tot.innerHTML = '';
-      if (!d.totals.length) tot.innerHTML = '<tr><td colspan="4">Nothing to calculate: none of the items has a recipe.</td></tr>';
-      d.totals.forEach(t => { const tr = document.createElement('tr'); addCell(tr, t.name); addCell(tr, t.code); addCell(tr, qtyText(t.qty)); addCell(tr, t.unit); tot.appendChild(tr); });
+      $('basis').textContent = d.basis_note;
+      const tot = $('totals'); tot.innerHTML = '';
+      if (!d.totals.length) { const tr = document.createElement('tr'); const td = el('td', '', 'Nothing could be calculated yet.'); td.colSpan = 5; tr.appendChild(td); tot.appendChild(tr); }
+      d.totals.forEach(t => { const tr = document.createElement('tr'); addCell(tr, t.name); addCell(tr, t.code); addCell(tr, qtyText(t.qty)); addCell(tr, t.unit); addCell(tr, day(r.delivery_needed_by) || '-'); tot.appendChild(tr); });
 
-      const actions = document.getElementById('actions'); actions.innerHTML = '';
+      const actions = $('actions'); actions.innerHTML = '';
       if (r.planned_indent_id) {
-        const a = document.createElement('a'); a.href = 'production-indent-detail.html?id=' + r.planned_indent_id; a.className = 'oxi-view-btn';
-        a.textContent = 'Indent ' + r.indent_number + ' already created'; actions.appendChild(a);
-      } else if (d.totals.length) {
-        const b = document.createElement('button'); b.textContent = 'Create draft production indent';
+        const a = el('a', 'oxi-view-btn', 'Indent ' + r.indent_number + ' already created'); a.href = 'production-indent-detail.html?id=' + r.planned_indent_id; actions.appendChild(a);
+      } else if (r.status !== 'approved') {
+        actions.appendChild(el('span', 'oxi-page-sub', r.status === 'po_raised' ? 'This request is already part of a purchase order, so it cannot also be planned (that would buy the same stock twice).' : 'Only approved requests can be planned.'));
+      } else if (!d.complete) {
+        const b = el('button', '', 'Create draft production indent'); b.disabled = true; b.title = 'Resolve the blocked items first'; actions.appendChild(b);
+        actions.appendChild(el('span', 'oxi-page-sub', 'Disabled until every item has a recipe.'));
+      } else {
+        const b = el('button', '', 'Create draft production indent');
         b.onclick = async () => {
-          if (!confirm('Create a production indent with these ' + d.totals.length + ' raw materials?')) return;
-          b.disabled = true;
-          const x = await api('/api/bom/plan/' + r.id + '/draft-indent', 'POST', {});
-          if (x.success) { show(x.indent_number + ' created with ' + x.materials + ' materials - waiting for Store approval', true); loadPlan(); }
-          else { show(x.error, false); b.disabled = false; }
+          if (!confirm('Create a production indent with these ' + d.totals.length + ' materials (gross requirement, stock not subtracted)?')) return;
+          b.disabled = true; b.textContent = 'Creating...';
+          let x; try { x = await api('/api/bom/plan/' + r.id + '/draft-indent', 'POST', {}); } catch (e) { x = { success: false, error: 'Network problem - please try again.' }; }
+          if (x.success) { show(x.indent_number + ' created - waiting for Store approval', true); loadPlan(); }
+          else { show(x.error, false); b.disabled = false; b.textContent = 'Create draft production indent'; }
         };
         actions.appendChild(b);
       }
     }
 
-    if (id) { document.getElementById('backLink').textContent = '← All requests to plan'; loadPlan(); } else loadList();
+    if (id) loadPlan(); else loadList();
   </script>
 </body>
 </html>

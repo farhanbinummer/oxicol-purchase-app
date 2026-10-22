@@ -27,8 +27,7 @@
     </table>
     <p><label>Payment date<br><input type="date" id="date"></label></p>
     <p><label>UTR number (bank transfer reference)<br><input id="utr" size="30" placeholder="e.g. HDFC123456789"></label></p>
-    <p><label>Approved by<br><input id="by" size="30" placeholder="e.g. Farhan"></label></p>
-    <p><label><input type="checkbox" id="approved"> I confirm this payment is approved</label></p>
+    <p><label><input type="checkbox" id="approved"> Confirm this payment now (only works if your role may approve payments; otherwise it waits for an approver)</label></p>
     <p><label>Notes<br><textarea id="notes" rows="2" cols="50"></textarea></label></p>
     <p><button type="submit" id="saveBtn">Record payment</button></p>
   </form>
@@ -71,7 +70,6 @@
         po_id: document.getElementById('po').value,
         payment_date: document.getElementById('date').value,
         utr_number: document.getElementById('utr').value,
-        approved_by: document.getElementById('by').value,
         approved: document.getElementById('approved').checked,
         notes: document.getElementById('notes').value
       });

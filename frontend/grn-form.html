@@ -34,7 +34,7 @@
     </div>
 
     <p><label>GRN date<br><input type="date" id="date"></label></p>
-    <p><label>Received by<br><input id="by" size="30" placeholder="e.g. Biju"></label></p>
+    <p>Received by: <b id="who"></b> <small>(recorded automatically from your login)</small></p>
     <p><label>Storage location<br><input id="loc" size="30" placeholder="e.g. Rack A2"></label></p>
     <p><label>QC notes<br><textarea id="qcnotes" rows="2" cols="50"></textarea></label></p>
     <p><label><input type="checkbox" id="qc"> QC approved</label></p>
@@ -43,6 +43,7 @@
 
   <script src="common.js"></script>
   <script>
+    try { document.getElementById('who').textContent = JSON.parse(localStorage.getItem('oxicol_user')).name; } catch (e) {}
     let pos = [];
     let poItems = [];
     const tbody = document.getElementById('items');
@@ -127,7 +128,6 @@
       const d = await api('/api/grn/create', 'POST', {
         po_id: document.getElementById('po').value,
         grn_date: document.getElementById('date').value,
-        received_by: document.getElementById('by').value,
         storage_location: document.getElementById('loc').value,
         qc_notes: document.getElementById('qcnotes').value,
         qc_approved: document.getElementById('qc').checked,

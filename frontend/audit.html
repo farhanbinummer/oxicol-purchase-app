@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit History</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; Administration &rsaquo; Audit History</p>
+  <h1>Audit History</h1>
+  <p class="oxi-page-sub">Who did what, and when. Entries cannot be edited or deleted from the app, and passwords or tokens are never recorded.</p>
+  <p id="message"></p>
+
+  <div class="oxi-toolbar">
+    <input type="search" id="q" placeholder="Search person, action or description" aria-label="Search audit history">
+    <select id="entity" aria-label="Record type"><option value="">All record types</option></select>
+    <button type="button" id="clear">Clear filters</button>
+    <span id="count" class="oxi-page-sub" style="margin:0"></span>
+  </div>
+
+  <div id="state" role="status" aria-live="polite"></div>
+  <table id="grid" hidden>
+    <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Record</th><th>What happened</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="oxi-actions" id="pager" hidden>
+    <button type="button" id="prev">Previous</button>
+    <span id="pageText"></span>
+    <button type="button" id="next">Next</button>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    if (!(JSON.parse(localStorage.getItem('oxicol_user') || '{}').role === 'admin')) location.href = 'index.html';
+    const $ = (id) => document.getElementById(id);
+    let page = 1, pages = 1, timer = null, entitiesFilled = false;
+    const when = (v) => { const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+
+    function state(text, retry) {
+      const s = $('state'); s.innerHTML = '';
+      if (!text) return;
+      const d = document.createElement('div'); d.className = 'oxi-note-card'; d.textContent = text;
+      if (retry) { const b = document.createElement('button'); b.textContent = 'Try again'; b.onclick = retry; d.append(' ', b); }
+      s.appendChild(d);
+    }
+
+    async function load() {
+      state('Loading...');
+      const qs = new URLSearchParams({ page, per: 25 });
+      if ($('q').value.trim()) qs.set('q', $('q').value.trim());
+      if ($('entity').value) qs.set('entity', $('entity').value);
+      let d; try { d = await api('/api/admin/audit?' + qs); } catch (e) { d = { success: false, error: 'Network problem' }; }
+      if (!d.success) { state('Could not load audit history: ' + d.error, load); return; }
+      state(null);
+      if (!entitiesFilled) { d.entities.forEach(e => { const o = document.createElement('option'); o.value = e; o.textContent = e.replace(/_/g, ' '); $('entity').appendChild(o); }); entitiesFilled = true; }
+      pages = Math.max(1, Math.ceil(d.total / d.per));
+      $('count').textContent = d.total + ' entr' + (d.total === 1 ? 'y' : 'ies');
+      const rows = $('rows'); rows.innerHTML = '';
+      $('grid').hidden = d.entries.length === 0; $('pager').hidden = d.total <= d.per;
+      $('pageText').textContent = 'Page ' + d.page + ' of ' + pages;
+      $('prev').disabled = d.page <= 1; $('next').disabled = d.page >= pages;
+      if (!d.entries.length) { state($('q').value || $('entity').value ? 'No entries match those filters.' : 'No activity recorded yet.'); return; }
+      d.entries.forEach(e => {
+        const tr = document.createElement('tr');
+        addCell(tr, when(e.at)); addCell(tr, (e.actor_name || 'System') + (e.actor_role ? ' (' + e.actor_role + ')' : ''));
+        addCell(tr, e.action); addCell(tr, (e.entity || '').replace(/_/g, ' ') + (e.entity_id ? ' #' + e.entity_id : ''));
+        const td = document.createElement('td'); td.appendChild(document.createTextNode(e.summary || ''));
+        if (e.reason) { const r = document.createElement('div'); r.className = 'oxi-page-sub'; r.style.margin = '2px 0 0'; r.textContent = 'Reason: ' + e.reason; td.appendChild(r); }
+        if (e.before_data || e.after_data) {
+          const det = document.createElement('details'); const sm = document.createElement('summary'); sm.textContent = 'Before / after'; det.appendChild(sm);
+          const pre = document.createElement('pre'); pre.style.cssText = 'white-space:pre-wrap;font-size:0.78rem;margin:4px 0';
+          pre.textContent = 'Before: ' + JSON.stringify(e.before_data) + '\nAfter:  ' + JSON.stringify(e.after_data); det.appendChild(pre); td.appendChild(det);
+        }
+        tr.appendChild(td); rows.appendChild(tr);
+      });
+    }
+    $('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { page = 1; load(); }, 250); });
+    $('entity').addEventListener('change', () => { page = 1; load(); });
+    $('clear').onclick = () => { $('q').value = ''; $('entity').value = ''; page = 1; load(); };
+    $('prev').onclick = () => { if (page > 1) { page--; load(); } };
+    $('next').onclick = () => { if (page < pages) { page++; load(); } };
+    load();
+  </script>
+</body>
+</html>

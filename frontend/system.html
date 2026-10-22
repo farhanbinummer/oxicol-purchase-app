@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>System Status</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#362b6b">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; Administration &rsaquo; System Status</p>
+  <h1>System Status</h1>
+  <p class="oxi-page-sub">Technical health and integrations, for administrators. This is where server and database problems are shown, so they stay off everyone else's dashboard.</p>
+  <p id="message"></p>
+  <div class="oxi-actions"><button type="button" id="refresh">Check again</button> <span id="checked" class="oxi-page-sub" style="margin:0"></span></div>
+  <div id="state" role="status" aria-live="polite"></div>
+  <div id="cards" class="oxi-info-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))"></div>
+  <h3>Database updates applied</h3>
+  <table id="mig" hidden><thead><tr><th>Update</th><th>Applied</th></tr></thead><tbody id="migRows"></tbody></table>
+
+  <script src="common.js"></script>
+  <script>
+    if (!(JSON.parse(localStorage.getItem('oxicol_user') || '{}').role === 'admin')) location.href = 'index.html';
+    const $ = (id) => document.getElementById(id);
+    const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; };
+    function card(title, status, ok, lines) {
+      const c = el('div', 'oxi-info-tile');
+      c.appendChild(el('small', '', title));
+      const b = el('b', '', status); b.style.color = ok === true ? 'var(--success)' : ok === false ? 'var(--danger)' : 'var(--warn)'; c.appendChild(b);
+      lines.forEach(t => { const p = el('div', 'oxi-page-sub', t); p.style.margin = '6px 0 0'; p.style.fontSize = '0.82rem'; c.appendChild(p); });
+      return c;
+    }
+    async function load() {
+      $('state').textContent = 'Checking...'; $('cards').innerHTML = '';
+      let d; try { d = await api('/api/admin/system'); } catch (e) { d = { success: false, error: 'Network problem' }; }
+      if (!d.success) { $('state').textContent = 'Could not check the system: ' + d.error; return; }
+      $('state').textContent = '';
+      $('checked').textContent = 'Checked ' + new Date(d.checked_at).toLocaleTimeString('en-GB');
+      const cards = $('cards');
+      cards.append(
+        card('Database', d.database.ok ? 'Connected' : 'Not reachable', d.database.ok, [d.database.ok ? 'Response time ' + d.database.latency_ms + ' ms' : d.database.error]),
+        card('Email alerts', d.alerts.email === 'configured' ? 'Configured' : 'Not configured', d.alerts.email === 'configured' ? true : null, [d.alerts.setup]),
+        card('WhatsApp alerts', d.alerts.whatsapp === 'configured' ? 'Configured' : 'Not configured', d.alerts.whatsapp === 'configured' ? true : null, ['Needs a Meta WhatsApp Business account.']),
+        card('Accounting export (' + d.accounting.system + ')', d.accounting.label, null, [d.accounting.detail, d.accounting.setup])
+      );
+      const rows = $('migRows'); rows.innerHTML = '';
+      $('mig').hidden = !d.migrations.length;
+      d.migrations.forEach(m => { const tr = document.createElement('tr'); addCell(tr, m.name); addCell(tr, new Date(m.applied_at).toLocaleString('en-GB')); rows.appendChild(tr); });
+    }
+    $('refresh').onclick = load; load();
+  </script>
+</body>
+</html>

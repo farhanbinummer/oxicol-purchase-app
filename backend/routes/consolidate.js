@@ -5,6 +5,7 @@
 const express = require('express');
 const { pool } = require('../database');
 const { notify } = require('../notify');
+const { audit } = require('../audit');
 const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
@@ -12,7 +13,8 @@ const router = express.Router();
 
 const CGST_RATE = Number(process.env.CGST_RATE ?? 9);
 const SGST_RATE = Number(process.env.SGST_RATE ?? 9);
-const OPEN = "('pending','approved')"; // request/indent statuses not yet turned into a PO
+// Only APPROVED demand can be purchased. Pending requests/indents have not been signed off yet.
+const OPEN = "('approved')";
 
 // ------------------------------------------------------------
 // GET /api/consolidate/all
@@ -24,8 +26,14 @@ router.get('/all', requirePermission(KEYS.CONSOLIDATE_VIEW), async (req, res) =>
               json_agg(json_build_object('item_name', i.item_name, 'quantity', i.quantity, 'unit', i.unit)
                        ORDER BY i.id) AS items
          FROM branch_stock_requests r JOIN branch_request_items i ON i.request_id = r.id
-        WHERE r.status IN ${OPEN}
+        WHERE r.status IN ${OPEN} AND r.planned_indent_id IS NULL
         GROUP BY r.id ORDER BY r.id`);
+
+    // A request planned into a production indent is bought through that indent's raw materials. Listing it here
+    // as well would buy the same demand twice, so it is held back (and shown so nobody wonders where it went).
+    const heldBack = await pool.query(
+      `SELECT r.id, r.request_number, r.branch, i.indent_number FROM branch_stock_requests r
+         JOIN production_indents i ON i.id = r.planned_indent_id WHERE r.status = 'approved' ORDER BY r.id`);
 
     const indents = await pool.query(
       `SELECT d.id, d.indent_number, d.production_head, d.status,
@@ -50,6 +58,7 @@ router.get('/all', requirePermission(KEYS.CONSOLIDATE_VIEW), async (req, res) =>
     res.json({
       success: true,
       branch_requests: branchReqs.rows,
+      held_back: heldBack.rows,
       production_indents: indents.rows,
       consolidated_items: [...totals.values()]
     });
@@ -119,17 +128,24 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
     // Link and close out every source that fed this PO.
     for (const id of branchIds) {
       const r = await client.query(
-        "UPDATE branch_stock_requests SET status = 'po_raised' WHERE id = $1 AND status IN ('pending','approved') RETURNING id", [id]);
-      if (r.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 400, `Branch request ${id} is not open for consolidation`); }
+        "UPDATE branch_stock_requests SET status = 'po_raised' WHERE id = $1 AND status = 'approved' AND planned_indent_id IS NULL RETURNING id", [id]);
+      if (r.rowCount === 0) {
+        const why = await client.query('SELECT status, request_number, planned_indent_id FROM branch_stock_requests WHERE id = $1', [id]);
+        await client.query('ROLLBACK');
+        const w = why.rows[0];
+        if (w && w.planned_indent_id) return fail(res, 400, `${w.request_number} was planned into a production indent. Buy its raw materials through that indent - buying the request as well would count the same demand twice.`);
+        return fail(res, 400, `Branch request ${w ? w.request_number : id} is not an approved, open request (it is "${w ? w.status : 'missing'}")`);
+      }
       await client.query("INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,'branch',$2)", [poId, id]);
     }
     for (const id of indentIds) {
       const r = await client.query(
-        "UPDATE production_indents SET status = 'po_raised' WHERE id = $1 AND status IN ('pending','approved') RETURNING id", [id]);
-      if (r.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 400, `Production indent ${id} is not open for consolidation`); }
+        "UPDATE production_indents SET status = 'po_raised' WHERE id = $1 AND status = 'approved' RETURNING id", [id]);
+      if (r.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 400, `Production indent ${id} is not an approved, open indent`); }
       await client.query("INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,'production',$2)", [poId, id]);
     }
 
+    await audit(client, req, { action: 'po.create_consolidated', entity: 'purchase_order', id: poId, summary: `${po.rows[0].po_number} created from ${branchIds.length} request(s) and ${indentIds.length} indent(s)`, after: { branch_request_ids: branchIds, production_indent_ids: indentIds, total: Number(po.rows[0].total_amount) } });
     await client.query('COMMIT');
     notify({ roles: ['accounts', 'store'], subject: 'New purchase order ' + po.rows[0].po_number, text: `Purchase order ${po.rows[0].po_number} was created from consolidated requests. Accounts: advance payment is due.`, path: 'po-detail.html?id=' + poId });
     res.status(201).json({
