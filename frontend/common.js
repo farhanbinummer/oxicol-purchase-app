@@ -58,7 +58,7 @@ const OXI_ICONS = {
 function svgIcon(name, size) {
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + (size || 18) + '" height="' + (size || 18) +
     '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-    'stroke-linecap="round" stroke-linejoin="round" class="oxi-icon">' + (OXI_ICONS[name] || '') + '</svg>';
+    'stroke-linecap="round" stroke-linejoin="round" class="oxi-icon" aria-hidden="true" focusable="false">' + (OXI_ICONS[name] || '') + '</svg>';
 }
 
 (function () {
@@ -132,6 +132,87 @@ function svgIcon(name, size) {
     return roles === '*' || user.role === 'admin' || roles.split(',').includes(user.role);
   }
 
+  // Turns each page's old "<- Home | + New ..." line, title and description into one shared header:
+  // breadcrumbs on top, title and description on the left, the main action on the right. The original
+  // elements are moved (not copied), so ids and scripts that update them keep working.
+  function buildPageHead(panel) {
+    const first = panel.firstElementChild;
+    const h1 = panel.querySelector(':scope > h1');
+    if (!first || first.tagName !== 'P' || !h1) return;
+    const home = first.querySelector('a[href="index.html"]');
+    if (!home) return;
+    const sub = h1.nextElementSibling && h1.nextElementSibling.classList.contains('oxi-page-sub') ? h1.nextElementSibling : null;
+    const others = [...first.querySelectorAll('a')].filter(a => a !== home);
+    const clean = (t) => t.replace(/^[\s←+]+/, '').trim();
+    const crumbs = [];   // elements, last one is the current page
+    let trailing = null; // a linked last crumb that the page itself may rename (e.g. material planning)
+    const actions = [];  // anchors shown as buttons on the right
+
+    const homeLink = document.createElement('a'); homeLink.href = 'index.html'; homeLink.textContent = 'Dashboard';
+    crumbs.push(homeLink);
+
+    if (first.textContent.includes('›')) {
+      // "Home > Section > Page": linked parts stay links, the rest is plain text
+      const parts = first.textContent.split('›').map(s => s.trim()).slice(1);
+      parts.forEach((txt, i) => {
+        const link = others.find(a => a.textContent.trim() === txt);
+        if (link) { crumbs.push(link); if (i === parts.length - 1) trailing = link; }
+        else if (i < parts.length - 1) { const s = document.createElement('span'); s.textContent = txt; crumbs.push(s); }
+      });
+    } else {
+      // "<- Home | <- All X | + New X": arrows mean "parent page", a plus means the main action
+      const isForm = /-form\.html$/.test(page);
+      others.forEach(a => {
+        const t = a.textContent.trim();
+        if (t.startsWith('+')) { a.textContent = clean(t); a.className = 'oxi-btn'; actions.push(a); }
+        else if (t.startsWith('←') || isForm) { a.textContent = clean(t); crumbs.push(a); }
+        else { a.className = 'oxi-btn oxi-btn-secondary'; actions.push(a); }
+      });
+    }
+
+    const current = document.createElement('span');
+    current.textContent = h1.textContent;
+    current.setAttribute('aria-current', 'page');
+    crumbs.push(current);
+
+    const nav = document.createElement('nav');
+    nav.className = 'oxi-crumbs'; nav.setAttribute('aria-label', 'Breadcrumb');
+    const ol = document.createElement('ol');
+    crumbs.forEach(c => { const li = document.createElement('li'); li.appendChild(c); ol.appendChild(li); });
+    nav.appendChild(ol);
+    // the title of detail pages is filled in after load; keep the last crumb in step with it
+    const syncCurrent = () => {
+      current.textContent = h1.textContent;
+      const same = !!trailing && trailing.textContent.trim() === current.textContent.trim();
+      current.parentNode.hidden = same;
+      if (trailing) { if (same) trailing.setAttribute('aria-current', 'page'); else trailing.removeAttribute('aria-current'); }
+    };
+    syncCurrent();
+    const watch = { childList: true, characterData: true, subtree: true };
+    new MutationObserver(syncCurrent).observe(h1, watch);
+    if (trailing) new MutationObserver(syncCurrent).observe(trailing, watch);
+
+    const titles = document.createElement('div'); titles.className = 'oxi-page-titles';
+    const row = document.createElement('div'); row.className = 'oxi-page-head-row';
+    const head = document.createElement('div'); head.className = 'oxi-page-head';
+    if (h1.classList.contains('oxi-desk-only')) head.classList.add('oxi-desk-only');
+
+    panel.insertBefore(head, h1);
+    titles.appendChild(h1);
+    if (sub) titles.appendChild(sub);
+    row.appendChild(titles);
+    if (actions.length) {
+      const box = document.createElement('div'); box.className = 'oxi-page-actions';
+      actions.forEach(a => box.appendChild(a));
+      row.appendChild(box);
+    }
+    head.append(nav, row);
+    const keep = document.createElement('span'); keep.hidden = true;
+    first.querySelectorAll('[id]').forEach(e => { if (!head.contains(e)) keep.appendChild(e); });
+    if (keep.firstChild) head.appendChild(keep);
+    first.remove();
+  }
+
   // Builds the sidebar + top bar shell around whatever the page already put in <body>.
   document.addEventListener('DOMContentLoaded', () => {
     if (PUBLIC_PAGES.includes(page)) return;
@@ -139,38 +220,72 @@ function svgIcon(name, size) {
     try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
     if (!user) return;
 
-    // Move everything the page already rendered into the large rounded white main panel.
-    const content = document.createElement('div');
+    // Everything the page already rendered goes into the main content area.
+    const content = document.createElement('main');
     content.className = 'oxi-content';
+    content.id = 'oxiMain';
+    content.tabIndex = -1;
     const panel = document.createElement('div');
     panel.className = 'oxi-main-panel';
     while (document.body.firstChild) panel.appendChild(document.body.firstChild);
+    buildPageHead(panel);
     content.appendChild(panel);
 
-    // ---------- sidebar: slim, icon-only circular buttons ----------
+    const skip = document.createElement('a');
+    skip.className = 'oxi-skip'; skip.href = '#oxiMain'; skip.textContent = 'Skip to content';
+
+    // ---------- sidebar: labelled navigation, collapsible to icons ----------
     const sidebar = document.createElement('aside');
     sidebar.className = 'oxi-sidebar';
     sidebar.innerHTML =
-      '<a href="index.html" class="oxi-brand-mark" title="Oxicol - Dashboard">' +
-        '<span class="oxi-brand-icon">O</span><span class="oxi-nav-label">Oxicol</span>' +
+      '<a href="index.html" class="oxi-brand-mark" aria-label="Oxicol - Dashboard">' +
+        '<span class="oxi-brand-icon" aria-hidden="true">O</span><span class="oxi-nav-label">Oxicol</span>' +
       '</a>' +
-      '<nav class="oxi-sidenav"></nav>' +
-      '<button class="oxi-nav-toggle" id="oxiNavToggle" title="Collapse or expand the menu" aria-label="Collapse or expand the menu">' + svgIcon('panel', 19) + '<span class="oxi-nav-label">Collapse menu</span></button>' +
-      '<button class="oxi-theme-toggle" id="oxiThemeToggle" title="Toggle dark mode"></button>';
+      '<nav class="oxi-sidenav" aria-label="Primary"></nav>' +
+      '<button type="button" class="oxi-nav-toggle" id="oxiNavToggle" aria-label="Collapse or expand the menu">' + svgIcon('panel', 19) + '<span class="oxi-nav-label">Collapse menu</span></button>' +
+      '<button type="button" class="oxi-theme-toggle" id="oxiThemeToggle"></button>';
     const sidenav = sidebar.querySelector('.oxi-sidenav');
 
-    // Pinned (labels always visible) is the default on desktop; the toggle collapses it to icons, and the choice is remembered.
-    const wide = () => window.matchMedia('(min-width: 1101px)').matches;
-    const setPinned = (on) => { document.body.classList.toggle('oxi-nav-pinned', on && wide()); };
-    let pinned = localStorage.getItem('oxicol_nav') !== 'collapsed';
-    setPinned(pinned);
-    window.addEventListener('resize', () => setPinned(pinned));
-    const navToggle = sidebar.querySelector('#oxiNavToggle');
-    navToggle.onclick = () => {
-      pinned = !pinned; localStorage.setItem('oxicol_nav', pinned ? 'open' : 'collapsed'); setPinned(pinned);
-      navToggle.setAttribute('aria-expanded', String(pinned));
+    // Labels are shown by default on a wide screen; the toggle collapses the menu to icons, and the choice is remembered.
+    const wide = () => window.matchMedia('(min-width: 901px)').matches;
+    const wantPinned = () => {
+      const pref = localStorage.getItem('oxicol_nav');          // 'open' | 'collapsed' | nothing yet
+      return pref ? pref === 'open' : window.matchMedia('(min-width: 1101px)').matches;
     };
-    navToggle.setAttribute('aria-expanded', String(pinned));
+    const navToggle = sidebar.querySelector('#oxiNavToggle');
+    function setPinned() {
+      const on = wantPinned() && wide();
+      document.body.classList.toggle('oxi-nav-pinned', on);
+      navToggle.setAttribute('aria-expanded', String(on));
+      navToggle.querySelector('.oxi-nav-label').textContent = on ? 'Collapse menu' : 'Expand menu';
+    }
+    setPinned();
+    window.addEventListener('resize', setPinned);
+    navToggle.onclick = () => {
+      const now = document.body.classList.contains('oxi-nav-pinned');
+      localStorage.setItem('oxicol_nav', now ? 'collapsed' : 'open');
+      setPinned();
+    };
+
+    // When the menu is collapsed to icons, a small floating label names the item under the pointer or keyboard focus.
+    const tip = document.createElement('div');
+    tip.className = 'oxi-tip'; tip.hidden = true; tip.setAttribute('role', 'tooltip');
+    function showTip(el) {
+      if (document.body.classList.contains('oxi-nav-pinned') || !wide()) return;
+      const lab = el.querySelector('.oxi-nav-label');
+      if (!lab) return;
+      tip.textContent = lab.textContent; tip.hidden = false;
+      const r = el.getBoundingClientRect();
+      tip.style.left = (sidebar.getBoundingClientRect().right + 8) + 'px';
+      tip.style.top = Math.max(8, r.top + (r.height - tip.offsetHeight) / 2) + 'px';
+    }
+    const hideTip = () => { tip.hidden = true; };
+    sidebar.addEventListener('mouseover', (e) => { const t = e.target.closest('a, button'); if (t) showTip(t); });
+    sidebar.addEventListener('focusin', (e) => { const t = e.target.closest('a, button'); if (t) showTip(t); });
+    sidebar.addEventListener('mouseout', hideTip);
+    sidebar.addEventListener('focusout', hideTip);
+    sidebar.addEventListener('scroll', hideTip, true);
+    navToggle.addEventListener('click', hideTip);
 
     // Permissions come from the server; the last answer is cached so the menu doesn't flicker between pages.
     const permKey = 'oxicol_perms_' + user.id;
@@ -185,7 +300,7 @@ function svgIcon(name, size) {
         const h = document.createElement('div'); h.className = 'oxi-nav-group'; h.textContent = g.title; sidenav.appendChild(h);
         items.forEach(item => {
           const a = document.createElement('a');
-          a.href = item.href; a.title = item.label;
+          a.href = item.href;
           a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
           if (page === item.href || (item.also || []).includes(page)) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
           sidenav.appendChild(a);
@@ -204,18 +319,18 @@ function svgIcon(name, size) {
     topbar.className = 'oxi-topbar';
     const companyLabel = 'Oxicol Car Care Products' + (user.branch ? ' &middot; ' + user.branch : '');
     topbar.innerHTML =
-      '<button class="oxi-icon-btn oxi-menu-btn" id="oxiMenuBtn" title="Menu">' + svgIcon('menu') + '</button>' +
+      '<button type="button" class="oxi-icon-btn oxi-menu-btn" id="oxiMenuBtn" aria-label="Open menu" aria-expanded="false">' + svgIcon('menu') + '</button>' +
       '<div class="oxi-company-label" title="Malappuram, Kerala">' + svgIcon('branch', 15) + '<span>' + companyLabel + '</span></div>' +
-      '<div class="oxi-search">' + svgIcon('search') +
-        '<input id="oxiSearch" placeholder="Search PO, supplier, GRN, invoice, or payment..." autocomplete="off">' +
+      '<div class="oxi-search" role="search">' + svgIcon('search') +
+        '<input id="oxiSearch" type="search" aria-label="Search purchase orders, suppliers, GRNs, invoices and payments" placeholder="Search PO, supplier, GRN, invoice, or payment..." autocomplete="off">' +
         '<div class="oxi-search-results" id="oxiSearchResults" hidden></div>' +
       '</div>' +
       '<div class="oxi-spacer"></div>' +
-      '<button class="oxi-icon-btn" id="oxiPrintBtn" title="Print this page">' + svgIcon('print') + '</button>' +
+      '<button type="button" class="oxi-icon-btn" id="oxiPrintBtn" aria-label="Print this page" title="Print this page">' + svgIcon('print') + '</button>' +
       '<div class="oxi-dropdown" id="oxiNotifWrap"></div>' +
       '<div class="oxi-dropdown" id="oxiCreateWrap"></div>' +
       '<div class="oxi-dropdown" id="oxiProfileWrap"></div>';
-    document.body.append(sidebar, topbar, content);
+    document.body.append(skip, sidebar, topbar, content, tip);
     document.body.classList.add('oxi-shell');
 
     // ---------- phone bottom navigation: Home | Requests | New | Orders | Profile ----------
@@ -264,12 +379,13 @@ function svgIcon(name, size) {
     // ---------- notifications: real pending items this role can act on, not a fake counter ----------
     const notifWrap = document.getElementById('oxiNotifWrap');
     const notifBtn = document.createElement('button');
-    notifBtn.className = 'oxi-icon-btn'; notifBtn.title = 'Notifications';
+    notifBtn.type = 'button'; notifBtn.className = 'oxi-icon-btn'; notifBtn.title = 'Notifications';
+    notifBtn.setAttribute('aria-label', 'Notifications'); notifBtn.setAttribute('aria-haspopup', 'true'); notifBtn.setAttribute('aria-expanded', 'false');
     notifBtn.innerHTML = svgIcon('bell') + '<span class="oxi-notif-dot" id="oxiNotifDot" hidden></span>';
     const notifMenu = document.createElement('div');
     notifMenu.className = 'oxi-menu oxi-notif-menu'; notifMenu.hidden = true;
     notifMenu.innerHTML = '<div class="oxi-menu-title">Notifications</div><div id="oxiNotifList" class="oxi-empty">Loading...</div>';
-    notifBtn.onclick = (e) => { e.stopPropagation(); notifMenu.hidden = !notifMenu.hidden; };
+    notifBtn.onclick = (e) => { e.stopPropagation(); notifMenu.hidden = !notifMenu.hidden; notifBtn.setAttribute('aria-expanded', String(!notifMenu.hidden)); };
     notifWrap.append(notifBtn, notifMenu);
 
     (async () => {
@@ -309,7 +425,9 @@ function svgIcon(name, size) {
     const createWrap = document.getElementById('oxiCreateWrap');
     if (creates.length) {
       const btn = document.createElement('button');
+      btn.type = 'button'; btn.id = 'oxiCreateBtn';
       btn.className = 'oxi-btn-primary-sm';
+      btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
       btn.innerHTML = svgIcon('plus', 16) + '<span>New</span>';
       const menu = document.createElement('div');
       menu.className = 'oxi-menu';
@@ -319,16 +437,16 @@ function svgIcon(name, size) {
         a.href = c.href; a.textContent = c.label;
         menu.appendChild(a);
       });
-      btn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+      btn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); };
       createWrap.append(btn, menu);
     }
 
     // ---------- profile dropdown ----------
     const profWrap = document.getElementById('oxiProfileWrap');
     const profBtn = document.createElement('button');
-    profBtn.className = 'oxi-profile-btn';
-    const initials = (user.name || '?').split(/s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    profBtn.setAttribute('aria-label', 'Account menu');
+    profBtn.type = 'button'; profBtn.className = 'oxi-profile-btn';
+    const initials = (user.name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    profBtn.setAttribute('aria-label', 'Account menu'); profBtn.setAttribute('aria-haspopup', 'true'); profBtn.setAttribute('aria-expanded', 'false');
     profBtn.innerHTML = '<span class="oxi-avatar">' + initials + '</span>' + svgIcon('user', 20) +
       '<span class="oxi-profile-text">' + user.name + '<small>' + user.role + (user.branch ? ', ' + user.branch : '') + '</small></span>' +
       svgIcon('chevron', 14);
@@ -347,7 +465,7 @@ function svgIcon(name, size) {
       location.href = 'login.html';
     };
     profMenu.appendChild(logoutBtn);
-    profBtn.onclick = (e) => { e.stopPropagation(); profMenu.hidden = !profMenu.hidden; };
+    profBtn.onclick = (e) => { e.stopPropagation(); profMenu.hidden = !profMenu.hidden; profBtn.setAttribute('aria-expanded', String(!profMenu.hidden)); };
     profWrap.append(profBtn, profMenu);
 
     // ---------- mobile: collapsed search pill expands to a full-width bar on tap ----------
@@ -361,24 +479,38 @@ function svgIcon(name, size) {
 
     // ---------- mobile sidebar toggle ----------
     const menuBtn = document.getElementById('oxiMenuBtn');
-    menuBtn.onclick = () => document.body.classList.toggle('oxi-sidebar-open');
+    menuBtn.onclick = () => {
+      const open = document.body.classList.toggle('oxi-sidebar-open');
+      menuBtn.setAttribute('aria-expanded', String(open));
+    };
 
-    document.addEventListener('click', (e) => {
-      profMenu.hidden = true;
-      notifMenu.hidden = true;
+    function closeMenus() {
+      profMenu.hidden = true; profBtn.setAttribute('aria-expanded', 'false');
+      notifMenu.hidden = true; notifBtn.setAttribute('aria-expanded', 'false');
       const cm = createWrap.querySelector('.oxi-menu'); if (cm) cm.hidden = true;
+      const cb = document.getElementById('oxiCreateBtn'); if (cb) cb.setAttribute('aria-expanded', 'false');
+    }
+    document.addEventListener('click', (e) => {
+      closeMenus();
       searchWrap.classList.remove('oxi-search-active');
       // Tapping anywhere outside the open mobile drawer closes it (it has no X button by design).
       if (!sidebar.contains(e.target) && !menuBtn.contains(e.target)) {
         document.body.classList.remove('oxi-sidebar-open');
+        menuBtn.setAttribute('aria-expanded', 'false');
       }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      closeMenus();
+      document.body.classList.remove('oxi-sidebar-open'); menuBtn.setAttribute('aria-expanded', 'false');
     });
 
     // ---------- dark mode toggle ----------
     const themeBtn = document.getElementById('oxiThemeToggle');
     function paintThemeBtn() {
       const t = document.documentElement.getAttribute('data-theme');
-      themeBtn.innerHTML = svgIcon(t === 'dark' ? 'sun' : 'moon', 16) + '<span class="oxi-nav-label">' + (t === 'dark' ? 'Light mode' : 'Dark mode') + '</span>';
+      themeBtn.innerHTML = svgIcon(t === 'dark' ? 'sun' : 'moon', 19) + '<span class="oxi-nav-label">' + (t === 'dark' ? 'Light mode' : 'Dark mode') + '</span>';
+      themeBtn.setAttribute('aria-label', t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
     }
     paintThemeBtn();
     themeBtn.onclick = () => {
@@ -439,12 +571,16 @@ function statusLabel(v) {
 function badge(status) {
   const s = document.createElement('span');
   const text = String(status || '-');
-  const GOOD = ['approved', 'confirmed', 'delivered', 'matched', 'good', 'active', 'closed', 'payment_done', 'posted_to_tally', 'yes'];
-  const BAD = ['rejected', 'damaged', 'short', 'mismatch', 'variance', 'failed', 'disabled', 'variance_flagged', 'no'];
-  const WARN = ['pending', 'pending_qc', 'initiated', 'created', 'payment_pending', 'in_transit', 'uploaded'];
+  // Only the colour class is chosen here; the stored value and the label text are unchanged.
+  const GOOD = ['approved', 'confirmed', 'delivered', 'matched', 'good', 'active', 'closed', 'payment_done', 'posted_to_tally', 'yes', 'mapped', 'invoice_matched'];
+  const BAD = ['rejected', 'damaged', 'short', 'mismatch', 'variance', 'failed', 'variance_flagged', 'no'];
+  const WARN = ['pending', 'pending_qc', 'initiated', 'payment_pending', 'needs_review'];
+  const INFO = ['created', 'in_transit', 'uploaded', 'po_raised'];
+  const INACTIVE = ['disabled', 'inactive'];
   const key = text.toLowerCase();
   const cls = GOOD.includes(key) ? 'badge-good' : BAD.includes(key) ? 'badge-bad'
-            : WARN.includes(key) ? 'badge-warn' : 'badge-neutral';
+            : WARN.includes(key) ? 'badge-warn' : INFO.includes(key) ? 'badge-info'
+            : INACTIVE.includes(key) ? 'badge-inactive' : 'badge-neutral';
   s.className = 'badge ' + cls;
   s.textContent = statusLabel(text);
   return s;
@@ -636,3 +772,80 @@ function addLink(tr, text, href) {
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('select#statusFilter option').forEach(o => { if (o.value) o.textContent = statusLabel(o.value); });
 });
+
+// ---------- presentation helpers that apply to every page ----------
+// Marks required fields, right-aligns money and quantities, and sets destructive buttons apart.
+// Presentation only: no values, handlers or validation are touched.
+(function () {
+  const NUMERIC_HEADER = /\u20B9|^(qty|quantity|ordered|received|items|total qty|qty per unit|gross requirement|per pack)$/i;
+  const DANGER_LABEL = /^(delete|reject|remove|disable)\b|^[x\u00D7\u2715\u2716]$/i;
+
+  function markRequired() {
+    document.querySelectorAll('label').forEach(label => {
+      if (label.querySelector('.oxi-req') || !label.querySelector('[required]')) return;
+      const text = [...label.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
+      if (!text) return;
+      const star = document.createElement('span');
+      star.className = 'oxi-req'; star.setAttribute('aria-hidden', 'true'); star.textContent = ' *';
+      text.after(star);
+    });
+  }
+
+  function alignNumbers() {
+    document.querySelectorAll('table').forEach(table => {
+      const heads = [...table.querySelectorAll('thead th')];
+      if (!heads.length) return;
+      heads.forEach((th, i) => {
+        if (!NUMERIC_HEADER.test(th.textContent.trim())) return;
+        th.classList.add('oxi-num');
+        table.querySelectorAll('tbody tr').forEach(tr => {
+          const td = tr.children[i];
+          if (td && td.colSpan === 1 && td.tagName === 'TD') td.classList.add('oxi-num');
+        });
+      });
+    });
+  }
+
+  function markDanger() {
+    document.querySelectorAll('button:not(.oxi-danger)').forEach(b => {
+      if (b.closest('.oxi-m-filters, .oxi-chips, .oxi-ac')) return;
+      const label = (b.getAttribute('aria-label') || b.textContent).trim();
+      if (DANGER_LABEL.test(label)) b.classList.add('oxi-danger');
+    });
+  }
+
+  // Fields with no visible label get an accessible name: the column header for item-entry rows, else the placeholder.
+  function nameControls() {
+    document.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach(el => {
+      if (el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || el.closest('label')) return;
+      if (el.id && document.querySelector('label[for="' + el.id + '"]')) return;
+      let name = '';
+      const td = el.closest('td');
+      if (td && td.parentElement) {
+        const th = td.closest('table').querySelectorAll('thead th')[[...td.parentElement.children].indexOf(td)];
+        if (th) name = th.textContent.trim();
+        // a selection checkbox has an empty column header: name it after its row
+        if (!name && el.type === 'checkbox') {
+          const label = [...td.parentElement.children].map(c => c.textContent.trim()).find(t => t);
+          name = label ? 'Include ' + label : 'Include this row';
+        }
+      }
+      name = name || el.getAttribute('placeholder') || '';
+      if (name) el.setAttribute('aria-label', name);
+    });
+  }
+
+  function run() { markRequired(); alignNumbers(); markDanger(); nameControls(); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const msg = document.getElementById('message');
+    if (msg) { msg.setAttribute('role', 'status'); msg.setAttribute('aria-live', 'polite'); }
+    run();
+    let queued = false;
+    new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      setTimeout(() => { queued = false; run(); }, 40);
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+})();

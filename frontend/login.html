@@ -4,23 +4,34 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Log in - Oxicol Purchase App</title>
+  <script src="theme-init.js"></script>
   <link rel="stylesheet" href="styles.css">
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#362b6b">
+  <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
 </head>
 <body class="oxi-login">
-  <div class="oxi-login-card">
-    <h1>Oxicol Purchase App</h1>
-    <h3>Log in to continue</h3>
-    <p id="message"></p>
+  <main class="oxi-login-wrap">
+    <div class="oxi-login-brand">
+      <span class="oxi-brand-icon" aria-hidden="true">O</span>
+      <div><b>Oxicol</b><span>Purchase Management System</span></div>
+    </div>
+    <div class="oxi-login-card">
+      <h1>Sign in</h1>
+      <p class="oxi-login-sub">Requests, purchase orders, goods receipts and payments for Oxicol Car Care Products.</p>
+      <p id="message" role="alert"></p>
 
-    <form id="loginForm">
-      <label>Username<br><input id="username" autocapitalize="off" required></label>
-      <label>Password<br><input id="password" type="password" required></label>
-      <button type="submit" id="loginBtn">Log in</button>
-    </form>
-  </div>
+      <form id="loginForm">
+        <label for="username">Username<br><input id="username" autocapitalize="off" autocomplete="username" required></label>
+        <label for="password">Password<br>
+          <span class="oxi-pw-row"><input id="password" type="password" autocomplete="current-password" required>
+          <button type="button" class="oxi-pw-toggle" id="pwToggle" aria-controls="password" aria-pressed="false">Show</button></span>
+        </label>
+        <button type="submit" id="loginBtn">Sign in</button>
+      </form>
+    </div>
+    <p class="oxi-login-foot">Having trouble signing in? Ask your administrator to reset your password.</p>
+  </main>
 
   <script>
     const msg = document.getElementById('message');
@@ -53,6 +64,15 @@
       } finally {
         btn.disabled = false;
       }
+    });
+  
+    // Show / hide the password while typing (display only; the value is submitted as before).
+    const pw = document.getElementById('password'), pwToggle = document.getElementById('pwToggle');
+    pwToggle.addEventListener('click', () => {
+      const show = pw.type === 'password';
+      pw.type = show ? 'text' : 'password';
+      pwToggle.textContent = show ? 'Hide' : 'Show';
+      pwToggle.setAttribute('aria-pressed', String(show));
     });
   </script>
 </body>
