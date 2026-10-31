@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Approvals</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a></p>
+  <h1>Approvals</h1>
+  <p class="oxi-page-sub">Decisions that are yours to make, most urgent first. Each shows who asked, what it is for and what was decided before. The decision itself is recorded under your own name when you open the record.</p>
+  <p id="message"></p>
+  <div id="list" aria-live="polite"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const $ = (id) => document.getElementById(id);
+    const fmtDay = (d) => { if (!d) return null; const p = String(d).slice(0, 10).split('-'); return p[2] + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1]) - 1] + ' ' + p[0]; };
+
+    async function load() {
+      const box = $('list'); box.innerHTML = ''; box.appendChild(skeletonBlock(110)); box.appendChild(skeletonBlock(110));
+      const d = await api('/api/workspace/approvals');
+      box.innerHTML = '';
+      if (!d.success) {
+        const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load approvals.'));
+        const b = el('button', null, 'Try again'); b.type = 'button'; b.onclick = load; e.appendChild(b); box.appendChild(e); return;
+      }
+      box.appendChild(el('p', 'oxi-section-sub', d.count + (d.count === 1 ? ' decision is' : ' decisions are') + ' waiting for you.'));
+      if (!d.count) { box.appendChild(el('p', 'oxi-empty-line', 'Nothing is waiting for your decision. New items appear here as soon as they are submitted.')); return; }
+      d.approvals.forEach(a => {
+        const card = el('div', 'oxi-approval' + (a.overdue ? ' late' : ''));
+        const top = el('div', 'oxi-approval-top');
+        const left = el('div');
+        left.appendChild(el('span', 'oxi-task-type', a.type + ' '));
+        const link = el('a', 'oxi-task-number', a.number); link.href = a.href; left.appendChild(link);
+        left.appendChild(el('span', 'oxi-task-party', '  ' + (a.party || '')));
+        left.appendChild(el('p', 'oxi-task-reason', a.reason));
+        const open = el('a', 'oxi-btn', a.next.label + ' and decide'); open.href = a.next.href;
+        top.append(left, open);
+        card.appendChild(top);
+
+        const facts = el('dl', 'oxi-approval-facts');
+        const fact = (k, v, cls) => { if (v == null || v === '') return; const w = el('div'); w.append(el('dt', null, k), el('dd', cls, v)); facts.appendChild(w); };
+        fact('Requested by', a.context.requester);
+        fact('Source', a.context.source);
+        fact('Quantity or amount', a.context.quantity);
+        fact('Required by', a.context.required ? fmtDay(a.context.required) + (a.overdue ? ' (overdue)' : '') : null, a.overdue ? 'oxi-late' : null);
+        fact('Waiting', a.waiting_days == null ? null : (a.waiting_days === 0 ? 'Since today' : a.waiting_days + (a.waiting_days === 1 ? ' day' : ' days')));
+        fact('Progress', a.progress);
+        card.appendChild(facts);
+
+        const prev = el('div', 'oxi-previous');
+        if (a.context.previous && a.context.previous.length) {
+          prev.appendChild(el('b', null, 'Earlier on this record'));
+          const ul = el('ul'); a.context.previous.forEach(p => ul.appendChild(el('li', null, p.on_day + ' - ' + p.summary + (p.actor_name ? ' (' + p.actor_name + ')' : ''))));
+          prev.appendChild(ul);
+        } else prev.appendChild(el('span', null, 'No earlier decisions on this record.'));
+        card.appendChild(prev);
+        box.appendChild(card);
+      });
+    }
+    load().catch(() => { $('list').innerHTML = ''; $('list').appendChild(el('p', 'oxi-empty-line', 'Could not reach the server.')); });
+  </script>
+</body>
+</html>

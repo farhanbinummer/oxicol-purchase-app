@@ -9,11 +9,14 @@ const { pool } = require('../database');
 const { fail } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
+const { can, branchScope, branchClause, fieldAccess } = require('../access');
 const router = express.Router();
 
 router.get('/summary', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) => {
   try {
     const q = (sql) => pool.query(sql).then(r => r.rows[0].n);
+    const reqParams = [];
+    const reqScope = branchClause(branchScope(req.access, KEYS.BRANCH_REQUEST_VIEW), 'branch', reqParams);
     // A rejected GRN "awaiting resupply" = rejected, and this PO has no OTHER GRN
     // that isn't rejected - i.e. nothing has arrived to replace what was sent back yet.
     const REJECTED_AWAITING_SQL = `
@@ -26,7 +29,7 @@ router.get('/summary', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) 
       inTransit, grnDiscrepancies, invoiceVariances, rejectedAwaitingResupply,
       openInvoices, pendingGrnQc
     ] = await Promise.all([
-      q("SELECT COUNT(*)::int n FROM branch_stock_requests WHERE status IN ('pending','approved')"),
+      pool.query("SELECT COUNT(*)::int n FROM branch_stock_requests WHERE status IN ('pending','approved')" + reqScope, reqParams).then(r => r.rows[0].n),
       q("SELECT COUNT(*)::int n FROM production_indents WHERE status IN ('pending','approved')"),
       q("SELECT COUNT(*)::int n FROM purchase_orders WHERE status NOT IN ('closed')"),
       q("SELECT COUNT(*)::int n FROM purchase_orders WHERE status IN ('created','payment_pending')"),
@@ -50,7 +53,8 @@ router.get('/summary', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) 
       rejected_awaiting_resupply: rejectedAwaitingResupply,
       open_invoices: openInvoices,
       pending_grn_qc: pendingGrnQc,
-      total_purchase_value: Number(totalValue.rows[0].v)
+      total_purchase_value: fieldAccess(req.access).prices ? Number(totalValue.rows[0].v) : undefined,
+      prices_hidden: !fieldAccess(req.access).prices
     });
   } catch (err) {
     console.error(err);
@@ -60,7 +64,8 @@ router.get('/summary', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) 
 
 router.get('/variance-report', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) => {
   try {
-    const grn = await pool.query(
+    const fa = fieldAccess(req.access);
+    const grn = can(req.access, KEYS.GRN_VIEW) ? await pool.query(
       `SELECT 'grn_short_or_excess' AS type, g.grn_number AS reference, po.po_number, s.name AS supplier_name,
               i.item_name, i.po_quantity, i.received_quantity, i.variance, NULL::numeric AS amount
          FROM grn_items i
@@ -68,8 +73,8 @@ router.get('/variance-report', requirePermission(KEYS.DASHBOARD_VIEW), async (re
          JOIN purchase_orders po ON po.id = g.po_id
          JOIN suppliers s ON s.id = po.supplier_id
         WHERE i.variance <> 0
-        ORDER BY g.id DESC`);
-    const inv = await pool.query(
+        ORDER BY g.id DESC`) : { rows: [] };
+    const inv = !can(req.access, KEYS.THREE_WAY_MATCH_VIEW) ? { rows: [] } : await pool.query(
       `SELECT 'invoice_variance' AS type, iv.invoice_number AS reference, po.po_number, s.name AS supplier_name,
               m.status, m.po_total, m.grn_total, m.invoice_total, m.variance_amount, m.notes
          FROM three_way_match m
@@ -79,7 +84,7 @@ router.get('/variance-report', requirePermission(KEYS.DASHBOARD_VIEW), async (re
         WHERE m.status <> 'matched'
         ORDER BY m.id DESC`);
     // Rejected GRNs where nothing has replaced the goods yet - who to chase, and why.
-    const rejected = await pool.query(
+    const rejected = !can(req.access, KEYS.GRN_VIEW) ? { rows: [] } : await pool.query(
       `SELECT g.grn_number, g.grn_date, g.qc_notes, g.condition, po.po_number, s.name AS supplier_name
          FROM grn_notes g
          JOIN purchase_orders po ON po.id = g.po_id
@@ -87,7 +92,8 @@ router.get('/variance-report', requirePermission(KEYS.DASHBOARD_VIEW), async (re
         WHERE g.status = 'rejected'
           AND NOT EXISTS (SELECT 1 FROM grn_notes g2 WHERE g2.po_id = g.po_id AND g2.status <> 'rejected')
         ORDER BY g.id DESC`);
-    res.json({ success: true, grn_discrepancies: grn.rows, invoice_variances: inv.rows,
+    if (!fa.prices) inv.rows.forEach(r => { ['po_total', 'grn_total', 'invoice_total', 'variance_amount', 'amount'].forEach(k => { delete r[k]; }); });
+    res.json({ success: true, prices_hidden: !fa.prices, grn_discrepancies: grn.rows, invoice_variances: inv.rows,
                rejected_awaiting_resupply: rejected.rows });
   } catch (err) {
     console.error(err);
@@ -99,6 +105,7 @@ router.get('/variance-report', requirePermission(KEYS.DASHBOARD_VIEW), async (re
 // GET /api/dashboard/analytics - monthly purchase trend (last 6 months) + top 5 suppliers
 // ------------------------------------------------------------
 router.get('/analytics', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) => {
+  if (!fieldAccess(req.access).prices) return fail(res, 403, 'Purchase values are not available to your account');
   try {
     const trend = await pool.query(
       `SELECT to_char(date_trunc('month', po_date), 'YYYY-MM') AS month,
@@ -133,19 +140,18 @@ router.get('/analytics', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res
 // ------------------------------------------------------------
 router.get('/recent-activity', requirePermission(KEYS.DASHBOARD_VIEW), async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM (
-         SELECT 'po' AS type, po.po_number AS reference, po.id AS po_id, s.name AS supplier_name,
+    // Only the kinds of record this person may open, and amounts only for people who may see money.
+    const parts = [];
+    if (can(req.access, KEYS.PO_VIEW)) parts.push(`SELECT 'po' AS type, po.po_number AS reference, po.id AS po_id, s.name AS supplier_name,
                 po.total_amount AS amount, po.status, po.created_at
-           FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id
-         UNION ALL
-         SELECT 'payment', p.payment_id, p.po_id, s.name, p.amount, p.status, p.created_at
-           FROM payments p JOIN suppliers s ON s.id = p.supplier_id
-         UNION ALL
-         SELECT 'grn', g.grn_number, g.po_id, s.name, NULL, g.status, g.created_at
-           FROM grn_notes g JOIN purchase_orders po ON po.id = g.po_id JOIN suppliers s ON s.id = po.supplier_id
-       ) activity
-       ORDER BY created_at DESC LIMIT 8`);
+           FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id`);
+    if (can(req.access, KEYS.PAYMENT_VIEW_ALL)) parts.push(`SELECT 'payment', p.payment_id, p.po_id, s.name, p.amount, p.status, p.created_at
+           FROM payments p JOIN suppliers s ON s.id = p.supplier_id`);
+    if (can(req.access, KEYS.GRN_VIEW)) parts.push(`SELECT 'grn', g.grn_number, g.po_id, s.name, NULL, g.status, g.created_at
+           FROM grn_notes g JOIN purchase_orders po ON po.id = g.po_id JOIN suppliers s ON s.id = po.supplier_id`);
+    if (parts.length === 0) return res.json({ success: true, activity: [] });
+    const result = await pool.query(`SELECT * FROM (${parts.join(' UNION ALL ')}) activity ORDER BY created_at DESC LIMIT 8`);
+    if (!fieldAccess(req.access).prices) result.rows.forEach(r => { r.amount = null; });
     res.json({ success: true, activity: result.rows });
   } catch (err) {
     console.error(err);

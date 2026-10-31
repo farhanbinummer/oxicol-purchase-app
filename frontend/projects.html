@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>R&amp;D Projects</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="project-new.html">+ New R&amp;D request</a></p>
+  <h1>R&amp;D Projects</h1>
+  <p class="oxi-page-sub">Every product development, improvement and customer-specific request you are allowed to see, with where it has reached and what is late.</p>
+  <p id="message"></p>
+
+  <div class="oxi-scopechips" id="scopes" role="group" aria-label="Show projects that are"></div>
+
+  <form class="oxi-filterbar" id="filters" role="search" aria-label="Filter projects" onsubmit="return false">
+    <input type="search" id="q" placeholder="Search number, title, brand or customer" aria-label="Search projects by number, title, brand or customer" autocomplete="off">
+    <select id="fStatus" aria-label="Status"><option value="">Any status</option></select>
+    <select id="fPriority" aria-label="Priority"><option value="">Any priority</option></select>
+    <select id="fDept" aria-label="Requesting department"><option value="">Any department</option></select>
+    <select id="fSort" aria-label="Sort by">
+      <option value="updated">Recently updated</option>
+      <option value="target">Target launch date</option>
+      <option value="priority">Priority</option>
+      <option value="number">Project number</option>
+    </select>
+    <label><input type="checkbox" id="fMine"> Mine</label>
+    <label><input type="checkbox" id="fOverdue"> Has overdue stage</label>
+  </form>
+
+  <p class="oxi-section-note" id="note" aria-live="polite"></p>
+  <div id="list" aria-live="polite" aria-busy="true"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const SCOPES = [['active', 'Active'], ['hold', 'On Hold'], ['closed', 'Closed'], ['drafts', 'My drafts']];
+    const state = { scope: 'active', q: '', status: '', priority: '', department: '', sort: 'updated', mine: false, overdue: false, year: '' };
+    let meta = null, counts = null, timer = null, seq = 0;
+
+    function readUrl() {
+      const p = new URLSearchParams(location.search);
+      ['scope', 'q', 'status', 'priority', 'department', 'sort', 'year'].forEach(k => { if (p.get(k)) state[k] = p.get(k); });
+      state.mine = p.get('mine') === '1'; state.overdue = p.get('overdue') === '1';
+    }
+    function writeUrl() {
+      const p = new URLSearchParams();
+      Object.entries(state).forEach(([k, v]) => { if (v && !(k === 'scope' && v === 'active') && !(k === 'sort' && v === 'updated')) p.set(k, v === true ? '1' : v); });
+      history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
+    }
+
+    function renderScopes() {
+      const box = $('scopes'); box.innerHTML = '';
+      SCOPES.forEach(([key, label]) => {
+        if (key === 'drafts' && counts && !counts.drafts && state.scope !== 'drafts') return;
+        const b = el('button'); b.type = 'button'; b.setAttribute('aria-pressed', String(state.scope === key));
+        b.append(document.createTextNode(label), el('b', null, counts ? String(counts[key]) : ''));
+        b.onclick = () => { state.scope = key; state.status = ''; $('fStatus').value = ''; load(); };
+        box.appendChild(b);
+      });
+    }
+    function fillSelect(sel, list) { list.forEach(v => { const o = el('option', null, v); o.value = v; sel.appendChild(o); }); }
+
+    function bar(row) {
+      const w = el('span', 'oxi-progress');
+      const b = el('span', 'oxi-bar'); b.setAttribute('aria-hidden', 'true');
+      for (let i = 1; i <= 8; i++) b.appendChild(el('i', i <= row.stages_done ? 'done' : (i === row.current_stage_no ? (row.overdue_stages ? 'late' : 'cur') : '')));
+      w.append(b, el('span', null, row.stages_done + '/8'));
+      w.title = row.stages_done + ' of 8 stages completed' + (row.overdue_stages ? ', ' + row.overdue_stages + ' overdue' : '');
+      return w;
+    }
+
+    async function toggleFav(btn, row) {
+      const want = !row.favourite;
+      btn.disabled = true;
+      const r = await api('/api/rd/projects/' + row.id + '/favourite', 'PUT', { favourite: want });
+      btn.disabled = false;
+      if (!r.success) { show(r.error || 'Could not save', false); return; }
+      row.favourite = want; btn.setAttribute('aria-pressed', String(want)); btn.textContent = want ? '★' : '☆';
+      btn.setAttribute('aria-label', (want ? 'Remove from favourites: ' : 'Add to favourites: ') + (row.project_number || row.title));
+    }
+
+    function render(d) {
+      const box = $('list'); box.innerHTML = '';
+      box.setAttribute('aria-busy', 'false');
+      const scopeLabel = SCOPES.find(s => s[0] === state.scope)[1];
+      $('note').textContent = d.count + (d.count === 1 ? ' project' : ' projects') + ' shown' + (state.scope === 'active' ? '. Active means: ' + d.active_definition.join(', ') + '. On Hold is paused work and is listed separately.' : '.');
+      if (!d.count) {
+        const filtered = state.q || state.status || state.priority || state.department || state.mine || state.overdue;
+        box.appendChild(emptyState(filtered ? 'No projects match these filters.' : (state.scope === 'drafts' ? 'You have no saved drafts.' : 'No ' + scopeLabel.toLowerCase() + ' projects to show.'),
+          meta && meta.can.create ? 'Start an R&D request' : null, 'project-new.html'));
+        return;
+      }
+      const t = el('table'); t.className = 'oxi-rd-table';
+      t.innerHTML = '<thead><tr><th scope="col"><span class="oxi-sr-only">Favourite</span></th><th scope="col">Project</th><th scope="col">Priority and status</th><th scope="col">Current stage</th><th scope="col">Progress</th><th scope="col">Lead</th><th scope="col">Target launch</th><th scope="col">Open tasks</th></tr></thead>';
+      const tb = el('tbody');
+      d.projects.forEach(r => {
+        const tr = el('tr');
+        const c0 = el('td'); const f = el('button', 'oxi-fav'); f.type = 'button';
+        if (!r.is_draft) {
+          f.textContent = r.favourite ? '★' : '☆'; f.setAttribute('aria-pressed', String(!!r.favourite));
+          f.setAttribute('aria-label', (r.favourite ? 'Remove from favourites: ' : 'Add to favourites: ') + (r.project_number || r.title));
+          f.onclick = () => toggleFav(f, r); c0.appendChild(f);
+        }
+        const c1 = el('td'); const cap = el('div', 'oxi-cap'); c1.appendChild(cap);
+        const a = el('a', null, r.is_draft ? 'Draft: ' + r.title : r.project_number + ' ' + r.title);
+        a.href = r.is_draft ? 'project-new.html?id=' + r.id : 'project.html?id=' + r.id;
+        cap.appendChild(a);
+        const sub = el('small', null, (r.project_type ? r.project_type + ' - ' : '') + 'Requested by ' + (r.requested_by_name || '-') + (r.department ? ' (' + r.department + ')' : '')); sub.style.display = 'block'; sub.style.color = 'var(--text-2)'; cap.appendChild(sub);
+        const c3 = el('td'); c3.style.whiteSpace = 'nowrap'; c3.appendChild(prioBadge(r.priority)); c3.appendChild(document.createTextNode(' '));
+        c3.appendChild(r.is_draft ? Object.assign(el('span', 'badge badge-pending'), { textContent: 'Draft' }) : rdBadge(r.status));
+        const c5 = el('td'); c5.appendChild(el('div', 'oxi-cap narrow', r.is_draft ? '-' : (r.current_stage ? r.current_stage_no + '. ' + r.current_stage : 'All stages done')));
+        const c6 = el('td'); if (!r.is_draft) c6.appendChild(bar(r)); else c6.textContent = '-';
+        if (r.overdue_stages) c6.appendChild(el('div', 'oxi-flag', r.overdue_stages + ' stage' + (r.overdue_stages === 1 ? '' : 's') + ' overdue'));
+        const c7 = el('td', null, r.lead_name || (r.is_draft ? '-' : 'Not assigned'));
+        const c8 = el('td', null, r.target_tbc ? 'To be confirmed' : (r.target_launch_date ? dmy(r.target_launch_date) : '-'));
+        const c9 = el('td', null, r.is_draft ? '-' : String(r.open_tasks)); if (r.overdue_tasks) c9.appendChild(el('div', 'oxi-flag', r.overdue_tasks + ' overdue'));
+        tr.append(c0, c1, c3, c5, c6, c7, c8, c9); tb.appendChild(tr);
+      });
+      t.appendChild(tb); box.appendChild(t);
+    }
+
+    async function load() {
+      const my = ++seq;
+      writeUrl(); renderScopes();
+      $('list').setAttribute('aria-busy', 'true');
+      if (!$('list').firstChild) $('list').appendChild(skeletonBlock(220));
+      const p = new URLSearchParams({ scope: state.scope, sort: state.sort });
+      ['q', 'status', 'priority', 'department', 'year'].forEach(k => { if (state[k]) p.set(k, state[k]); });
+      if (state.mine) p.set('mine', '1'); if (state.overdue) p.set('overdue', '1');
+      const d = await api('/api/rd/projects?' + p);
+      if (my !== seq) return; // a newer request was made meanwhile
+      if (!d.success) {
+        $('list').innerHTML = ''; $('list').setAttribute('aria-busy', 'false');
+        const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load projects.'));
+        const b = el('button', null, 'Try again'); b.type = 'button'; b.onclick = load; e.appendChild(b); $('list').appendChild(e); return;
+      }
+      counts = d.counts; renderScopes(); render(d);
+    }
+
+    (async function init() {
+      readUrl();
+      const m = await api('/api/rd/meta');
+      if (!m.success) { show(m.error || 'You may not open R&D projects.', false); $('list').setAttribute('aria-busy', 'false'); return; }
+      meta = m;
+      fillSelect($('fStatus'), m.lists.statuses); fillSelect($('fPriority'), m.lists.priorities); fillSelect($('fDept'), m.lists.departments);
+      $('q').value = state.q; $('fStatus').value = state.status; $('fPriority').value = state.priority; $('fDept').value = state.department;
+      $('fSort').value = state.sort; $('fMine').checked = state.mine; $('fOverdue').checked = state.overdue;
+      if (!m.can.create) document.querySelectorAll('a[href="project-new.html"]').forEach(a => { a.hidden = true; });
+      const change = () => { state.q = $('q').value.trim(); state.status = $('fStatus').value; state.priority = $('fPriority').value; state.department = $('fDept').value; state.sort = $('fSort').value; state.mine = $('fMine').checked; state.overdue = $('fOverdue').checked; load(); };
+      $('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(change, 250); });
+      ['fStatus', 'fPriority', 'fDept', 'fSort', 'fMine', 'fOverdue'].forEach(id => $(id).addEventListener('change', change));
+      load();
+    })().catch(() => show('Could not reach the server.', false));
+  </script>
+</body>
+</html>

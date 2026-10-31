@@ -25,6 +25,7 @@ const { createProduct } = require('./catalog');
 const { fail, todayISO, stamp, nextNumber } = require('../utils');
 const { requirePermission, requireRole } = require('../auth');
 const { KEYS } = require('../permissions');
+const { branchScope, branchClause, inBranchScope } = require('../access');
 const router = express.Router();
 
 const idOf = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -226,13 +227,15 @@ router.put('/recipes/:productId', requireRole('admin'), async (req, res) => {
 // ---------- material planning ----------
 router.get('/plan', requirePermission(KEYS.PRODUCTION_INDENT_VIEW), async (req, res) => {
   try {
+    const scopeParams = [];
+    const scoped = branchClause(branchScope(req.access, KEYS.PRODUCTION_INDENT_VIEW), 'b.branch', scopeParams);
     const r = await pool.query(
       `SELECT b.id, b.request_number, b.branch, b.priority, b.delivery_needed_by, b.planned_indent_id, i.indent_number,
               (SELECT COUNT(*)::int FROM branch_request_items x WHERE x.request_id = b.id) AS items,
               (SELECT COUNT(*)::int FROM branch_request_items x WHERE x.request_id = b.id AND x.product_id IS NULL) AS unlinked
          FROM branch_stock_requests b LEFT JOIN production_indents i ON i.id = b.planned_indent_id
-        WHERE b.status = 'approved' OR b.planned_indent_id IS NOT NULL
-        ORDER BY (b.planned_indent_id IS NOT NULL), (b.priority = 'urgent') DESC, b.delivery_needed_by NULLS LAST, b.id DESC`);
+        WHERE (b.status = 'approved' OR b.planned_indent_id IS NOT NULL)${scoped}
+        ORDER BY (b.planned_indent_id IS NOT NULL), (b.priority = 'urgent') DESC, b.delivery_needed_by NULLS LAST, b.id DESC`, scopeParams);
     res.json({ success: true, requests: r.rows });
   } catch (err) { console.error(err); fail(res, 500, 'Could not load requests to plan'); }
 });
@@ -263,6 +266,7 @@ router.get('/plan/:requestId', requirePermission(KEYS.PRODUCTION_INDENT_VIEW), a
   try {
     const d = await planFor(pool, id);
     if (!d) return fail(res, 404, 'Branch request not found');
+    if (!inBranchScope(branchScope(req.access, KEYS.PRODUCTION_INDENT_VIEW), d.request.branch)) return fail(res, 403, 'That request belongs to a branch you are not assigned to');
     res.json({ success: true, ...d });
   } catch (err) { console.error(err); fail(res, 500, 'Could not calculate materials'); }
 });
@@ -276,6 +280,7 @@ router.post('/plan/:requestId/draft-indent', requirePermission(KEYS.PRODUCTION_I
     await client.query('SELECT id FROM branch_stock_requests WHERE id = $1 FOR UPDATE', [id]);
     const d = await planFor(client, id);
     if (!d) { await client.query('ROLLBACK'); return fail(res, 404, 'Branch request not found'); }
+    if (!inBranchScope(branchScope(req.access, KEYS.PRODUCTION_INDENT_CREATE), d.request.branch)) { await client.query('ROLLBACK'); return fail(res, 403, 'That request belongs to a branch you are not assigned to'); }
     if (d.request.planned_indent_id) { await client.query('ROLLBACK'); return fail(res, 400, `Already planned as ${d.request.indent_number}`); }
     if (d.request.status === 'po_raised') { await client.query('ROLLBACK'); return fail(res, 400, 'This request is already part of a purchase order, so planning it again would buy the same stock twice.'); }
     if (d.request.status !== 'approved') { await client.query('ROLLBACK'); return fail(res, 400, 'Only approved requests can be planned'); }

@@ -61,6 +61,13 @@
   <script>
     let all = [];
     let filter = 'all';
+    { // opened from a dashboard card: ?status=pending or ?status=approved
+      const s = new URLSearchParams(location.search).get('status');
+      if (s === 'pending' || s === 'approved') {
+        filter = s;
+        document.querySelectorAll('.oxi-m-filters button').forEach(b => { const on = b.dataset.f === filter; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+      }
+    }
     let term = '';
 
     const STATUS = {

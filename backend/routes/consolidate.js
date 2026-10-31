@@ -9,6 +9,7 @@ const { audit } = require('../audit');
 const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
+const { branchScope, branchClause } = require('../access');
 const router = express.Router();
 
 const CGST_RATE = Number(process.env.CGST_RATE ?? 9);
@@ -21,19 +22,21 @@ const OPEN = "('approved')";
 // ------------------------------------------------------------
 router.get('/all', requirePermission(KEYS.CONSOLIDATE_VIEW), async (req, res) => {
   try {
+    const scopeParams = [];
+    const scoped = branchClause(branchScope(req.access, KEYS.CONSOLIDATE_VIEW), 'r.branch', scopeParams);
     const branchReqs = await pool.query(
       `SELECT r.id, r.request_number, r.branch, r.requested_by, r.status,
               json_agg(json_build_object('item_name', i.item_name, 'quantity', i.quantity, 'unit', i.unit)
                        ORDER BY i.id) AS items
          FROM branch_stock_requests r JOIN branch_request_items i ON i.request_id = r.id
-        WHERE r.status IN ${OPEN} AND r.planned_indent_id IS NULL
-        GROUP BY r.id ORDER BY r.id`);
+        WHERE r.status IN ${OPEN} AND r.planned_indent_id IS NULL${scoped}
+        GROUP BY r.id ORDER BY r.id`, scopeParams);
 
     // A request planned into a production indent is bought through that indent's raw materials. Listing it here
     // as well would buy the same demand twice, so it is held back (and shown so nobody wonders where it went).
     const heldBack = await pool.query(
       `SELECT r.id, r.request_number, r.branch, i.indent_number FROM branch_stock_requests r
-         JOIN production_indents i ON i.id = r.planned_indent_id WHERE r.status = 'approved' ORDER BY r.id`);
+         JOIN production_indents i ON i.id = r.planned_indent_id WHERE r.status = 'approved'${scoped} ORDER BY r.id`, scopeParams);
 
     const indents = await pool.query(
       `SELECT d.id, d.indent_number, d.production_head, d.status,
@@ -92,6 +95,12 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
   const indentIds = Array.isArray(b.production_indent_ids) ? b.production_indent_ids.map(Number).filter(Number.isInteger) : [];
   if (branchIds.length === 0 && indentIds.length === 0) {
     return fail(res, 400, 'Select at least one branch request or production indent to consolidate');
+  }
+  // Every request being bought must belong to a branch this person may reach.
+  const buyScope = branchScope(req.access, KEYS.CONSOLIDATE_CREATE_PO);
+  if (buyScope !== null && branchIds.length) {
+    const own = await pool.query('SELECT id, branch FROM branch_stock_requests WHERE id = ANY($1)', [branchIds]);
+    if (own.rows.some(r => !buyScope.includes(r.branch))) return fail(res, 403, 'One of those requests belongs to a branch you are not assigned to');
   }
 
   const client = await pool.connect();

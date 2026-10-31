@@ -71,6 +71,8 @@ app.use('/api/bom', require('./routes/bom'));
 app.use('/api/catalog', require('./routes/catalog'));
 app.use('/api/admin', requireRole('admin'), require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
+app.use('/api/workspace', require('./routes/workspace'));
+app.use('/api/rd', require('./routes/rd'));
 
 // ---------- Error handling ----------
 // Unknown /api route -> JSON 404 (not an HTML page)

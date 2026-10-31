@@ -41,7 +41,17 @@
     const $ = (id) => document.getElementById(id);
     let me = null; try { me = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
     $('who').textContent = me ? me.name : '';
-    if (me && me.role === 'branch' && me.branch) { $('branch').value = me.branch; $('branch').disabled = true; }
+    // A person limited to branches can only raise requests for those; the server enforces it, this just makes the form match.
+    let allowedBranches = null;
+    function applyBranchScope() {
+      const sc = allowedBranches;
+      if (!sc) return;
+      [...$('branch').options].forEach(o => { if (o.value && !sc.includes(o.value)) o.remove(); });
+      if (sc.length === 1) { $('branch').value = sc[0]; $('branch').disabled = true; }
+    }
+    const cached = window.oxiScope ? window.oxiScope() : null;
+    if (Array.isArray(cached)) { allowedBranches = cached; applyBranchScope(); }
+    api('/api/workspace/me').then(m => { if (m.success && Array.isArray(m.scope.branches)) { allowedBranches = m.scope.branches; applyBranchScope(); } });
 
     // ---------- catalogue picker: the server searches, the person chooses; the chosen product's ID is what is saved ----------
     const dd = document.createElement('div'); dd.className = 'oxi-ac'; dd.setAttribute('role', 'listbox'); dd.hidden = true; document.body.appendChild(dd);
@@ -157,7 +167,7 @@
       submitting = false; btn.disabled = false; btn.textContent = 'Submit request';
       if (d.success) {
         show(d.request_number + ' submitted - waiting for store approval', true);
-        $('reqForm').reset(); if (me && me.role === 'branch' && me.branch) $('branch').value = me.branch;
+        $('reqForm').reset(); if (allowedBranches && allowedBranches.length === 1) $('branch').value = allowedBranches[0];
         tbody.innerHTML = ''; addRow();
       } else { err.textContent = d.error; err.hidden = false; show('Error: ' + d.error, false); }
     });

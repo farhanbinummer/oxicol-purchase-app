@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Expected Deliveries</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="grn-form.html" id="receiveLink" hidden>+ Receive goods</a></p>
+  <h1>Expected Deliveries</h1>
+  <p class="oxi-page-sub">Purchase orders still waiting for goods, with what was ordered and what is left to arrive. Prices are never shown here.</p>
+  <p id="message"></p>
+
+  <div class="oxi-chips" id="whenChips" role="group" aria-label="Show deliveries">
+    <button type="button" class="oxi-chip" data-when="all">All waiting</button>
+    <button type="button" class="oxi-chip" data-when="today">Due today</button>
+    <button type="button" class="oxi-chip" data-when="soon">Due in 7 days</button>
+    <button type="button" class="oxi-chip" data-when="overdue">Overdue</button>
+  </div>
+  <div id="list" aria-live="polite"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const $ = (id) => document.getElementById(id);
+    const WORDS = { all: 'waiting for goods', today: 'due today', soon: 'due in the next 7 days', overdue: 'overdue' };
+    let when = new URLSearchParams(location.search).get('when');
+    if (!WORDS[when]) when = 'all';
+    const fmtDay = (d) => { if (!d) return 'No date set'; const p = d.split('-'); return p[2] + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1]) - 1] + ' ' + p[0]; };
+    const qty = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+
+    api('/api/workspace/me').then(me => { if (me.success && (me.is_admin || (me.permissions || []).includes('grn.create'))) $('receiveLink').hidden = false; });
+
+    function paintChips() {
+      document.querySelectorAll('#whenChips .oxi-chip').forEach(c => {
+        const on = c.dataset.when === when;
+        c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on));
+      });
+    }
+
+    async function load() {
+      paintChips();
+      const box = $('list'); box.innerHTML = ''; box.appendChild(skeletonBlock(90)); box.appendChild(skeletonBlock(90));
+      const d = await api('/api/workspace/expected-deliveries?when=' + when);
+      box.innerHTML = '';
+      if (!d.success) {
+        const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load deliveries.'));
+        const b = el('button', null, 'Try again'); b.type = 'button'; b.onclick = load; e.appendChild(b); box.appendChild(e); return;
+      }
+      box.appendChild(el('p', 'oxi-section-sub', d.count + (d.count === 1 ? ' order is ' : ' orders are ') + WORDS[when] + '.'));
+      if (!d.count) { box.appendChild(el('p', 'oxi-empty-line', 'No orders in this view. Orders appear here once they are placed and disappear when goods are received.')); return; }
+      d.deliveries.forEach(p => {
+        const late = p.days_late > 0;
+        const card = el('div', 'oxi-delivery' + (late ? ' late' : ''));
+        const head = el('div', 'oxi-delivery-head');
+        const a = el('a', null, p.po_number); a.href = 'po-detail.html?id=' + p.id;
+        head.append(a, el('span', null, p.supplier_name), el('span', late ? 'oxi-late' : null, 'Expected ' + fmtDay(p.delivery_date) + (late ? ' (' + p.days_late + (p.days_late === 1 ? ' day' : ' days') + ' late)' : '')));
+        head.appendChild(badge(p.status));
+        if (p.earlier_rejected) head.appendChild(el('span', 'badge badge-bad', 'An earlier delivery was rejected'));
+        card.appendChild(head);
+        const t = el('table'); const thead = el('thead'); const hr = el('tr');
+        ['Item', 'Ordered', 'Rejected earlier', 'Remaining'].forEach((h, i) => { const th = el('th', i ? 'oxi-num' : null, h); hr.appendChild(th); });
+        thead.appendChild(hr); t.appendChild(thead);
+        const tb = el('tbody');
+        p.items.forEach(i => {
+          const tr = el('tr');
+          tr.append(el('td', null, i.item_name));
+          [i.ordered, i.rejected_earlier, i.remaining].forEach(v => tr.appendChild(el('td', 'oxi-num', qty(v) + ' ' + i.unit)));
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb); card.appendChild(t);
+        box.appendChild(card);
+      });
+    }
+
+    document.querySelectorAll('#whenChips .oxi-chip').forEach(c => c.addEventListener('click', () => {
+      when = c.dataset.when; history.replaceState(null, '', 'expected-deliveries.html?when=' + when); load();
+    }));
+    load();
+  </script>
+</body>
+</html>

@@ -11,6 +11,7 @@ const { notify } = require('../notify');
 const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
+const { can, fieldAccess, redactPo, redactItems } = require('../access');
 const router = express.Router();
 
 // Order of statuses. A PO can only move FORWARD in this list.
@@ -140,7 +141,9 @@ router.get('/', requirePermission(KEYS.PO_VIEW), async (req, res) => {
          JOIN suppliers s ON s.id = po.supplier_id
         ORDER BY po.id DESC`
     );
-    res.json({ success: true, count: result.rowCount, pos: result.rows });
+    const fa = fieldAccess(req.access);
+    result.rows.forEach(r => redactPo(r, fa));
+    res.json({ success: true, count: result.rowCount, prices_hidden: !fa.prices, pos: result.rows });
   } catch (err) {
     console.error(err);
     fail(res, 500, 'Could not load POs');
@@ -163,11 +166,15 @@ router.get('/:id', requirePermission(KEYS.PO_VIEW), async (req, res) => {
     if (po.rowCount === 0) return fail(res, 404, 'PO not found');
 
     const items = await pool.query('SELECT * FROM po_items WHERE po_id = $1 ORDER BY id', [id]);
-    const payments = await pool.query('SELECT * FROM payments WHERE po_id = $1 ORDER BY id', [id]);
+    // Payments are only included for people who may see them; money fields only for people who may see money.
+    const payments = can(req.access, KEYS.PAYMENT_VIEW_BY_PO)
+      ? await pool.query('SELECT * FROM payments WHERE po_id = $1 ORDER BY id', [id]) : { rows: [] };
     const grns = await pool.query('SELECT * FROM grn_notes WHERE po_id = $1 ORDER BY id', [id]);
+    const fa = fieldAccess(req.access);
+    redactPo(po.rows[0], fa); redactItems(items.rows, fa);
 
     res.json({ success: true, po: po.rows[0], items: items.rows,
-               payments: payments.rows, grns: grns.rows });
+               payments: payments.rows, grns: grns.rows, fields: fa });
   } catch (err) {
     console.error(err);
     fail(res, 500, 'Could not load PO');

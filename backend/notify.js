@@ -40,10 +40,19 @@ async function ensureSchema() {
 }
 
 async function recipients(roles, branch) {
-  const params = [roles];
-  let sql = "SELECT name, email, phone FROM users WHERE active AND role = ANY($1) AND (email IS NOT NULL OR phone IS NOT NULL)";
-  if (branch) { params.push(branch); sql += " AND (role <> 'branch' OR branch = $2)"; }
-  return (await pool.query(sql, params)).rows;
+  // A person is a recipient when ANY role they hold is listed. When the alert is about one branch, a role that
+  // is limited to branches only counts if one of those branches is the one concerned.
+  const r = await pool.query(
+    `SELECT u.name, u.email, u.phone FROM users u
+      WHERE u.active AND (u.email IS NOT NULL OR u.phone IS NOT NULL)
+        AND EXISTS (
+          SELECT 1 FROM user_roles ur
+           WHERE ur.user_id = u.id AND ur.role = ANY($1)
+             AND ($2::text IS NULL
+                  OR NOT (ur.role = 'branch' OR EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.role = ur.role AND s.scope_type = 'branch'))
+                  OR EXISTS (SELECT 1 FROM user_scopes s WHERE s.user_id = u.id AND s.role = ur.role AND s.scope_type = 'branch' AND s.scope_value = $2)))`,
+    [roles, branch || null]);
+  return r.rows;
 }
 
 async function sendEmail(to, subject, text) {

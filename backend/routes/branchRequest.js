@@ -12,6 +12,7 @@ const { audit } = require('../audit');
 const { fail, isValidDate, todayISO, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
+const { branchScope, inBranchScope } = require('../access');
 const router = express.Router();
 
 const BRANCHES = ['Kannur', 'Thrissur', 'Trivandrum', 'Ernakulam'];
@@ -40,8 +41,14 @@ function validate(body) {
 router.post('/create', requirePermission(KEYS.BRANCH_REQUEST_CREATE), async (req, res) => {
   const problem = validate(req.body);
   if (problem) return fail(res, 400, problem);
-  // A branch login can only ever raise a request for its OWN branch, whatever the form sends.
-  const branch = req.user.role === 'branch' ? req.user.branch : req.body.branch;
+  // Someone limited to one branch can only ever raise a request for that branch, whatever the form sends;
+  // someone covering several must name one of them; someone unrestricted names any branch.
+  const createScope = branchScope(req.access, KEYS.BRANCH_REQUEST_CREATE);
+  let branch = req.body.branch;
+  if (createScope !== null) {
+    if (createScope.length === 1) branch = createScope[0];
+    else if (!createScope.includes(branch)) return fail(res, 403, 'You may only raise requests for the branches you are assigned to');
+  }
   const { delivery_needed_by, items } = req.body;
   // Who asked is the signed-in person - never a typed name.
   const requestedBy = req.user.name;
@@ -85,8 +92,12 @@ router.get('/', requirePermission(KEYS.BRANCH_REQUEST_VIEW), async (req, res) =>
     const clauses = [];
     const params = [];
     if (req.query.status) { params.push(req.query.status); clauses.push(`status = $${params.length}`); }
-    // A branch login only ever sees its own branch's requests.
-    if (req.user.role === 'branch') { params.push(req.user.branch); clauses.push(`branch = $${params.length}`); }
+    // Only the branches this person is assigned to (everyone, when they are not limited to any).
+    const scope = branchScope(req.access, KEYS.BRANCH_REQUEST_VIEW);
+    if (scope !== null) {
+      if (scope.length === 0) clauses.push('FALSE');
+      else { params.push(scope); clauses.push(`branch = ANY($${params.length})`); }
+    }
     const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
     const result = await pool.query(
       `SELECT * FROM branch_stock_requests ${where} ORDER BY id DESC`, params);
@@ -103,7 +114,7 @@ router.get('/:id', requirePermission(KEYS.BRANCH_REQUEST_VIEW), async (req, res)
   try {
     const r = await pool.query('SELECT * FROM branch_stock_requests WHERE id = $1', [id]);
     if (r.rowCount === 0) return fail(res, 404, 'Branch request not found');
-    if (req.user.role === 'branch' && r.rows[0].branch !== req.user.branch) {
+    if (!inBranchScope(branchScope(req.access, KEYS.BRANCH_REQUEST_VIEW), r.rows[0].branch)) {
       return fail(res, 403, 'That request belongs to a different branch');
     }
     const items = await pool.query(
@@ -127,6 +138,10 @@ router.put('/:id/approve', requirePermission(KEYS.BRANCH_REQUEST_APPROVE), async
     await client.query('BEGIN');
     const cur = await client.query('SELECT status, request_number, branch FROM branch_stock_requests WHERE id = $1 FOR UPDATE', [id]);
     if (cur.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 404, 'Branch request not found'); }
+    if (!inBranchScope(branchScope(req.access, KEYS.BRANCH_REQUEST_APPROVE), cur.rows[0].branch)) {
+      await client.query('ROLLBACK');
+      return fail(res, 403, 'That request belongs to a branch you are not assigned to');
+    }
     if (cur.rows[0].status !== 'pending') {
       await client.query('ROLLBACK');
       return fail(res, 400, `Only "pending" requests can be approved (this one is "${cur.rows[0].status}")`);
@@ -149,7 +164,7 @@ router.delete('/:id', requirePermission(KEYS.BRANCH_REQUEST_DELETE), async (req,
   try {
     const cur = await pool.query('SELECT status, branch, request_number FROM branch_stock_requests WHERE id = $1', [id]);
     if (cur.rowCount === 0) return fail(res, 404, 'Branch request not found');
-    if (req.user.role === 'branch' && cur.rows[0].branch !== req.user.branch) {
+    if (!inBranchScope(branchScope(req.access, KEYS.BRANCH_REQUEST_DELETE), cur.rows[0].branch)) {
       return fail(res, 403, 'That request belongs to a different branch');
     }
     if (cur.rows[0].status !== 'pending') {

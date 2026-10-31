@@ -36,3 +36,54 @@ Because nothing is dropped, an older version of the app mostly keeps working aga
 ## Also new (not a migration)
 
 `backend/notify.js` still adds `users.email/phone` and `branch_stock_requests.priority` at start-up, and `backend/bom.js` creates the original recipe tables and loads the 29-product BOM only when the products table is empty.
+
+---
+
+# Migration notes - role workspaces (steps 007 and 008)
+
+Run automatically at server start, once each, in a transaction. **Take a backup first** (Supabase > Database > Backups, or `pg_dump`).
+A local backup taken before they were first run is at `C:\Users\USER\oxicol-local-before-workspaces.sql` (local database only).
+
+| Step | What it does | Existing data |
+|---|---|---|
+| 007_roles_scopes_workspaces | Creates `user_roles`, `user_scopes`, `user_workspace_prefs`. Replaces the two CHECK lists (`users.role`, `role_permissions.role`) so `manager` and `qc` are allowed. | Every user gets one `user_roles` row equal to their current role; every branch user gets one `user_scopes` row equal to their current branch. `users.role` and `users.branch` are untouched and remain the **primary** role/branch. |
+| 008_field_visibility_and_new_roles | Adds the permission keys `field.prices` and `field.supplier_bank`; seeds default permissions for the new `qc` and `manager` roles. | Existing action grants are not touched (an administrator's earlier edits stay). `purchase` and `accounts` receive the two field keys so they see exactly what they saw before. **Stores does not**, which is the one deliberate narrowing: it no longer receives prices or supplier bank details until an administrator ticks the two boxes. |
+
+Verified on the local database: 9 users, 9 role rows, 0 mismatches; 4 branch users, 4 scope rows, 0 mismatches; running the steps again changes nothing.
+
+## Unresolved mappings / decisions
+
+See "Decisions needed from the business" in [../docs/WORKSPACES.md](../docs/WORKSPACES.md): payment references for Stores, splitting Stores' three jobs,
+the Administrator's blanket approvals, approval thresholds, manager payment confirmation, branches and warehouses as master data.
+
+## Rolling back
+
+Nothing is dropped. An older release keeps working with most screens because `users.role` still holds a valid role; but a person given
+a new role (`manager`, `qc`) or several roles would not be understood by it. To undo completely, restore the backup. Do not delete rows
+from `app_migrations` without also removing what the step created (the CHECK lists would be re-applied and the field keys re-inserted).
+
+Accounts created directly in SQL (outside the application) without `user_roles` / `user_scopes` rows are still understood: the role is
+read from `users.role` and a branch user's branch from `users.branch`.
+
+---
+
+# Migration notes - R&D projects (steps 009 and 010)
+
+Run automatically at server start, once each, in a transaction. **Take a backup first** (Supabase > Database > Backups, or `pg_dump`). Steps 007 to 010 all run the first time the new release starts against the live database.
+
+| Step | What it does | Existing data |
+|---|---|---|
+| 009_rd_projects | Creates `rd_projects`, `rd_number_counters`, `rd_requirements`, `rd_project_members`, `rd_stages`, `rd_stage_history`, `rd_checklist_items`, `rd_tasks`, `rd_updates`, `rd_approvals`, `rd_user_projects`. Replaces the two role CHECK lists (`users.role`, `role_permissions.role`) so the new `rd` role is allowed. | Nothing existing is read, changed or dropped. All new tables start empty. No project is created. |
+| 010_rd_permissions | Seeds the `rd.*` permission keys and `field.rd_technical` for the roles listed in `docs/RD-PROJECTS.md`. | Existing grants are untouched (`ON CONFLICT DO NOTHING`). **No role receives an approval key.** |
+
+Verified on the local database: both steps applied once, a second start applies nothing, existing purchasing tests still pass.
+
+## Bringing in the project already running on paper (OXRD011026)
+
+Not part of the migrations. Run `node scripts/import-oxrd011026.js` (dry run) and review the output, then `--apply`. See `docs/RD-PROJECTS.md`. The script refuses to run if the number is already used, and the reported same-day completions of the eight stages are imported only with `--stages-completed-on=YYYY-MM-DD --owner-confirmed`.
+
+After importing, the month's counter is at least 1 for October 2026, so the next submitted request is `OXRD021026`.
+
+## Rolling back
+
+Nothing is dropped from existing tables. To undo completely restore the backup. If only the R&D data must go: drop the `rd_*` tables, delete the `009_rd_projects` and `010_rd_permissions` rows from `app_migrations`, and delete the `rd.*` and `field.rd_technical` rows from `role_permissions`; users given the `rd` role must first be moved to another role.

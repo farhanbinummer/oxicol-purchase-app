@@ -119,15 +119,21 @@
         setBadge('status', po.status);
         rebuildStatusOptions(po.status);
         set('notes', po.notes || '-');
-        set('subtotal', money(po.subtotal));
-        set('cgst', money(po.cgst_amount));
-        set('sgst', money(po.sgst_amount));
-        set('total', money(po.total_amount));
+        const mv = (v) => (v === undefined || v === null ? '\u2014' : money(v)); // money was not sent: show a dash, never 0.00
+        set('subtotal', mv(po.subtotal));
+        set('cgst', mv(po.cgst_amount));
+        set('sgst', mv(po.sgst_amount));
+        set('total', mv(po.total_amount));
+        if (d.fields && !d.fields.prices && !document.getElementById('priceNote')) {
+          const note = document.createElement('p'); note.id = 'priceNote'; note.className = 'oxi-note-card';
+          note.textContent = 'Prices, tax and totals are not shown for your role.';
+          document.getElementById('items').closest('table').before(note);
+        }
         const tbody = document.getElementById('items');
         tbody.innerHTML = '';
         d.items.forEach(it => {
           const tr = document.createElement('tr');
-          [it.item_name, Number(it.quantity), it.unit, money(it.rate), money(it.line_amount)]
+          [it.item_name, Number(it.quantity), it.unit, mv(it.rate), mv(it.line_amount)]
             .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
           tbody.appendChild(tr);
         });

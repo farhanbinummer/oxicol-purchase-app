@@ -89,48 +89,24 @@ function svgIcon(name, size) {
     return res;
   };
 
-  // Sidebar, grouped by what people are doing. An entry shows only when this login holds its permission -
-  // the list comes from the server (/api/auth/my-permissions), the same rules the server enforces on every call.
-  // 'perm' is a permission key, 'admin' means administrators only, 'always' means everyone signed in.
-  const NAV_GROUPS = [
-    { title: 'Workspace', items: [
-      { label: 'Dashboard', href: 'index.html', always: true, icon: 'dashboard' } ] },
-    { title: 'Demand & Planning', items: [
-      { label: 'Branch Requests', href: 'branch-request-list.html', perm: 'branch_request.view', icon: 'branch', also: ['branch-request-detail.html', 'branch-request-form.html'] },
-      { label: 'Production Requirements', href: 'production-indent-list.html', perm: 'production_indent.view', icon: 'production', also: ['production-indent-detail.html', 'production-indent-form.html'] },
-      { label: 'Material Planning', href: 'material-plan.html', perm: 'production_indent.view', icon: 'calculator' } ] },
-    { title: 'Purchasing', items: [
-      { label: 'Consolidation', href: 'consolidate.html', perm: 'consolidate.view', icon: 'consolidate' },
-      { label: 'Purchase Orders', href: 'po-list.html', perm: 'po.view', icon: 'po', also: ['po-detail.html', 'po-form.html'] } ] },
-    { title: 'Warehouse', items: [
-      { label: 'Goods Receipts', href: 'grn-list.html', perm: 'grn.view', icon: 'grn', also: ['grn-detail.html', 'grn-form.html'] } ] },
-    { title: 'Finance', items: [
-      { label: 'Payments', href: 'payment-list.html', perm: 'payment.view_all', icon: 'payment', also: ['payment-form.html'] } ] },
-    { title: 'Reports', items: [
-      { label: 'Variances', href: 'variance-report.html', perm: 'dashboard.view', icon: 'variance' } ] },
-    { title: 'Master Data', items: [
-      { label: 'Finished Products', href: 'catalog.html', perm: 'catalog.view', icon: 'tag' },
-      { label: 'Recipes / Bill of Materials', href: 'recipes.html', perm: 'production_indent.view', icon: 'book' },
-      { label: 'Catalogue Review', href: 'catalog-review.html', perm: 'catalog.map_items', icon: 'link' } ] },
-    { title: 'Administration', items: [
-      { label: 'Users', href: 'users.html', admin: true, icon: 'users' },
-      { label: 'Roles & Permissions', href: 'permissions.html', admin: true, icon: 'shield' },
-      { label: 'Audit History', href: 'audit.html', admin: true, icon: 'history' },
-      { label: 'System Status', href: 'system.html', admin: true, icon: 'server' } ] }
-  ];
-
-  // "+ New" quick-create menu, role-aware (same idea as the sidebar).
-  const CREATE_LINKS = [
-    { label: 'Branch Stock Request', href: 'branch-request-form.html', roles: 'branch' },
-    { label: 'Production Indent', href: 'production-indent-form.html', roles: 'production' },
-    { label: 'Purchase Order', href: 'po-form.html', roles: 'purchase' },
-    { label: 'Payment', href: 'payment-form.html', roles: 'accounts' },
-    { label: 'GRN', href: 'grn-form.html', roles: 'store' }
-  ];
-
-  function allowedFor(user, roles) {
-    return roles === '*' || user.role === 'admin' || roles.split(',').includes(user.role);
+  // ---------- who I am and which workspace I work in ----------
+  // The server decides this (roles, branches, permissions, menu) and the answer is cached per person so the menu does not
+  // flicker between pages. Pages ask oxiCan('po.view') or oxiScope() instead of checking role names; the server still
+  // checks every request on its own - this is only for display.
+  const ROLE_LABELS = { rd: 'R&D', admin: 'Administrator', manager: 'Manager', purchase: 'Purchase', accounts: 'Accounts', store: 'Stores', qc: 'Quality check', production: 'Production', branch: 'Branch staff' };
+  const meKey = (id) => 'oxicol_ws_' + id;
+  function cachedMe() {
+    try { const u = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); return u ? JSON.parse(localStorage.getItem(meKey(u.id)) || 'null') : null; } catch (e) { return null; }
   }
+  window.oxiMe = cachedMe;
+  window.oxiCan = (key) => { const m = cachedMe(); return !!m && (m.is_admin || (m.permissions || []).includes(key)); };
+  window.oxiScope = () => { const m = cachedMe(); return m ? m.scope.branches : []; }; // null means every branch
+
+  const PERM_FOR_FORM = {
+    'grn-form.html': 'grn.create', 'po-form.html': 'po.create', 'payment-form.html': 'payment.create',
+    'branch-request-form.html': 'branch_request.create', 'production-indent-form.html': 'production_indent.create',
+    'project-new.html': 'rd.create'
+  };
 
   // Turns each page's old "<- Home | + New ..." line, title and description into one shared header:
   // breadcrumbs on top, title and description on the left, the main action on the right. The original
@@ -164,7 +140,11 @@ function svgIcon(name, size) {
       const isForm = /-form\.html$/.test(page);
       others.forEach(a => {
         const t = a.textContent.trim();
-        if (t.startsWith('+')) { a.textContent = clean(t); a.className = 'oxi-btn'; actions.push(a); }
+        if (t.startsWith('+')) {
+          a.textContent = clean(t); a.className = 'oxi-btn'; actions.push(a);
+          const need = PERM_FOR_FORM[a.getAttribute('href')];
+          if (need) a.dataset.needPerm = need; // hidden for people without it once their permissions are known
+        }
         else if (t.startsWith('←') || isForm) { a.textContent = clean(t); crumbs.push(a); }
         else { a.className = 'oxi-btn oxi-btn-secondary'; actions.push(a); }
       });
@@ -241,6 +221,7 @@ function svgIcon(name, size) {
       '<a href="index.html" class="oxi-brand-mark" aria-label="Oxicol - Dashboard">' +
         '<span class="oxi-brand-icon" aria-hidden="true">O</span><span class="oxi-nav-label">Oxicol</span>' +
       '</a>' +
+      '<div class="oxi-ws" id="oxiWs"></div>' +
       '<nav class="oxi-sidenav" aria-label="Primary"></nav>' +
       '<button type="button" class="oxi-nav-toggle" id="oxiNavToggle" aria-label="Collapse or expand the menu">' + svgIcon('panel', 19) + '<span class="oxi-nav-label">Collapse menu</span></button>' +
       '<button type="button" class="oxi-theme-toggle" id="oxiThemeToggle"></button>';
@@ -274,7 +255,7 @@ function svgIcon(name, size) {
       if (document.body.classList.contains('oxi-nav-pinned') || !wide()) return;
       const lab = el.querySelector('.oxi-nav-label');
       if (!lab) return;
-      tip.textContent = lab.textContent; tip.hidden = false;
+      tip.textContent = lab.dataset.tip || lab.textContent; tip.hidden = false;
       const r = el.getBoundingClientRect();
       tip.style.left = (sidebar.getBoundingClientRect().right + 8) + 'px';
       tip.style.top = Math.max(8, r.top + (r.height - tip.offsetHeight) / 2) + 'px';
@@ -287,40 +268,93 @@ function svgIcon(name, size) {
     sidebar.addEventListener('scroll', hideTip, true);
     navToggle.addEventListener('click', hideTip);
 
-    // Permissions come from the server; the last answer is cached so the menu doesn't flicker between pages.
-    const permKey = 'oxicol_perms_' + user.id;
-    let perms = null;
-    try { perms = JSON.parse(localStorage.getItem(permKey) || 'null'); } catch (e) {}
-    const can = (item) => item.always || (perms && (item.admin ? perms.admin : (perms.admin || perms.list.includes(item.perm))));
+    // ---------- navigation and workspace switcher (from the server) ----------
+    let ws = cachedMe();
+    const switcher = sidebar.querySelector('#oxiWs');
+    function pickActive(items) {
+      const cur = new URLSearchParams(location.search);
+      let best = null, bestScore = 0;
+      items.forEach(it => {
+        const [file, query] = it.href.split('?');
+        const want = new URLSearchParams(query || '');
+        let score = 0;
+        if (file === page) {
+          let ok = true;
+          want.forEach((v, k) => { if (cur.get(k) !== v) ok = false; });
+          score = ok ? (query ? 2 : 1) : 0;
+        } else if ((it.also || []).includes(page)) score = 1;
+        if (score > bestScore) { best = it; bestScore = score; }
+      });
+      return best;
+    }
     function renderNav() {
       sidenav.innerHTML = '';
-      NAV_GROUPS.forEach(g => {
-        const items = g.items.filter(can);
-        if (!items.length) return;
+      const groups = (ws && ws.nav) || [];
+      const active = pickActive(groups.flatMap(g => g.items));
+      groups.forEach(g => {
         const h = document.createElement('div'); h.className = 'oxi-nav-group'; h.textContent = g.title; sidenav.appendChild(h);
-        items.forEach(item => {
+        g.items.forEach(item => {
           const a = document.createElement('a');
           a.href = item.href;
           a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
-          if (page === item.href || (item.also || []).includes(page)) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
+          if (item === active) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
+          sidenav.appendChild(a);
+        });
+      });
+      // favourite and recently opened R&D projects
+      const pr = ws && ws.projects;
+      const curId = page === 'project.html' ? new URLSearchParams(location.search).get('id') : null;
+      [['Favourite projects', pr && pr.favourites], ['Recent projects', pr && pr.recent]].forEach(([title, list]) => {
+        if (!list || !list.length) return;
+        const h = document.createElement('div'); h.className = 'oxi-nav-group'; h.textContent = title; sidenav.appendChild(h);
+        list.forEach(p => {
+          const a = document.createElement('a'); a.href = 'project.html?id=' + p.id; a.className = 'oxi-nav-proj';
+          a.innerHTML = svgIcon('book', 19) + '<span class="oxi-nav-label"></span>';
+          a.querySelector('.oxi-nav-label').textContent = p.number + ' ' + p.title;
+          if (String(p.id) === curId) { a.classList.add('active'); a.setAttribute('aria-current', 'page'); }
           sidenav.appendChild(a);
         });
       });
     }
-    renderNav();
-    fetch('/api/auth/my-permissions').then(r => r.json()).then(d => {
-      if (!d.success) return;
-      const next = { admin: !!d.admin, list: d.permissions };
-      if (JSON.stringify(next) !== JSON.stringify(perms)) { perms = next; localStorage.setItem(permKey, JSON.stringify(next)); renderNav(); }
-    }).catch(() => {});
+    function renderSwitcher() {
+      switcher.innerHTML = '';
+      if (!ws || !ws.active) return;
+      const current = ws.workspaces.find(w => w.id === ws.active) || { title: '' };
+      const many = ws.workspaces.length > 1;
+      const btn = document.createElement(many ? 'button' : 'div');
+      btn.className = 'oxi-ws-btn';
+      if (many) { btn.type = 'button'; btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false'); btn.setAttribute('aria-label', 'Workspace: ' + current.title + '. Change workspace'); }
+      btn.innerHTML = svgIcon('panel', 19) + '<span class="oxi-nav-label" data-tip="Workspace: ' + current.title + '"><small>Workspace</small><b>' + current.title + '</b></span>' + (many ? svgIcon('chevron', 14) : '');
+      switcher.appendChild(btn);
+      if (!many) return;
+      const menu = document.createElement('div'); menu.className = 'oxi-ws-menu'; menu.hidden = true; menu.setAttribute('role', 'menu');
+      ws.workspaces.forEach(w => {
+        const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitemradio');
+        b.setAttribute('aria-checked', String(w.id === ws.active));
+        b.innerHTML = '<span>' + w.title + '</span>' + (w.id === ws.active ? '<i aria-hidden="true">&#10003;</i>' : '') + '<small>' + w.description + '</small>';
+        b.onclick = async (e) => {
+          e.stopPropagation();
+          if (w.id !== ws.active) {
+            const r = await api('/api/workspace/preference', 'PUT', { active: w.id });
+            if (!r.success) { oxiToast(r.error || 'Could not switch workspace'); return; }
+          }
+          location.href = 'index.html';
+        };
+        menu.appendChild(b);
+      });
+      btn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); };
+      switcher.appendChild(menu);
+      document.addEventListener('click', () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); });
+    }
+    renderNav(); renderSwitcher();
 
     // ---------- top bar ----------
     const topbar = document.createElement('header');
     topbar.className = 'oxi-topbar';
-    const companyLabel = 'Oxicol Car Care Products' + (user.branch ? ' &middot; ' + user.branch : '');
+    const companyLabel = 'Oxicol Car Care Products';
     topbar.innerHTML =
       '<button type="button" class="oxi-icon-btn oxi-menu-btn" id="oxiMenuBtn" aria-label="Open menu" aria-expanded="false">' + svgIcon('menu') + '</button>' +
-      '<div class="oxi-company-label" title="Malappuram, Kerala">' + svgIcon('branch', 15) + '<span>' + companyLabel + '</span></div>' +
+      '<div class="oxi-company-label" title="Malappuram, Kerala">' + svgIcon('branch', 15) + '<span id="oxiCompany">' + companyLabel + '</span></div>' +
       '<div class="oxi-search" role="search">' + svgIcon('search') +
         '<input id="oxiSearch" type="search" aria-label="Search purchase orders, suppliers, GRNs, invoices and payments" placeholder="Search PO, supplier, GRN, invoice, or payment..." autocomplete="off">' +
         '<div class="oxi-search-results" id="oxiSearchResults" hidden></div>' +
@@ -333,46 +367,46 @@ function svgIcon(name, size) {
     document.body.append(skip, sidebar, topbar, content, tip);
     document.body.classList.add('oxi-shell');
 
-    // ---------- phone bottom navigation: Home | Requests | New | Orders | Profile ----------
+    // ---------- phone bottom navigation: Home | two tabs of the workspace | New | Profile ----------
     // Five equal grid columns; the raised New button sits in the middle column (see styles.css).
-    const REQ_BY_ROLE = { branch: 'branch-request-list.html', production: 'production-indent-list.html', store: 'branch-request-list.html',
-      purchase: 'consolidate.html', accounts: 'payment-list.html', admin: 'branch-request-list.html' };
-    const reqHref = REQ_BY_ROLE[user.role] || 'index.html';
-    const reqLabel = { accounts: 'Payments', purchase: 'Consolidate' }[user.role] || 'Requests';
-    const ordersOk = allowedFor(user, 'store,purchase,accounts');
-    const createLinks = CREATE_LINKS.filter(c => allowedFor(user, c.roles));
     const bn = document.createElement('nav');
     bn.className = 'oxi-bottomnav';
     bn.setAttribute('aria-label', 'Main');
-    const bnItem = (href, icon, label, active, extra) =>
-      '<a class="oxi-bn-item' + (active ? ' active' : '') + (extra || '') + '" href="' + href + '"' + (active ? ' aria-current="page"' : '') + '>' +
-      '<span class="oxi-bn-icon">' + svgIcon(icon, 22) + '</span><span class="oxi-bn-label">' + label + '</span></a>';
-    const newLabel = createLinks.length ? createLinks[0].label : 'request';
-    bn.innerHTML =
-      bnItem('index.html', 'house', 'Home', page === 'index.html') +
-      bnItem(reqHref, 'clipboardlist', reqLabel, page === reqHref) +
-      '<a class="oxi-bn-item oxi-bn-new" id="oxiBnNew" href="' + (createLinks.length ? createLinks[0].href : 'index.html') + '" aria-label="Create new ' + newLabel.toLowerCase() + '">' +
-        '<span class="oxi-bn-plus"><span class="oxi-bn-plus-icon">' + svgIcon('plus', 24) + '</span></span>' +
-        '<span class="oxi-bn-icon"></span><span class="oxi-bn-label">New</span></a>' +
-      (ordersOk ? bnItem('po-list.html', 'cart', 'Orders', page === 'po-list.html')
-                : '<span class="oxi-bn-item oxi-bn-off" aria-disabled="true"><span class="oxi-bn-icon">' + svgIcon('cart', 22) + '</span><span class="oxi-bn-label">Orders</span></span>') +
-      bnItem('account.html', 'userround', 'Profile', page === 'account.html');
     document.body.appendChild(bn);
-
-    // Roles with several create screens (admin) get a small menu; everyone else goes straight to theirs.
     const sheet = document.createElement('div');
     sheet.className = 'oxi-bn-sheet'; sheet.hidden = true;
-    createLinks.forEach(c => { const a = document.createElement('a'); a.href = c.href; a.textContent = c.label; sheet.appendChild(a); });
     document.body.appendChild(sheet);
-    document.getElementById('oxiBnNew').addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const plus = e.currentTarget.querySelector('.oxi-bn-plus');
-      plus.classList.remove('go'); void plus.offsetWidth; plus.classList.add('go');
-      if (createLinks.length > 1) { sheet.hidden = !sheet.hidden; return; }
-      oxiToast('Opening new ' + newLabel.toLowerCase());
-      const href = e.currentTarget.getAttribute('href');
-      setTimeout(() => { location.href = href; }, 420);
-    });
+    let createLinks = [];
+    function renderTabs() {
+      createLinks = (ws && ws.create_links) || [];
+      const tabs = (ws && ws.tabs) || [];
+      const bnItem = (href, icon, label) => {
+        const active = href.split('?')[0] === page && (href.indexOf('?') < 0 || pickActive([{ href, also: [] }]));
+        return '<a class="oxi-bn-item' + (active ? ' active' : '') + '" href="' + href + '"' + (active ? ' aria-current="page"' : '') + '>' +
+          '<span class="oxi-bn-icon">' + svgIcon(icon, 22) + '</span><span class="oxi-bn-label">' + label + '</span></a>';
+      };
+      const tab = (t) => t ? bnItem(t.href, t.icon, t.label) : '<span class="oxi-bn-item oxi-bn-off" aria-hidden="true"><span class="oxi-bn-icon"></span><span class="oxi-bn-label">&nbsp;</span></span>';
+      const newLabel = createLinks.length ? createLinks[0].label : 'request';
+      bn.innerHTML =
+        bnItem('index.html', 'house', 'Home') + tab(tabs[0]) +
+        '<a class="oxi-bn-item oxi-bn-new" id="oxiBnNew" href="' + (createLinks.length ? createLinks[0].href : 'index.html') + '" aria-label="Create new ' + newLabel.toLowerCase() + '"' + (createLinks.length ? '' : ' hidden') + '>' +
+          '<span class="oxi-bn-plus"><span class="oxi-bn-plus-icon">' + svgIcon('plus', 24) + '</span></span>' +
+          '<span class="oxi-bn-icon"></span><span class="oxi-bn-label">New</span></a>' +
+        (createLinks.length ? '' : '<span class="oxi-bn-item" aria-hidden="true"></span>') +
+        tab(tabs[1]) + bnItem('account.html', 'userround', 'Profile');
+      sheet.innerHTML = '';
+      createLinks.forEach(c => { const a = document.createElement('a'); a.href = c.href; a.textContent = c.label; sheet.appendChild(a); });
+      const plusBtn = document.getElementById('oxiBnNew');
+      if (plusBtn) plusBtn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const plus = e.currentTarget.querySelector('.oxi-bn-plus');
+        plus.classList.remove('go'); void plus.offsetWidth; plus.classList.add('go');
+        if (createLinks.length > 1) { sheet.hidden = !sheet.hidden; return; }
+        oxiToast('Opening new ' + newLabel.toLowerCase());
+        const href = e.currentTarget.getAttribute('href');
+        setTimeout(() => { location.href = href; }, 420);
+      });
+    }
     document.addEventListener('click', () => { sheet.hidden = true; });
     document.getElementById('oxiPrintBtn').onclick = () => window.print();
 
@@ -388,42 +422,26 @@ function svgIcon(name, size) {
     notifBtn.onclick = (e) => { e.stopPropagation(); notifMenu.hidden = !notifMenu.hidden; notifBtn.setAttribute('aria-expanded', String(!notifMenu.hidden)); };
     notifWrap.append(notifBtn, notifMenu);
 
-    (async () => {
-      const items = [];
-      if (['branch', 'store', 'admin'].includes(user.role)) {
-        const d = await api('/api/branch-request?status=pending');
-        if (d.success) d.requests.forEach(r => items.push({ label: r.request_number + ' - ' + r.branch + ' needs approval', href: 'branch-request-list.html' }));
-      }
-      if (['production', 'store', 'admin'].includes(user.role)) {
-        const d = await api('/api/production-indent?status=pending');
-        if (d.success) d.indents.forEach(r => items.push({ label: r.indent_number + ' needs approval', href: 'production-indent-list.html' }));
-      }
-      if (['production', 'store', 'admin'].includes(user.role)) {
-        const d = await api('/api/bom/plan');
-        if (d.success) d.requests.filter(r => !r.planned_indent_id).forEach(r => items.push({ label: r.request_number + ' (' + r.branch + ') needs material planning', href: 'material-plan.html?id=' + r.id }));
-      }
-      if (['store', 'admin'].includes(user.role)) {
-        const d = await api('/api/grn?discrepancies=false');
-        if (d.success) d.grns.filter(g => g.status === 'pending_qc').forEach(g => items.push({ label: 'GRN ' + g.grn_number + ' needs QC decision', href: 'grn-detail.html?id=' + g.id }));
-      }
-      if (['accounts', 'admin'].includes(user.role)) {
-        const d = await api('/api/payment');
-        if (d.success) d.payments.filter(p => p.status === 'initiated').forEach(p => items.push({ label: 'Payment ' + p.payment_id + ' needs confirmation', href: 'payment-list.html' }));
-      }
+    async function loadNotifications() {
       const list = document.getElementById('oxiNotifList');
-      if (items.length === 0) { list.textContent = 'Nothing needs your attention right now.'; return; }
+      const d = await api('/api/workspace/notifications');
+      if (!d.success) { list.className = 'oxi-empty'; list.textContent = 'Could not load notifications.'; return; }
+      list.innerHTML = '';
+      if (d.notifications.length === 0) { list.className = 'oxi-empty'; list.textContent = 'Nothing needs your attention right now.'; document.getElementById('oxiNotifDot').hidden = true; return; }
+      list.className = '';
       document.getElementById('oxiNotifDot').hidden = false;
-      list.className = ''; list.innerHTML = '';
-      items.slice(0, 8).forEach(i => {
-        const a = document.createElement('a'); a.href = i.href; a.textContent = i.label;
+      d.notifications.slice(0, 8).forEach(n => {
+        const a = document.createElement('a'); a.href = n.href; a.textContent = n.text;
         list.appendChild(a);
       });
-    })();
+    }
 
     // ---------- "+ New" quick-create dropdown ----------
-    const creates = CREATE_LINKS.filter(c => allowedFor(user, c.roles));
     const createWrap = document.getElementById('oxiCreateWrap');
-    if (creates.length) {
+    function renderCreate() {
+      createWrap.innerHTML = '';
+      const creates = (ws && ws.create_links) || [];
+      if (!creates.length) return;
       const btn = document.createElement('button');
       btn.type = 'button'; btn.id = 'oxiCreateBtn';
       btn.className = 'oxi-btn-primary-sm';
@@ -448,7 +466,7 @@ function svgIcon(name, size) {
     const initials = (user.name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
     profBtn.setAttribute('aria-label', 'Account menu'); profBtn.setAttribute('aria-haspopup', 'true'); profBtn.setAttribute('aria-expanded', 'false');
     profBtn.innerHTML = '<span class="oxi-avatar">' + initials + '</span>' + svgIcon('user', 20) +
-      '<span class="oxi-profile-text">' + user.name + '<small>' + user.role + (user.branch ? ', ' + user.branch : '') + '</small></span>' +
+      '<span class="oxi-profile-text">' + user.name + '<small id="oxiRoles">' + (user.roles || [user.role]).map(r => ROLE_LABELS[r] || r).join(', ') + '</small></span>' +
       svgIcon('chevron', 14);
     const profMenu = document.createElement('div');
     profMenu.className = 'oxi-menu';
@@ -467,6 +485,33 @@ function svgIcon(name, size) {
     profMenu.appendChild(logoutBtn);
     profBtn.onclick = (e) => { e.stopPropagation(); profMenu.hidden = !profMenu.hidden; profBtn.setAttribute('aria-expanded', String(!profMenu.hidden)); };
     profWrap.append(profBtn, profMenu);
+
+    // ---------- apply the server's answer (workspaces, menu, scope, roles) everywhere it is shown ----------
+    function renderLabels() {
+      if (!ws) return;
+      const sc = ws.scope && ws.scope.branches;
+      const company = document.getElementById('oxiCompany');
+      if (company) company.textContent = 'Oxicol Car Care Products' + (sc && sc.length ? ' \u00B7 ' + sc.join(', ') : '');
+      const roles = document.getElementById('oxiRoles');
+      if (roles) roles.textContent = ws.user.roles.map(r => ROLE_LABELS[r] || r).join(', ');
+    }
+    // Buttons that open a create screen are shown only to people who may use that screen.
+    function applyNeeds() {
+      if (!ws) return;
+      document.querySelectorAll('[data-need-perm]').forEach(e => { e.hidden = !(ws.is_admin || (ws.permissions || []).includes(e.dataset.needPerm)); });
+    }
+    function refresh() { renderNav(); renderSwitcher(); renderCreate(); renderTabs(); renderLabels(); applyNeeds(); }
+    refresh();
+    fetch('/api/workspace/me').then(r => r.json()).then(d => {
+      if (!d.success) return;
+      const changed = JSON.stringify(d) !== JSON.stringify(ws);
+      ws = d;
+      localStorage.setItem(meKey(user.id), JSON.stringify(d));
+      // keep the name/role the browser remembers in step with what the server now says
+      localStorage.setItem('oxicol_user', JSON.stringify(Object.assign({}, user, { role: d.user.role, roles: d.user.roles, branch: d.user.branch })));
+      if (changed) refresh();
+    }).catch(() => {});
+    loadNotifications().catch(() => {});
 
     // ---------- mobile: collapsed search pill expands to a full-width bar on tap ----------
     const searchWrap = topbar.querySelector('.oxi-search');
@@ -594,6 +639,18 @@ function addBadge(tr, status) {
   return td;
 }
 
+// "2026-10-31" -> "31-10-2026" (business dates are shown day-month-year everywhere in R&D)
+function dmy(v) { return v ? String(v).slice(0, 10).split('-').reverse().join('-') : ''; }
+
+// A project status as a compact badge. On Hold is shown as paused, not as finished or failed.
+function rdBadge(status) {
+  const map = { 'Received': 'info', 'Under Review': 'info', 'Approved': 'good', 'In Lab Trials': 'info', 'Sample Sent': 'info', 'Plant Trial': 'info', 'Completed': 'good', 'On Hold': 'pending', 'Rejected': 'bad' };
+  const s = document.createElement('span'); s.className = 'badge badge-' + (map[status] || 'neutral'); s.textContent = status || '-'; return s;
+}
+function prioBadge(p) {
+  const s = document.createElement('span'); s.className = 'badge badge-' + ({ High: 'bad', Medium: 'warn', Low: 'neutral' }[p] || 'neutral'); s.textContent = p || '-'; return s;
+}
+
 // 1234.5 -> "1,234.50"
 function money(n) {
   return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -691,27 +748,54 @@ function attachListFilter(opts) {
   const statusEl = opts.statusId && document.getElementById(opts.statusId);
   const chipsEl = opts.chipsId && document.getElementById(opts.chipsId);
   let chipValue = '';
+  let urlSet = null; // statuses asked for by the address (e.g. ?status=created,payment_pending); the person can clear it
+  let note = null;
+  function clearUrlFilter() { urlSet = null; if (note) { note.remove(); note = null; } }
   function apply() {
     const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
     const st = statusEl ? statusEl.value : chipsEl ? chipValue : '';
     [...tbody.rows].forEach(tr => {
       if (!tr.dataset.status && tr.cells.length === 1) return; // "Loading.../No X yet" placeholder row
       const matchesSearch = !q || tr.textContent.toLowerCase().includes(q);
-      const matchesStatus = !st || tr.dataset.status === st;
+      const matchesStatus = urlSet ? urlSet.includes(tr.dataset.status) : (!st || tr.dataset.status === st);
       tr.style.display = (matchesSearch && matchesStatus) ? '' : 'none';
     });
   }
   if (searchEl) searchEl.addEventListener('input', apply);
-  if (statusEl) statusEl.addEventListener('change', apply);
+  if (statusEl) statusEl.addEventListener('change', () => { clearUrlFilter(); apply(); });
   if (chipsEl) {
     chipsEl.querySelectorAll('.oxi-chip').forEach(chip => {
       chip.addEventListener('click', () => {
+        clearUrlFilter();
         chipsEl.querySelectorAll('.oxi-chip').forEach(c => c.classList.remove('active'));
         chip.classList.add('active');
         chipValue = chip.dataset.value || '';
         apply();
       });
     });
+  }
+
+  // A dashboard card opens the list already filtered: ?status=pending_qc, or several: ?status=created,payment_pending.
+  const wanted = (new URLSearchParams(location.search).get('status') || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (wanted.length) {
+    const chip = wanted.length === 1 && chipsEl && [...chipsEl.querySelectorAll('.oxi-chip')].find(c => c.dataset.value === wanted[0]);
+    const option = wanted.length === 1 && statusEl && [...statusEl.options].find(o => o.value === wanted[0]);
+    if (chip) { chipsEl.querySelectorAll('.oxi-chip').forEach(c => c.classList.remove('active')); chip.classList.add('active'); chipValue = wanted[0]; }
+    else if (option) statusEl.value = wanted[0];
+    else {
+      urlSet = wanted;
+      if (chipsEl) chipsEl.querySelectorAll('.oxi-chip').forEach(c => c.classList.remove('active'));
+      note = document.createElement('div');
+      note.className = 'oxi-filter-note';
+      note.append('Showing only: ' + wanted.map(statusLabel).join(', ') + ' ');
+      const clear = document.createElement('button');
+      clear.type = 'button'; clear.className = 'oxi-linklike'; clear.textContent = 'Show all';
+      clear.onclick = () => { clearUrlFilter(); if (chipsEl) { const all = chipsEl.querySelector('.oxi-chip[data-value=""]'); if (all) all.classList.add('active'); } apply(); };
+      note.appendChild(clear);
+      const table = tbody.closest('table');
+      if (table) table.parentNode.insertBefore(note, table);
+    }
+    apply();
   }
   return apply;
 }
@@ -732,10 +816,10 @@ function addLink(tr, text, href) {
 // filled in after the page loads, so this labels every cell from its column header
 // and re-labels whenever the rows change.
 (function () {
-  const CARD_PAGES = ['branch-request-list.html', 'production-indent-list.html', 'po-list.html',
+  const CARD_PAGES = ['projects.html', 'project.html', 'branch-request-list.html', 'production-indent-list.html', 'po-list.html',
     'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html',
     'branch-request-detail.html', 'production-indent-detail.html', 'po-detail.html', 'grn-detail.html', 'material-plan.html', 'recipes.html'];
-  const FORM_PAGES = ['po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html'];
+  const FORM_PAGES = ['project-new.html', 'po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
   const isForm = FORM_PAGES.includes(page);
   if (!CARD_PAGES.includes(page) && !isForm) return;
@@ -835,7 +919,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function run() { markRequired(); alignNumbers(); markDanger(); nameControls(); }
+  // A table that is wider than the space it has scrolls inside its own box (reachable by keyboard) instead of pushing the page sideways.
+  function wrapWide() {
+    document.querySelectorAll('table').forEach(table => {
+      const parent = table.parentElement;
+      if (!parent || parent.classList.contains('oxi-table-scroll') || table.classList.contains('oxi-kv')) return;
+      if (getComputedStyle(table).display !== 'table') return; // phones already scroll tables on their own
+      if (table.scrollWidth <= parent.clientWidth + 1 || parent.clientWidth === 0) return;
+      const box = document.createElement('div');
+      box.className = 'oxi-table-scroll'; box.tabIndex = 0; box.setAttribute('role', 'region'); box.setAttribute('aria-label', 'Table, scrolls sideways');
+      parent.insertBefore(box, table); box.appendChild(table);
+    });
+  }
+
+  function run() { markRequired(); alignNumbers(); markDanger(); nameControls(); wrapWide(); }
 
   document.addEventListener('DOMContentLoaded', () => {
     const msg = document.getElementById('message');

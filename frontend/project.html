@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>R&amp;D Project</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; <a href="projects.html">R&amp;D Projects</a></p>
+  <h1 id="pageTitle">Project</h1>
+  <p id="message" role="status"></p>
+  <div id="banner" class="oxi-banner" role="alert" hidden></div>
+  <div id="meta" class="oxi-pmeta"></div>
+  <ol class="oxi-stagebar" id="stagebar" aria-label="Development stages"></ol>
+
+  <div class="oxi-tabs" role="tablist" aria-label="Project views">
+    <button type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview">Overview</button>
+    <button type="button" role="tab" id="tab-list" aria-controls="panel-list" aria-selected="false" data-tab="list" tabindex="-1">List</button>
+  </div>
+
+  <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview"><div id="overview" aria-busy="true"></div></div>
+  <div id="panel-list" role="tabpanel" aria-labelledby="tab-list" hidden><div id="listview"></div></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const pid = Number(new URLSearchParams(location.search).get('id'));
+    let D = null, meta = null, people = [], dirtyAssess = false, lastFocus = null;
+
+    const TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']];
+    const APPROVAL_ROWS = ['rd_head', 'management', 'qc_signoff', 'customer', 'handover_ack'];
+    const DECISION_TEXT = { approved: 'Approved', rejected: 'Rejected', returned: 'Returned for more information', submitted: 'Submitted' };
+
+    // ------------------------------------------------------------------ helpers
+    function note(text, ok) { const m = $('message'); m.textContent = text; m.className = ok ? 'success' : 'error'; if (!ok) m.scrollIntoView({ block: 'nearest' }); }
+    function banner(text, reload) {
+      const b = $('banner'); b.innerHTML = ''; b.appendChild(document.createTextNode(text));
+      if (reload) { const r = el('button', null, 'Reload the project'); r.type = 'button'; r.onclick = () => { b.hidden = true; load(); }; b.appendChild(r); }
+      b.hidden = false;
+    }
+    /** Shows an API failure where the person is looking: inside the open dialog, otherwise on the page. */
+    function fail(r, box) {
+      const text = (r && r.error) || 'That did not work.';
+      const stale = r && r.current_version !== undefined && !r.cooldown;
+      if (box) { box.textContent = text; box.hidden = false; }
+      else note(text, false);
+      if (stale) banner('This project was changed by someone else. Reload to see their changes before trying again.', true);
+    }
+    function field(label, ctl, id, hint) {
+      const w = el('div'); const l = el('label', null, label); ctl.id = id; l.htmlFor = id; w.append(l, ctl);
+      if (hint) { const h = el('div', 'oxi-section-note', hint); h.style.margin = '2px 0 0'; w.appendChild(h); }
+      return w;
+    }
+    function select(options, value, blank) {
+      const s = el('select');
+      if (blank != null) { const o = el('option', null, blank); o.value = ''; s.appendChild(o); }
+      options.forEach(x => { const [v, t] = Array.isArray(x) ? x : [x, x]; const o = el('option', null, t); o.value = v; s.appendChild(o); });
+      s.value = value == null ? '' : String(value); return s;
+    }
+    const personOptions = () => people.map(p => [p.id, p.name]);
+    function dateInput(value, max) { const i = el('input'); i.type = 'date'; i.value = value || ''; if (max) i.max = max; return i; }
+
+    /** A modal dialog. build(body) fills it and returns a function that reads the answers; onOk(answers, errBox, okButton) must return true to close. */
+    function dialog(title, build, okLabel, onOk, opts) {
+      lastFocus = document.activeElement;
+      const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'dlgTitle');
+      const form = el('form'); form.method = 'dialog';
+      const h = el('h3', null, title); h.id = 'dlgTitle';
+      const body = el('div'); const err = el('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true;
+      const read = build(body, err);
+      const row = el('div', 'row');
+      const cancel = el('button', 'oxi-btn-secondary', opts && opts.cancelLabel || 'Cancel'); cancel.type = 'button'; cancel.onclick = () => dlg.close();
+      const ok = el('button', null, okLabel); ok.type = 'submit';
+      if (opts && opts.disableOk) ok.disabled = true;
+      row.append(cancel); if (onOk) row.append(ok);
+      form.append(h, body, err, row); dlg.appendChild(form); document.body.appendChild(dlg);
+      let working = false;
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        if (working || !onOk) return;
+        working = true; ok.disabled = true; err.hidden = true;           // a second click while the request is out does nothing
+        let close = false;
+        try { close = await onOk(read ? read() : {}, err, ok); } catch (e) { err.textContent = 'Could not reach the server.'; err.hidden = false; }
+        working = false; if (!close) ok.disabled = !!(opts && opts.disableOk && opts.stayDisabled && opts.stayDisabled());
+        if (close) dlg.close();
+      });
+      dlg.addEventListener('close', () => { dlg.remove(); if (lastFocus && document.contains(lastFocus)) lastFocus.focus(); });
+      dlg.showModal();
+      const first = dlg.querySelector('input:not([type=hidden]),select,textarea'); if (first) first.focus(); else cancel.focus();
+      return dlg;
+    }
+
+    // ------------------------------------------------------------------ header and stage bar
+    function renderHeader() {
+      const p = D.project;
+      $('pageTitle').textContent = p.project_number + ' ' + p.title;
+      document.title = p.project_number + ' - R&D Project';
+      const m = $('meta'); m.innerHTML = '';
+      const add = (...nodes) => { const s = el('span'); nodes.forEach(n => s.append(typeof n === 'string' ? document.createTextNode(n) : n)); m.appendChild(s); return s; };
+      add(rdBadge(p.status)); add(prioBadge(p.priority));
+      if (p.status === 'On Hold') add(el('small', null, 'Paused: no stage can be completed until work resumes.'));
+      add(el('small', null, 'Lead'), D.lead ? D.lead.name : 'Not assigned');
+      add(el('small', null, 'Target launch'), p.target_tbc ? 'To be confirmed' : (p.target_launch_date ? dmy(p.target_launch_date) : '-'));
+      add(el('small', null, 'Requested by'), (p.requested_by_name || '-') + (p.request_date ? ' on ' + dmy(p.request_date) : ''));
+      if (p.project_type) add(el('small', null, 'Type'), p.project_type);
+      const fav = el('button', 'oxi-fav'); fav.type = 'button'; fav.textContent = D.favourite ? '★' : '☆'; fav.setAttribute('aria-pressed', String(D.favourite));
+      fav.setAttribute('aria-label', D.favourite ? 'Remove from favourites' : 'Add to favourites');
+      fav.onclick = async () => { fav.disabled = true; const r = await api('/api/rd/projects/' + pid + '/favourite', 'PUT', { favourite: !D.favourite }); fav.disabled = false; if (r.success) { D.favourite = r.favourite; renderHeader(); } else fail(r); };
+      m.appendChild(fav);
+      if (D.can.edit) { const e = el('a', 'oxi-btn oxi-btn-secondary', 'Edit request'); e.href = 'project-new.html?id=' + pid; m.appendChild(e); }
+      if (D.can.edit) { const sb = el('button', 'oxi-btn-secondary', 'Change status'); sb.type = 'button'; sb.onclick = statusDialog; m.appendChild(sb); }
+
+      const bar = $('stagebar'); bar.innerHTML = '';
+      D.stages.forEach(s => {
+        const li = el('li', s.state === 'done' ? 'done' : s.overdue ? 'late' : s.state === 'current' ? 'cur' : '');
+        const word = s.state === 'done' ? 'Done ' + dmy(s.actual) : s.overdue ? 'Overdue' : s.state === 'current' ? 'Current' : 'Not started';
+        li.append(el('b', null, 'Stage ' + s.no), el('span', null, s.name), el('em', null, word + (s.review_flag ? ' - needs review' : '')));
+        li.setAttribute('aria-label', 'Stage ' + s.no + ', ' + s.name + ': ' + word + (s.review_flag ? ', needs review' : ''));
+        if (s.state === 'current') li.setAttribute('aria-current', 'step');
+        bar.appendChild(li);
+      });
+    }
+
+    // ------------------------------------------------------------------ next step and stage completion
+    function nextStepCard() {
+      const p = D.project, c = el('section', 'oxi-card2 next'); c.setAttribute('aria-labelledby', 'nsT');
+      const h = el('h2', null, 'Next step'); h.id = 'nsT'; c.appendChild(h);
+      if (p.status === 'Completed') {
+        c.appendChild(el('p', null, 'This project was completed on ' + dmy(p.completed_on) + '.'));
+        return c;
+      }
+      if (p.status === 'Rejected') { c.appendChild(el('p', null, 'This request was rejected. Change the status if it should be reconsidered.')); return c; }
+      if (p.status === 'On Hold') { c.appendChild(el('p', null, 'This project is on hold (paused). Stages cannot be completed until it is resumed.')); return c; }
+      const n = D.next_step;
+      if (!n) {
+        c.appendChild(el('p', null, 'All eight stages are complete. Marking the project completed closes it.'));
+        if (D.can.stage) {
+          const b = el('button', null, 'Mark Project Completed'); b.type = 'button'; b.onclick = completeProjectDialog; c.appendChild(b);
+        }
+        return c;
+      }
+      if (n.overdue) c.classList.add('late');
+      const stage = D.stages[n.stage - 1];
+      c.appendChild(el('p', null, 'Stage ' + n.stage + ': ' + n.name));
+      const kv = el('dl', 'oxi-kvlist');
+      const kvp = (k, v, cls) => { const d = el('div'); d.append(el('dt', null, k), el('dd', cls, v)); kv.appendChild(d); };
+      kvp('Owner', n.owner ? n.owner.name + (n.owner.explicit ? '' : ' (project lead)') : 'No owner yet: assign a project lead');
+      kvp('Planned date', n.due ? dmy(n.due) : 'Not planned yet');
+      if (n.overdue) kvp('Status', 'Overdue by ' + stage.delay + ' calendar day' + (stage.delay === 1 ? '' : 's'), 'oxi-late');
+      c.appendChild(kv);
+      if (stage.review_flag) c.appendChild(el('div', 'oxi-flag', stage.review_flag));
+
+      const ul = el('ul', 'oxi-checklist'); ul.setAttribute('aria-label', 'Stage ' + n.stage + ' checklist');
+      n.checklist.forEach(ci => {
+        const li = el('li'); const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = ci.done; cb.disabled = !D.can.edit;
+        cb.onchange = async () => {
+          cb.disabled = true;
+          const r = await api('/api/rd/projects/' + pid + '/stages/' + n.stage + '/checklist/' + ci.id, 'POST', { done: cb.checked });
+          if (!r.success) { cb.checked = !cb.checked; cb.disabled = !D.can.edit; fail(r); return; }
+          load(true);
+        };
+        lab.append(cb, document.createTextNode(' ' + ci.label)); li.appendChild(lab); ul.appendChild(li);
+      });
+      c.appendChild(ul);
+      if (n.missing.length) { const m = el('div', 'oxi-missing'); m.append(document.createTextNode('Before this stage can be completed:')); const mu = el('ul'); n.missing.forEach(t => mu.appendChild(el('li', null, t))); m.appendChild(mu); c.appendChild(m); }
+      if (D.can.stage) { const b = el('button', null, 'Mark stage ' + n.stage + ' done'); b.type = 'button'; b.onclick = () => completeStageDialog(stage); c.appendChild(b); }
+      else c.appendChild(el('p', 'oxi-section-note', 'Completing a stage needs the stage permission and edit access to this project.'));
+      return c;
+    }
+
+    function completeStageDialog(stage) {
+      let dateEl;
+      dialog('Complete stage ' + stage.no + ': ' + stage.name, (body) => {
+        if (stage.missing.length) {
+          const m = el('div', 'oxi-missing'); m.append(document.createTextNode('This stage cannot be completed yet:')); const ul = el('ul'); stage.missing.forEach(t => ul.appendChild(el('li', null, t))); m.appendChild(ul); body.appendChild(m);
+        } else {
+          body.appendChild(el('p', null, 'Confirm that every checklist item for this stage is done and the work is finished. The completion date is recorded with your name and cannot be in the future. Reopening it later needs a reason.'));
+        }
+        dateEl = dateInput(D.today, D.today); body.appendChild(field('Completion date', dateEl, 'cDate'));
+        return () => ({ date: dateEl.value });
+      }, 'Complete stage ' + stage.no, async (a, errBox) => {
+        const r = await api('/api/rd/projects/' + pid + '/stages/' + stage.no + '/complete', 'POST', { date: a.date, confirm: true, stage_version: stage.version });
+        if (!r.success) { if (r.missing) errBox.textContent = r.error + ': ' + r.missing.join('; '); else fail(r, errBox); errBox.hidden = false; if (r.already) load(true); return false; }
+        note('Stage ' + stage.no + ' completed.', true); load(true); return true;
+      }, { disableOk: stage.missing.length > 0, stayDisabled: () => stage.missing.length > 0 });
+    }
+
+    function completeProjectDialog() {
+      let dEl;
+      dialog('Mark project completed', (body) => {
+        body.appendChild(el('p', null, 'All eight stages are done. This closes the project. Completing a project does not release any formula to production: that needs the handover acknowledgement and an authorised release.'));
+        dEl = dateInput(D.today, D.today); body.appendChild(field('Completion date', dEl, 'pcDate'));
+        return () => ({ date: dEl.value });
+      }, 'Mark completed', async (a, errBox) => {
+        const r = await api('/api/rd/projects/' + pid + '/complete', 'POST', { date: a.date, confirm: true, version: D.project.version });
+        if (!r.success) { if (r.missing) errBox.textContent = r.error + ': ' + r.missing.join('; '); else fail(r, errBox); errBox.hidden = false; return false; }
+        note('Project marked completed.', true); load(true); return true;
+      });
+    }
+
+    function reopenDialog(stage) {
+      let reason;
+      dialog('Reopen stage ' + stage.no + ': ' + stage.name, (body) => {
+        const later = D.stages.filter(s => s.no > stage.no && s.state === 'done');
+        body.appendChild(el('p', null, 'The completion on ' + dmy(stage.actual) + ' stays in the history. ' + (later.length ? 'Later completed stages (' + later.map(s => s.no).join(', ') + ') are not cleared; they are flagged for review.' : '')));
+        reason = el('textarea'); reason.rows = 3; reason.required = true; body.appendChild(field('Reason for reopening', reason, 'rReason'));
+        return () => ({ reason: reason.value.trim() });
+      }, 'Reopen stage', async (a, errBox) => {
+        if (!a.reason) { errBox.textContent = 'Give a reason for reopening.'; errBox.hidden = false; return false; }
+        const r = await api('/api/rd/projects/' + pid + '/stages/' + stage.no + '/reopen', 'POST', { reason: a.reason, stage_version: stage.version });
+        if (!r.success) { fail(r, errBox); return false; }
+        note('Stage ' + stage.no + ' reopened.', true); load(true); return true;
+      });
+    }
+
+    function stageEditDialog(stage) {
+      let pl, ow, rm;
+      dialog('Stage ' + stage.no + ': ' + stage.name, (body) => {
+        pl = dateInput(stage.planned); pl.disabled = stage.state === 'done';
+        body.appendChild(field('Planned date', pl, 'sPlan', stage.state === 'done' ? 'A completed stage keeps its planned date.' : 'Dates are calendar days. Leave empty to plan it later.'));
+        ow = select(personOptions(), stage.owner && stage.owner.explicit ? stage.owner.id : '', 'Project lead' + (D.lead ? ' (' + D.lead.name + ')' : ''));
+        body.appendChild(field('Stage owner', ow, 'sOwner', 'Without a named owner the project lead is responsible.'));
+        rm = el('textarea'); rm.rows = 3; rm.value = stage.remarks || ''; body.appendChild(field('Remarks', rm, 'sRem'));
+        return () => ({ planned: pl.value, owner: ow.value, remarks: rm.value });
+      }, 'Save', async (a, errBox) => {
+        const body = { version: stage.version, owner_user_id: a.owner || null, remarks: a.remarks };
+        if (stage.state !== 'done') body.planned_date = a.planned || null;
+        const r = await api('/api/rd/projects/' + pid + '/stages/' + stage.no, 'PUT', body);
+        if (!r.success) { fail(r, errBox); return false; }
+        note('Stage saved.', true); load(true); return true;
+      });
+    }
+
+    // ------------------------------------------------------------------ scheduling previews
+    function planDialog() {
+      api('/api/rd/projects/' + pid + '/auto-plan', 'POST', { apply: false }).then(r => {
+        if (!r.success) { fail(r); return; }
+        if (!r.proposals.length) { note('Every open stage already has a planned date, so there is nothing to fill in.', true); return; }
+        dialog('Fill in empty planned dates', (body) => {
+          body.appendChild(el('p', null, 'These stages have no planned date. Each is planned in calendar days after the stage before it. Dates you have already entered are not changed.'));
+          const t = el('table'); t.innerHTML = '<thead><tr><th scope="col">Stage</th><th scope="col">Proposed date</th></tr></thead>'; const tb = el('tbody');
+          r.proposals.forEach(p => { const tr = el('tr'); tr.append(el('td', null, p.no + '. ' + D.stages[p.no - 1].name), el('td', null, dmy(p.planned))); tb.appendChild(tr); });
+          t.appendChild(tb); body.appendChild(t);
+          r.conflicts.forEach(c => body.appendChild(el('div', 'oxi-conflict', c.message)));
+        }, 'Apply these dates', async (a, errBox) => {
+          const x = await api('/api/rd/projects/' + pid + '/auto-plan', 'POST', { apply: true });
+          if (!x.success) { fail(x, errBox); return false; }
+          note('Planned dates filled in.', true); load(true); return true;
+        });
+      });
+    }
+
+    function replanDialog() {
+      api('/api/rd/projects/' + pid + '/replan-preview').then(r => {
+        if (!r.success) { fail(r); return; }
+        const changed = r.preview.filter(x => x.changed);
+        dialog('Re-plan from the trial duration', (body) => {
+          body.appendChild(el('p', null, 'Trial duration: ' + (r.trial_days ? r.trial_days + ' calendar days' : 'not set (standard 21 days)') + '. Nothing changes until you apply. Completed stages are never touched.'));
+          const undated = D.stages.filter(s => s.state !== 'done' && s.no < 3 && !s.planned);
+          if (undated.length) body.appendChild(el('p', 'oxi-section-note', 'Stage' + (undated.length === 1 ? ' ' : 's ') + undated.map(s => s.no).join(', ') + ' ha' + (undated.length === 1 ? 's' : 've') + ' no planned date, so the proposal assumes the standard duration for ' + (undated.length === 1 ? 'it' : 'them') + '. Use "Fill in empty planned dates" first if you want those dates set.'));
+          if (!changed.length) { body.appendChild(el('p', null, 'The current dates already match, so there is nothing to change.')); return null; }
+          const t = el('table'); t.innerHTML = '<thead><tr><th scope="col"><span class="oxi-sr-only">Apply</span></th><th scope="col">Stage</th><th scope="col">Now</th><th scope="col">Proposed</th></tr></thead>'; const tb = el('tbody');
+          const boxes = [];
+          changed.forEach(x => {
+            const tr = el('tr'); const td0 = el('td'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = true; cb.setAttribute('aria-label', 'Apply the new date for stage ' + x.no); td0.appendChild(cb); boxes.push([cb, x]);
+            tr.append(td0, el('td', null, x.no + '. ' + D.stages[x.no - 1].name), el('td', null, x.current ? dmy(x.current) : 'none'), el('td', null, dmy(x.proposed))); tb.appendChild(tr);
+          });
+          t.appendChild(tb); body.appendChild(t);
+          return () => ({ dates: boxes.filter(([cb]) => cb.checked).map(([, x]) => ({ no: x.no, planned: x.proposed })) });
+        }, 'Apply selected dates', changed.length ? async (a, errBox) => {
+          if (!a.dates.length) { errBox.textContent = 'Tick at least one date to apply.'; errBox.hidden = false; return false; }
+          const x = await api('/api/rd/projects/' + pid + '/replan', 'POST', { dates: a.dates });
+          if (!x.success) { fail(x, errBox); return false; }
+          note('Schedule updated.', true); load(true); return true;
+        } : null, { cancelLabel: changed.length ? 'Cancel' : 'Close' });
+      });
+    }
+
+    // ------------------------------------------------------------------ milestone table
+    function milestoneCard() {
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'msT');
+      const h = el('h2', null, 'Milestones'); h.id = 'msT'; c.appendChild(h);
+      c.appendChild(el('p', 'oxi-section-note', 'Durations and delays are counted in calendar days. A stage is current when every stage before it is complete.'));
+      D.conflicts.forEach(x => { const d = el('div', 'oxi-conflict', x.message); d.setAttribute('role', 'note'); c.appendChild(d); });
+      const t = el('table');
+      t.innerHTML = '<thead><tr><th scope="col">Stage</th><th scope="col">Owner</th><th scope="col">Planned</th><th scope="col">Actual</th><th scope="col">Delay</th><th scope="col">Remarks</th><th scope="col"><span class="oxi-sr-only">Actions</span></th></tr></thead>';
+      const tb = el('tbody');
+      D.stages.forEach(s => {
+        const tr = el('tr'); if (s.state === 'current') tr.setAttribute('aria-current', 'step');
+        const c0 = el('td'); c0.append(el('strong', null, s.no + '. ' + s.name), el('br'), el('small', null, s.days + ' days' + (s.no === 3 && D.project.est_trial_days ? ' (trial estimate)' : '')));
+        const st = el('small', null, s.state === 'done' ? 'Done by ' + (s.completed_by_name || '-') : s.state === 'current' ? 'Current stage' : 'Not started'); st.style.display = 'block'; c0.appendChild(st);
+        if (s.review_flag) c0.appendChild(el('div', 'oxi-flag', 'Needs review: ' + s.review_flag));
+        const c1 = el('td', null, s.owner ? s.owner.name + (s.owner.explicit ? '' : ' (lead)') : '-');
+        const c2 = el('td', null, s.planned ? dmy(s.planned) : 'Not planned'); c2.style.whiteSpace = 'nowrap';
+        const c3 = el('td', null, s.actual ? dmy(s.actual) : '-'); c3.style.whiteSpace = 'nowrap';
+        const c4 = el('td');
+        if (s.actual && s.planned) c4.textContent = s.delay > 0 ? s.delay + ' days late' : s.delay < 0 ? Math.abs(s.delay) + ' days early' : 'On time';
+        else if (s.overdue) { c4.textContent = s.delay + ' days overdue'; c4.className = 'oxi-late'; }
+        else c4.textContent = '-';
+        const c5 = el('td', null, s.remarks || '');
+        const c6 = el('td');
+        if (D.can.edit) { const b = el('button', 'oxi-btn-secondary', 'Edit'); b.type = 'button'; b.setAttribute('aria-label', 'Edit stage ' + s.no); b.onclick = () => stageEditDialog(s); c6.appendChild(b); }
+        if (D.can.stage && s.state === 'done' && D.project.status !== 'Completed') { const b = el('button', 'oxi-btn-secondary', 'Reopen'); b.type = 'button'; b.setAttribute('aria-label', 'Reopen stage ' + s.no); b.onclick = () => reopenDialog(s); c6.appendChild(b); }
+        tr.append(c0, c1, c2, c3, c4, c5, c6); tb.appendChild(tr);
+      });
+      t.appendChild(tb); c.appendChild(t);
+      if (D.can.edit) {
+        const row = el('p'); const a = el('button', 'oxi-btn-secondary', 'Fill in empty planned dates'); a.type = 'button'; a.onclick = planDialog;
+        const b = el('button', 'oxi-btn-secondary', 'Re-plan from trial duration'); b.type = 'button'; b.onclick = replanDialog;
+        row.append(a, document.createTextNode(' '), b); c.appendChild(row);
+      }
+      return c;
+    }
+
+    // ------------------------------------------------------------------ assessment
+    function assessmentCard() {
+      const p = D.project, c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'asT');
+      const h = el('h2', null, 'R&D assessment'); h.id = 'asT'; c.appendChild(h);
+      if (!D.can.edit) {
+        const kv = el('dl', 'oxi-kvlist');
+        const add = (k, v) => { const d = el('div'); d.append(el('dt', null, k), el('dd', null, v || 'Not recorded')); kv.appendChild(d); };
+        add('Project lead', D.lead && D.lead.name); add('Team', D.members.map(m => m.name).join(', ')); add('Estimated trial duration', p.est_trial_days ? p.est_trial_days + ' calendar days' : null); add('Feasibility', p.feasibility);
+        c.appendChild(kv);
+        if (D.confidential_hidden) c.appendChild(el('p', 'oxi-section-note', 'Technical approach and risks are confidential R&D content and are not shown for your role.'));
+        else { add('Technical approach', p.technical_approach); add('Risks', p.risks); }
+        return c;
+      }
+      const form = el('form'); form.noValidate = true;
+      const g = el('div', 'oxi-grid2');
+      const lead = select(personOptions(), p.lead_user_id, 'Not assigned');
+      const days = el('input'); days.type = 'number'; days.min = '1'; days.max = '365'; days.step = '1'; days.value = p.est_trial_days || '';
+      const feas = select(meta.lists.feasibility, p.feasibility, 'Not assessed');
+      g.append(field('Project lead', lead, 'aLead', 'The lead is the default owner of every stage without a named owner.'), field('Estimated trial duration (calendar days)', days, 'aDays', 'Used for stage 3. Changing it offers a re-plan; nothing is rewritten automatically.'), field('Feasibility', feas, 'aFeas'));
+      form.appendChild(g);
+      const fs = el('fieldset'); fs.appendChild(el('legend', null, 'Project team'));
+      const boxes = people.map(pp => { const l = el('label'); l.style.fontWeight = '500'; l.style.marginRight = '16px'; const cb = el('input'); cb.type = 'checkbox'; cb.value = pp.id; cb.checked = D.members.some(m => m.id === pp.id); l.append(cb, document.createTextNode(' ' + pp.name)); fs.appendChild(l); return cb; });
+      form.appendChild(fs);
+      let tech, risk;
+      if (D.can.technical) {
+        tech = el('textarea'); tech.rows = 4; tech.value = p.technical_approach || ''; risk = el('textarea'); risk.rows = 3; risk.value = p.risks || '';
+        form.append(field('Technical approach (confidential)', tech, 'aTech'), field('Risks (confidential)', risk, 'aRisk'));
+      } else form.appendChild(el('p', 'oxi-section-note', 'Technical approach and risks are confidential R&D content and are not shown for your role.'));
+      const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+      const save = el('button', null, 'Save assessment'); save.type = 'submit';
+      form.append(err, save);
+      form.addEventListener('input', () => { dirtyAssess = true; });
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); if (save.disabled) return; save.disabled = true; err.hidden = true;
+        const b = { version: D.project.version, lead_user_id: lead.value || null, est_trial_days: days.value || null, feasibility: feas.value || null, members: boxes.filter(x => x.checked).map(x => Number(x.value)) };
+        if (D.can.technical) { b.technical_approach = tech.value; b.risks = risk.value; }
+        const r = await api('/api/rd/projects/' + pid + '/assessment', 'PUT', b);
+        save.disabled = false;
+        if (!r.success) { fail(r, err); return; }
+        dirtyAssess = false; note('Assessment saved.', true);
+        await load(true);
+        if (r.replan_suggested) replanDialog();
+      });
+      c.appendChild(form);
+      return c;
+    }
+
+    // ------------------------------------------------------------------ approvals
+    function approvalCard() {
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'apT');
+      const h = el('h2', null, 'Approvals and sign-offs'); h.id = 'apT'; c.appendChild(h);
+      c.appendChild(el('p', 'oxi-section-note', 'Submitting a request only records who asked. It is not an authorisation by management. Each decision below is recorded under the name of the person who gives it. Who may record each one is set in User Access.'));
+      const t = el('table');
+      t.innerHTML = '<thead><tr><th scope="col">Decision</th><th scope="col">Needed for</th><th scope="col">Latest record</th><th scope="col"><span class="oxi-sr-only">Action</span></th></tr></thead>';
+      const tb = el('tbody');
+      const needed = { qc_signoff: 'Stage 4 completion', customer: 'Stage 6 completion', handover_ack: 'Stage 8 completion', rd_head: 'Recorded, not tied to a stage', management: 'Recorded, not tied to a stage' };
+      APPROVAL_ROWS.forEach(kind => {
+        const list = D.approvals.filter(a => a.kind === kind), last = list[list.length - 1];
+        const tr = el('tr');
+        tr.append(el('td', null, meta.approval_labels[kind]), el('td', null, needed[kind]));
+        const td = el('td');
+        if (last) {
+          td.append(el('strong', null, DECISION_TEXT[last.decision] || last.decision), document.createTextNode(' on ' + dmy(last.decision_date) + ' by ' + (last.decided_by_name || '-')));
+          if (last.remarks) td.appendChild(el('div', null, last.remarks));
+          if (kind === 'customer') { td.appendChild(el('div', null, 'Customer representative: ' + (last.external_rep || '-'))); td.appendChild(el('div', null, 'Evidence: ' + (last.evidence || '-'))); td.appendChild(el('small', null, 'Recorded internally by ' + (last.decided_by_name || '-'))); }
+          if (list.length > 1) td.appendChild(el('div', 'oxi-section-note', list.length + ' records in total; earlier ones stay in the history.'));
+        } else td.textContent = 'Not recorded';
+        const act = el('td');
+        const allowed = D.can.approve[kind] && !['On Hold'].includes(D.project.status);
+        if (allowed) { const b = el('button', 'oxi-btn-secondary', 'Record decision'); b.type = 'button'; b.setAttribute('aria-label', 'Record decision: ' + meta.approval_labels[kind]); b.onclick = () => approvalDialog(kind); act.appendChild(b); }
+        tr.append(td, act); tb.appendChild(tr);
+      });
+      t.appendChild(tb); c.appendChild(t);
+      return c;
+    }
+
+    function approvalDialog(kind) {
+      let dec, dt, rem, rep, ev;
+      dialog(meta.approval_labels[kind], (body) => {
+        dec = select([['approved', 'Approve'], ['rejected', 'Reject'], ['returned', 'Return for more information']], 'approved');
+        body.appendChild(field('Decision', dec, 'dDec'));
+        if (kind === 'customer') {
+          body.appendChild(el('p', 'oxi-section-note', 'This is the customer’s approval, recorded by you. Name the customer’s representative and what proves it.'));
+          rep = el('input'); rep.type = 'text'; body.appendChild(field('Customer representative', rep, 'dRep'));
+          ev = el('textarea'); ev.rows = 2; body.appendChild(field('Evidence (for example the e-mail date, letter or report reference)', ev, 'dEv'));
+        }
+        dt = dateInput(D.today, D.today); body.appendChild(field('Decision date', dt, 'dDate'));
+        rem = el('textarea'); rem.rows = 3; body.appendChild(field('Remarks (required for reject or return)', rem, 'dRem'));
+        return () => ({ decision: dec.value, date: dt.value, remarks: rem.value.trim(), rep: rep && rep.value.trim(), evidence: ev && ev.value.trim() });
+      }, 'Record decision', async (a, errBox) => {
+        const r = await api('/api/rd/projects/' + pid + '/approvals', 'POST', { kind, decision: a.decision, decision_date: a.date, remarks: a.remarks, external_rep: a.rep, evidence: a.evidence });
+        if (!r.success) { fail(r, errBox); return false; }
+        note('Decision recorded.', true); load(true); return true;
+      });
+    }
+
+    // ------------------------------------------------------------------ status
+    function statusDialog() {
+      let st, why;
+      dialog('Change project status', (body) => {
+        st = select(meta.lists.statuses.filter(s => s !== 'Completed').map(s => [s, s + (s === 'On Hold' ? ' (paused)' : '')]), D.project.status);
+        body.appendChild(field('Status', st, 'stS', 'Completed is set with "Mark Project Completed" once all eight stages are done.'));
+        why = el('textarea'); why.rows = 2; body.appendChild(field('Reason (required for On Hold, Rejected, or reopening a closed project)', why, 'stW'));
+        return () => ({ status: st.value, reason: why.value.trim() });
+      }, 'Change status', async (a, errBox) => {
+        if (a.status === D.project.status) { errBox.textContent = 'The project already has that status.'; errBox.hidden = false; return false; }
+        const r = await api('/api/rd/projects/' + pid + '/status', 'POST', { status: a.status, reason: a.reason, version: D.project.version });
+        if (!r.success) { fail(r, errBox); return false; }
+        note('Status changed.', true); load(true); return true;
+      });
+    }
+
+    // ------------------------------------------------------------------ notes, activity, request details
+    function updatesCards() {
+      const out = [];
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'upT');
+      const h = el('h2', null, 'Discussion and lab updates'); h.id = 'upT'; c.appendChild(h);
+      const form = el('form'); const ta = el('textarea'); ta.rows = 3; ta.maxLength = 5000;
+      const kind = D.can.edit && D.can.technical ? select([['comment', 'Comment (visible to anyone who can open this project)'], ['lab_note', 'Lab note (confidential, R&D only)']], 'comment') : null;
+      form.appendChild(field('Add an update', ta, 'uBody'));
+      if (kind) form.appendChild(field('Type', kind, 'uKind'));
+      const err = el('div', 'oxi-errtext'); err.hidden = true; const b = el('button', null, 'Post update'); b.type = 'submit'; form.append(err, b);
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); if (b.disabled) return; if (!ta.value.trim()) { err.textContent = 'Write something first.'; err.hidden = false; return; }
+        b.disabled = true; err.hidden = true;
+        const r = await api('/api/rd/projects/' + pid + '/updates', 'POST', { kind: kind ? kind.value : 'comment', body: ta.value });
+        b.disabled = false; if (!r.success) { fail(r, err); return; }
+        load(true);
+      });
+      c.appendChild(form);
+      const feed = el('ul', 'oxi-feed'); const items = D.updates.filter(u => u.kind !== 'system');
+      if (!items.length) feed.appendChild(el('li', null, 'No comments or lab notes yet.'));
+      items.forEach(u => { const li = el('li'); li.append(el('span', 'who', u.author_name || '-'), el('span', 'when', timeAgo(u.at) + (u.kind === 'lab_note' ? ' - lab note' : '')), el('p', null, u.body)); feed.appendChild(li); });
+      c.appendChild(feed); out.push(c);
+
+      const d = el('details', 'oxi-details'); d.appendChild(el('summary', null, 'Activity'));
+      const box = el('div'); const f2 = el('ul', 'oxi-feed'); const sys = D.updates.filter(u => u.kind === 'system');
+      if (!sys.length) f2.appendChild(el('li', null, 'No activity yet.'));
+      sys.forEach(u => { const li = el('li'); li.append(el('span', 'who', u.author_name || 'System'), el('span', 'when', timeAgo(u.at)), el('p', 'k-system', u.body)); f2.appendChild(li); });
+      box.appendChild(f2); d.appendChild(box); out.push(d);
+      return out;
+    }
+
+    function detailsCard() {
+      const p = D.project, d = el('details', 'oxi-details'); d.appendChild(el('summary', null, 'Request details'));
+      const box = el('div'); const kv = el('dl', 'oxi-kvlist');
+      const yn = (v) => v === true ? 'Yes' : v === false ? 'No' : null;
+      const rows = [['Project type', p.project_type], ['Requesting department', p.department], ['Customer / OEM', p.customer_oem], ['Brand / product', p.brand_product],
+        ['Product category', p.product_category], ['Base system', p.base_system], ['Description and intended use', p.description], ['Application method', p.application_method],
+        ['Substrate', p.substrate], ['End-user / market', p.end_user_market], ['Benchmarks', p.benchmark], ['Appearance, colour, finish', p.appearance_notes],
+        ['Target cost', p.target_cost != null ? p.target_cost + ' ' + (p.cost_basis || '') : null], ['Expected monthly volume', p.monthly_volume != null ? p.monthly_volume + ' ' + (p.volume_unit || '') : null],
+        ['Pack sizes', p.pack_sizes], ['Packaging type', p.packaging_type], ['Labelling or marketing claims', p.labelling_claims],
+        ['VOC limit required', yn(p.voc_limit_required)], ['VOC target (g/L)', p.voc_target_gl], ['SDS / GHS required', yn(p.sds_ghs_required)],
+        ['Restricted substances', p.restricted_substances], ['Standards', p.standards]];
+      rows.forEach(([k, v]) => { const x = el('div'); x.append(el('dt', null, k), el('dd', null, v == null || v === '' ? 'Not stated' : String(v))); kv.appendChild(x); });
+      box.appendChild(kv);
+      box.appendChild(el('p', 'oxi-section-note', 'These are the requester’s statements. They are not a compliance certificate.'));
+      if (D.requirements.length) {
+        const t = el('table'); t.innerHTML = '<caption>Performance requirements</caption><thead><tr><th scope="col">Parameter</th><th scope="col">Target</th><th scope="col">Acceptable range</th><th scope="col">Test method</th><th scope="col">Benchmark</th><th scope="col">Remarks</th></tr></thead>';
+        const tb = el('tbody'); D.requirements.forEach(r => { const tr = el('tr'); ['parameter', 'target', 'acceptable_range', 'test_method', 'benchmark_value', 'remarks'].forEach(k => tr.appendChild(el('td', null, r[k] || ''))); tb.appendChild(tr); });
+        t.appendChild(tb); box.appendChild(t);
+      }
+      d.appendChild(box); return d;
+    }
+
+    function renderOverview() {
+      const o = $('overview'); o.innerHTML = ''; o.setAttribute('aria-busy', 'false');
+      o.append(nextStepCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard());
+    }
+
+    // ------------------------------------------------------------------ List tab (tasks)
+    function renderList() {
+      const box = $('listview'); box.innerHTML = '';
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'tkT');
+      const h = el('h2', null, 'Tasks'); h.id = 'tkT'; c.appendChild(h);
+      c.appendChild(el('p', 'oxi-section-note', 'Completing a task does not complete a stage or give an approval. Stages are completed from the Overview, and approvals are recorded by the people authorised to give them.'));
+      const open = D.tasks.filter(t => t.status !== 'done'), done = D.tasks.filter(t => t.status === 'done');
+      if (!D.tasks.length) c.appendChild(el('p', null, 'No tasks yet.' + (D.can.create_task ? ' Add the first one below.' : '')));
+      else {
+        const t = el('table'); t.innerHTML = '<thead><tr><th scope="col">Task</th><th scope="col">Stage</th><th scope="col">Responsible</th><th scope="col">Due</th><th scope="col">Priority</th><th scope="col">Status</th></tr></thead>';
+        const tb = el('tbody');
+        [...open, ...done].forEach(tk => {
+          const tr = el('tr'); const late = tk.status !== 'done' && tk.due_date && tk.due_date < D.today;
+          const c0 = el('td'); c0.appendChild(el('strong', null, tk.title)); if (tk.description) c0.appendChild(el('small', null, tk.description)).style.display = 'block';
+          const c1 = el('td', null, tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : '-');
+          const c2 = el('td', null, tk.assignee_name ? tk.assignee_name : (tk.team ? 'Unclaimed (' + tk.team + ' team)' : 'Unassigned'));
+          const c3 = el('td', null, tk.due_date ? dmy(tk.due_date) : '-'); if (late) { c3.className = 'oxi-late'; c3.appendChild(el('div', 'oxi-flag', 'Overdue')); }
+          const c4 = el('td'); c4.appendChild(prioBadge(tk.priority));
+          const c5 = el('td'); const sel = select(TASK_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Status of task: ' + tk.title);
+          sel.disabled = !(D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id));
+          sel.onchange = async () => {
+            const was = tk.status; sel.disabled = true;
+            const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', { version: tk.version, status: sel.value });
+            if (!r.success) { sel.value = was; sel.disabled = false; fail(r); return; }
+            note('Task updated.', true); load(true);
+          };
+          c5.appendChild(sel); tr.append(c0, c1, c2, c3, c4, c5); tb.appendChild(tr);
+        });
+        t.appendChild(tb); c.appendChild(t);
+      }
+      box.appendChild(c);
+      if (D.can.create_task) box.appendChild(taskForm());
+    }
+
+    function taskForm() {
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'ntT');
+      const h = el('h2', null, 'Add a task'); h.id = 'ntT'; c.appendChild(h);
+      const form = el('form'); form.noValidate = true; const g = el('div', 'oxi-grid2');
+      const title = el('input'); title.type = 'text'; title.maxLength = 250; title.required = true;
+      const who = select(personOptions(), '', 'Unclaimed: anyone in the team may take it');
+      const team = select(meta.lists.departments, 'R&D Internal');
+      const stage = select(D.stages.map(s => [s.no, s.no + '. ' + s.name]), '', 'Not linked to a stage');
+      const due = dateInput(''); const prio = select(meta.lists.priorities, 'Medium');
+      const teamField = field('Team that should pick it up', team, 'tTeam');
+      who.addEventListener('change', () => { teamField.hidden = !!who.value; });
+      g.append(field('Task', title, 'tTitle'), field('Accountable person', who, 'tWho', 'One person is accountable for a task. Others can help through comments.'), teamField, field('Stage', stage, 'tStage'), field('Due date', due, 'tDue'), field('Priority', prio, 'tPrio'));
+      const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert'); const b = el('button', null, 'Add task'); b.type = 'submit';
+      form.append(g, err, b);
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); if (b.disabled) return;
+        if (!title.value.trim()) { err.textContent = 'A task needs a title.'; err.hidden = false; title.focus(); return; }
+        b.disabled = true; err.hidden = true;
+        const r = await api('/api/rd/projects/' + pid + '/tasks', 'POST', { title: title.value, assignee_id: who.value || null, team: who.value ? null : team.value, stage_no: stage.value || null, due_date: due.value || null, priority: prio.value });
+        b.disabled = false; if (!r.success) { fail(r, err); return; }
+        note('Task added.', true); load(true);
+      });
+      c.appendChild(form); return c;
+    }
+
+    // ------------------------------------------------------------------ tabs and loading
+    function setTab(name, focus) {
+      document.querySelectorAll('[role=tab]').forEach(t => { const on = t.dataset.tab === name; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); });
+      $('panel-overview').hidden = name !== 'overview'; $('panel-list').hidden = name !== 'list';
+      history.replaceState(null, '', location.pathname + location.search + (name === 'list' ? '#list' : ''));
+    }
+    document.querySelectorAll('[role=tab]').forEach(t => {
+      t.addEventListener('click', () => setTab(t.dataset.tab));
+      t.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { setTab(t.dataset.tab === 'overview' ? 'list' : 'overview', true); e.preventDefault(); } });
+    });
+    window.addEventListener('beforeunload', (e) => { if (dirtyAssess) { e.preventDefault(); e.returnValue = ''; } });
+
+    async function load(quiet) {
+      if (!pid) { note('No project selected.', false); return; }
+      const d = await api('/api/rd/projects/' + pid);
+      if (!d.success) {
+        $('overview').setAttribute('aria-busy', 'false'); $('overview').innerHTML = '';
+        const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load this project.'));
+        const b = el('button', null, 'Try again'); b.type = 'button'; b.onclick = () => load(); e.appendChild(b); $('overview').appendChild(e); return;
+      }
+      if (d.project.is_draft) { location.replace('project-new.html?id=' + pid); return; }
+      D = d; D.me_id = (() => { try { return JSON.parse(localStorage.getItem('oxicol_user')).id; } catch (e) { return null; } })();
+      if (!meta) { meta = await api('/api/rd/meta'); if (!meta.success) { note(meta.error, false); return; } }
+      if (D.can.edit && !people.length) { const p = await api('/api/rd/people'); if (p.success) people = p.people; }
+      renderHeader(); renderOverview(); renderList();
+      $('banner').hidden = true;
+    }
+
+    const sp = new URLSearchParams(location.search);
+    if (sp.get('submitted') !== null) note('Request submitted' + (sp.get('submitted') ? ' as ' + sp.get('submitted') : '') + '. R&D can now assess it.', true);
+    load().then(() => { if (location.hash === '#list') setTab('list'); }).catch(() => note('Could not reach the server.', false));
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Oxicol Purchase Management System</title>
+  <title>Dashboard - Oxicol Purchase Management System</title>
   <script src="theme-init.js"></script>
   <link rel="stylesheet" href="styles.css">
   <link rel="manifest" href="manifest.webmanifest">
@@ -11,206 +11,174 @@
   <link rel="icon" href="icons/icon-192.png">
 </head>
 <body>
-  <div class="oxi-hero">
-    <h1 id="greeting">Good day</h1>
+  <div class="oxi-page-head">
+    <div class="oxi-page-head-row">
+      <div class="oxi-page-titles">
+        <h1 id="wsTitle">Dashboard</h1>
+        <p class="oxi-page-sub" id="wsSub">Loading your workspace...</p>
+      </div>
+      <div class="oxi-page-actions" id="wsActions"></div>
+    </div>
   </div>
   <p id="message"></p>
 
-  <div class="oxi-home-grid">
-    <div class="oxi-action-cards" id="actionCards"></div>
-    <div class="oxi-insight-card" id="insightCard">
-      <div class="oxi-insight-label">Today</div>
-      <div class="oxi-insight-value" id="insightValue" aria-busy="true">Loading...</div>
-      <div class="oxi-insight-note" id="insightNote"></div>
-    </div>
-  </div>
+  <div id="controls" class="oxi-controls" hidden></div>
+  <div class="oxi-metrics" id="cards" aria-busy="true"></div>
+  <section id="extraBox" hidden aria-labelledby="extraTitle">
+    <h2 class="oxi-band-title" id="extraTitle">R&amp;D projects</h2>
+    <div class="oxi-metrics" id="extraCards"></div>
+  </section>
 
-  <div class="oxi-kpi-chips" id="kpiChips" data-roles="store,purchase,accounts"></div>
+  <section class="oxi-section" aria-labelledby="queueTitle">
+    <h2 id="queueTitle">My work <span class="oxi-count-pill" id="queueCount" hidden></span></h2>
+    <p class="oxi-section-sub">Most urgent first: overdue, then by due date, then by how long it has waited.</p>
+    <div id="queue" class="oxi-tasks"></div>
+  </section>
 
-  <div class="oxi-command-bar">
-    <div class="oxi-command-input">
-      <span id="cmdIcon"></span>
-      <input id="cmdSearch" placeholder="Search PO, supplier, GRN, invoice, or payment..." autocomplete="off">
-    </div>
-    <div id="cmdResults"></div>
-    <div class="oxi-pill-actions" id="pillActions"></div>
-  </div>
+  <section class="oxi-section" id="exceptionsBox" aria-labelledby="exTitle" hidden>
+    <h2 id="exTitle">Needs attention <span class="oxi-count-pill" id="exCount" hidden></span></h2>
+    <div id="exceptions" class="oxi-tasks"></div>
+  </section>
+
+  <section class="oxi-section" id="notesBox" aria-labelledby="notesTitle" hidden>
+    <h2 id="notesTitle">Connections</h2>
+    <div id="notes" class="oxi-notes"></div>
+  </section>
+
+  <section class="oxi-section" id="activityBox" aria-labelledby="actTitle" hidden>
+    <h2 id="actTitle">Recent activity</h2>
+    <div id="activity" class="oxi-activity"></div>
+  </section>
 
   <script src="common.js"></script>
   <script>
-    let user = null;
-    try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
-    const isAllowed = (roles) => !user || user.role === 'admin' || roles.split(',').includes(user.role);
-    document.getElementById('cmdIcon').innerHTML = svgIcon('search', 18);
+    // Everything shown here is built by the server for this person's active workspace: the same permission, branch
+    // and field rules as every other screen. Text goes in with textContent, so data can never inject markup.
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const fmtDay = (d) => { if (!d) return null; const p = String(d).slice(0, 10).split('-'); return p[2] + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1]) - 1] + ' ' + p[0]; };
 
-    document.querySelectorAll('[data-roles]').forEach(el => { if (!isAllowed(el.dataset.roles)) el.remove(); });
+    function taskRow(t) {
+      const row = el('div', 'oxi-task oxi-tone-' + (t.tone || 'info')); row.setAttribute('role', 'listitem');
+      const main = el('div', 'oxi-task-main');
+      const head = el('div', 'oxi-task-head');
+      head.append(el('span', 'oxi-task-type', t.type));
+      const link = el('a', 'oxi-task-number', t.number); link.href = t.href;
+      head.appendChild(link);
+      if (t.party) head.append(el('span', 'oxi-task-party', t.party));
+      main.append(head, el('p', 'oxi-task-reason', t.reason));
 
-    // ---------- greeting ----------
-    if (user) {
-      const hour = new Date().getHours();
-      const part = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
-      document.getElementById('greeting').textContent = 'Good ' + part + ', ' + user.name.split(' ')[0];
+      const facts = el('dl', 'oxi-task-facts');
+      const fact = (k, v, cls) => { if (v == null || v === '') return; const w = el('div'); w.append(el('dt', null, k), el('dd', cls, v)); facts.appendChild(w); };
+      fact('Progress', t.progress);
+      fact('Responsible', t.responsible);
+      fact('Due', t.due ? fmtDay(t.due) + (t.overdue ? ' (overdue)' : '') : null, t.overdue ? 'oxi-late' : null);
+      fact('Waiting', t.waiting_days == null ? null : (t.waiting_days === 0 ? 'Since today' : t.waiting_days + (t.waiting_days === 1 ? ' day' : ' days')));
+      main.appendChild(facts);
+
+      const side = el('div', 'oxi-task-side');
+      if (t.next && t.next.href) { const a = el('a', 'oxi-btn', t.next.label); a.href = t.next.href; side.appendChild(a); }
+      else if (t.waiting_on) side.appendChild(el('span', 'oxi-task-wait', t.waiting_on));
+      row.append(main, side);
+      return row;
     }
 
-    // ---------- figure out who this role needs to chase for approval, and where ----------
-    async function pendingApprovals() {
-      const items = [];
-      if (['store', 'admin'].includes(user.role)) {
-        const a = await api('/api/branch-request?status=pending');
-        if (a.success) items.push(...a.requests.map(() => 'branch-request-list.html'));
-        const b = await api('/api/production-indent?status=pending');
-        if (b.success) items.push(...b.indents.map(() => 'production-indent-list.html'));
-        const c = await api('/api/grn?discrepancies=false');
-        if (c.success) items.push(...c.grns.filter(g => g.status === 'pending_qc').map(g => 'grn-detail.html?id=' + g.id));
-      }
-      if (['accounts', 'admin'].includes(user.role)) {
-        const d = await api('/api/payment');
-        if (d.success) items.push(...d.payments.filter(p => p.status === 'initiated').map(() => 'payment-list.html'));
-      }
-      return items; // items[i] is the href for that pending thing; count = items.length
+    function fillList(box, list, emptyText) {
+      box.innerHTML = '';
+      box.setAttribute('role', 'list');
+      if (!list.items.length) { box.appendChild(el('p', 'oxi-empty-line', emptyText)); return; }
+      list.items.forEach(t => box.appendChild(taskRow(t)));
+      if (list.total > list.items.length) box.appendChild(el('p', 'oxi-more', 'Showing the ' + list.items.length + ' most urgent of ' + list.total + '.'));
     }
 
-    // ---------- action cards ----------
-    const CANDIDATE_CARDS = [
-      { title: 'Create Purchase Order', tag: 'Purchase', icon: 'po', href: 'po-form.html', roles: 'purchase',
-        desc: 'Create and send purchase orders to suppliers.' },
-      { title: 'Consolidate Orders', tag: 'Purchase', icon: 'consolidate', href: 'consolidate.html', roles: 'purchase',
-        desc: 'Merge branch and production requests into one PO.' },
-      { title: 'Goods Received', tag: 'Warehouse', icon: 'grn', href: 'grn-form.html', roles: 'store',
-        desc: 'Record a GRN and match received items with the order.' },
-      { title: 'Supplier Payments', tag: 'Finance', icon: 'payment', href: 'payment-form.html', roles: 'accounts',
-        desc: 'Record advances and track outstanding balances.' },
-      { title: 'Branch Stock Request', tag: 'Branch', icon: 'branch', href: 'branch-request-form.html', roles: 'branch',
-        desc: 'Ask HQ for stock for your branch.' },
-      { title: 'Production Indent', tag: 'Production', icon: 'production', href: 'production-indent-form.html', roles: 'production',
-        desc: 'Request raw materials for production.' },
-      { title: 'Manage Users', tag: 'Admin', icon: 'users', href: 'users.html', roles: 'admin',
-        desc: 'Add, rename, or disable team accounts.' }
-    ];
+    function showError(text) {
+      $('cards').innerHTML = ''; $('cards').setAttribute('aria-busy', 'false');
+      $('queue').innerHTML = '';
+      const box = el('div', 'oxi-error-state'); box.setAttribute('role', 'alert');
+      box.append(el('p', null, text));
+      const retry = el('button', null, 'Try again'); retry.type = 'button'; retry.onclick = () => load().catch(() => showError('Could not reach the server.'));
+      box.appendChild(retry);
+      $('queue').appendChild(box);
+    }
 
-    (async () => {
-      const cardsBox = document.getElementById('actionCards');
-      const cards = CANDIDATE_CARDS.filter(c => isAllowed(c.roles)).slice(0, 3);
+    function skeleton() {
+      const cards = $('cards'); cards.innerHTML = ''; cards.setAttribute('aria-busy', 'true');
+      for (let i = 0; i < 3; i++) { const s = el('div', 'oxi-metric oxi-skeleton'); s.style.height = '88px'; cards.appendChild(s); }
+      $('queue').innerHTML = ''; $('queue').appendChild(skeletonBlock(72)); $('queue').appendChild(skeletonBlock(72));
+    }
 
-      // "Approvals Waiting" is only meaningful for roles that can actually approve something.
-      if (['store', 'accounts', 'admin'].includes(user.role)) {
-        const pending = await pendingApprovals();
-        cards.unshift({
-          title: 'Approvals Waiting', tag: 'Approval', icon: 'variance',
-          href: pending[0] || 'variance-report.html',
-          desc: pending.length ? pending.length + ' item' + (pending.length === 1 ? '' : 's') + ' waiting for your review.' : 'Nothing waiting - you are all caught up.'
-        });
+    async function load() {
+      skeleton();
+      const me = await api('/api/workspace/me');
+      if (!me.success) { showError(me.error || 'Could not load your workspace.'); return; }
+      if (!me.active) {
+        $('wsTitle').textContent = 'No workspace assigned';
+        $('wsSub').textContent = 'Your account has no role that opens a workspace. Ask an administrator to assign one.';
+        $('cards').innerHTML = ''; $('cards').setAttribute('aria-busy', 'false'); $('queue').innerHTML = ''; return;
       }
-      cardsBox.innerHTML = '';
-      cards.slice(0, 4).forEach(c => {
-        const a = document.createElement('a');
-        a.className = 'oxi-action-card'; a.href = c.href;
-        a.innerHTML =
-          '<span class="oxi-action-icon">' + svgIcon(c.icon, 20) + '</span>' +
-          '<span class="oxi-action-tag">' + c.tag + '</span>' +
-          '<span class="oxi-action-title">' + c.title + '</span>' +
-          '<span class="oxi-action-desc">' + c.desc + '</span>';
-        cardsBox.appendChild(a);
+      const sel = $('controls').querySelector('select');
+      const period = sel ? sel.value : '';
+      const d = await api('/api/workspace/' + me.active + '/dashboard' + (period ? '?period=' + encodeURIComponent(period) : ''));
+      if (!d.success) { showError(d.error || 'Could not load this dashboard.'); return; }
+
+      const first = (me.user.name || '').split(' ')[0];
+      $('wsTitle').textContent = d.workspace.title;
+      $('wsSub').textContent = (first ? first + ', ' : '') + d.workspace.description.charAt(0).toLowerCase() + d.workspace.description.slice(1);
+      document.title = d.workspace.title + ' - Oxicol';
+
+      const actions = $('wsActions'); actions.innerHTML = '';
+      d.actions.forEach((a, i) => { const b = el('a', 'oxi-btn' + (i === 0 ? '' : ' oxi-btn-secondary'), a.label); b.href = a.href; actions.appendChild(b); });
+
+      // controls (for example the period for purchase spending)
+      const ctl = $('controls'); ctl.innerHTML = '';
+      d.controls.forEach(c => {
+        const label = el('label', null, c.label + ' '); const s2 = el('select'); s2.id = 'ctl-' + c.name;
+        c.options.forEach(o => { const op = el('option', null, o.label); op.value = o.value; if (o.value === c.value) op.selected = true; s2.appendChild(op); });
+        s2.onchange = () => load().catch(() => showError('Could not reach the server.'));
+        label.appendChild(s2); ctl.appendChild(label);
+      });
+      ctl.hidden = d.controls.length === 0;
+
+      const cards = $('cards'); cards.innerHTML = ''; cards.setAttribute('aria-busy', 'false');
+      if (!d.cards.length) cards.appendChild(el('p', 'oxi-empty-line', 'There is nothing to summarise for your account yet.'));
+      d.cards.forEach(c => {
+        const a = el('a', 'oxi-metric oxi-tone-' + c.tone); a.href = c.href;
+        a.append(el('span', 'oxi-metric-label', c.label), el('span', 'oxi-metric-value', String(c.value)));
+        if (c.hint) a.appendChild(el('span', 'oxi-metric-hint', c.hint));
+        cards.appendChild(a);
       });
 
-      // ---------- insight card: one real, honest highlight ----------
-      const iv = document.getElementById('insightValue'), ino = document.getElementById('insightNote');
-      try {
-      if (['store', 'accounts', 'admin'].includes(user.role)) {
-        const pending = await pendingApprovals();
-        if (pending.length > 0) {
-          iv.textContent = pending.length + ' item' + (pending.length === 1 ? '' : 's') + ' need your approval';
-          ino.textContent = 'Clear these first to keep purchases moving.';
-        } else if (isAllowed('purchase,store,accounts')) {
-          const d = await api('/api/dashboard/summary');
-          iv.textContent = d.success ? '₹' + money(d.total_purchase_value) : 'All caught up';
-          ino.textContent = d.success ? 'Total purchase value on record.' : '';
-        }
-      } else if (user.role === 'branch') {
-        const d = await api('/api/branch-request?status=pending');
-        iv.textContent = d.success ? d.requests.length + ' request' + (d.requests.length === 1 ? '' : 's') + ' pending' : '-';
-        ino.textContent = 'Waiting for HQ to review.';
-      } else if (user.role === 'production') {
-        const d = await api('/api/production-indent?status=pending');
-        iv.textContent = d.success ? d.indents.length + ' indent' + (d.indents.length === 1 ? '' : 's') + ' pending' : '-';
-        ino.textContent = 'Waiting for HQ to review.';
-      } else {
-        iv.textContent = 'Welcome';
-        ino.textContent = '';
-      }
-      } catch (e) {
-        iv.textContent = 'Could not load this';
-        ino.textContent = '';
-        const b = document.createElement('button'); b.textContent = 'Try again'; b.onclick = () => location.reload(); ino.appendChild(b);
-      }
-      iv.removeAttribute('aria-busy');
-    })();
-
-    // ---------- KPI chips (real numbers only - no fabricated "low stock" metric) ----------
-    if (document.getElementById('kpiChips')) {
-      api('/api/dashboard/summary').then(d => {
-        if (!d.success) return;
-        const box = document.getElementById('kpiChips');
-        const chip = (cls, label, value) => {
-          const s = document.createElement('div'); s.className = 'oxi-kpi-chip' + (cls ? ' ' + cls : '');
-          s.innerHTML = '<span class="oxi-kpi-chip-dot"></span><span><b>' + value + '</b> ' + label + '</span>';
-          return s;
-        };
-        box.append(
-          chip('', 'Pending Requests', d.pending_branch_requests + d.pending_production_indents),
-          chip('', 'Open POs', d.active_pos),
-          chip(d.pending_grn_qc > 0 ? 'warn' : 'good', 'Awaiting QC Approval', d.pending_grn_qc),
-          chip('', 'Total Purchase Value', '₹' + money(d.total_purchase_value)),
-          chip(d.variance_issues > 0 ? 'bad' : 'good', 'Variance Issues', d.variance_issues)
-        );
-      }).catch(() => {});
-    }
-
-    // ---------- bottom command bar: search + role-aware pill actions ----------
-    const cmdInput = document.getElementById('cmdSearch');
-    const cmdResults = document.getElementById('cmdResults');
-    let cmdTimer = null;
-    cmdInput.addEventListener('input', () => {
-      clearTimeout(cmdTimer);
-      const q = cmdInput.value.trim();
-      if (q.length < 2) { cmdResults.innerHTML = ''; return; }
-      cmdTimer = setTimeout(async () => {
-        const d = await api('/api/search?q=' + encodeURIComponent(q));
-        cmdResults.innerHTML = '';
-        const list = document.createElement('div');
-        list.className = 'oxi-search-results'; list.style.cssText = 'position:static;box-shadow:none;margin-bottom:14px;';
-        if (d.success && d.results.length) {
-          d.results.forEach(r => {
-            const a = document.createElement('a'); a.href = r.href; a.innerHTML = '<small>' + r.type + '</small>' + r.label;
-            list.appendChild(a);
-          });
-        } else {
-          list.innerHTML = '<div class="oxi-search-empty">No matches</div>';
-        }
-        cmdResults.appendChild(list);
-      }, 250);
-    });
-
-    (async () => {
-      const pillBox = document.getElementById('pillActions');
-      const pending = ['store', 'accounts', 'admin'].includes(user.role) ? await pendingApprovals() : [];
-      const PILLS = [
-        { label: 'New PO', href: 'po-form.html', roles: 'purchase' },
-        { label: 'Create GRN', href: 'grn-form.html', roles: 'store' },
-        { label: 'Record Payment', href: 'payment-form.html', roles: 'accounts' },
-        { label: 'New Branch Request', href: 'branch-request-form.html', roles: 'branch' },
-        { label: 'New Production Indent', href: 'production-indent-form.html', roles: 'production' },
-        { label: 'View Reports', href: isAllowed('store,purchase,accounts') ? 'variance-report.html'
-                                       : isAllowed('branch') ? 'branch-request-list.html' : 'production-indent-list.html', roles: '*' },
-        { label: 'Pending Approvals (' + pending.length + ')', href: pending[0] || 'variance-report.html', roles: 'store,accounts',
-          secondary: true, hide: pending.length === 0 }
-      ];
-      PILLS.filter(p => isAllowed(p.roles) && !p.hide).forEach(p => {
-        const a = document.createElement('a');
-        a.href = p.href; a.className = 'oxi-pill' + (p.secondary ? ' secondary' : ''); a.textContent = p.label;
-        pillBox.appendChild(a);
+      const ex = $('extraCards'); ex.innerHTML = '';
+      (d.extra_cards || []).forEach(c => {
+        const a = el('a', 'oxi-metric oxi-tone-' + c.tone); a.href = c.href;
+        a.append(el('span', 'oxi-metric-label', c.label), el('span', 'oxi-metric-value', String(c.value)));
+        if (c.hint) a.appendChild(el('span', 'oxi-metric-hint', c.hint));
+        ex.appendChild(a);
       });
-    })();
+      $('extraBox').hidden = !(d.extra_cards && d.extra_cards.length);
+
+      $('queueCount').hidden = d.queue.total === 0; $('queueCount').textContent = d.queue.total;
+      fillList($('queue'), d.queue, 'Nothing is waiting for you. New work appears here as soon as it is ready.');
+
+      $('exceptionsBox').hidden = d.exceptions.total === 0;
+      $('exCount').hidden = d.exceptions.total === 0; $('exCount').textContent = d.exceptions.total;
+      fillList($('exceptions'), d.exceptions, '');
+
+      const nb = $('notes'); nb.innerHTML = '';
+      d.notes.forEach(n => { const w = el('div', 'oxi-note'); w.append(el('b', null, n.label), el('span', 'badge badge-pending', n.state), el('p', null, n.detail)); nb.appendChild(w); });
+      $('notesBox').hidden = d.notes.length === 0;
+
+      const act = $('activity'); act.innerHTML = '';
+      d.activity.forEach(a => {
+        const li = el('a', 'oxi-activity-row'); li.href = a.href;
+        li.append(el('span', 'oxi-activity-type', a.type), el('b', null, a.reference), el('span', 'oxi-activity-party', a.party || ''), el('span', 'oxi-activity-status', a.status));
+        if (a.amount != null) li.appendChild(el('span', 'oxi-activity-amount', '₹' + money(a.amount)));
+        li.appendChild(el('span', 'oxi-activity-when', timeAgo(a.at)));
+        act.appendChild(li);
+      });
+      $('activityBox').hidden = d.activity.length === 0;
+    }
+    load().catch(() => showError('Could not reach the server.'));
   </script>
 </body>
 </html>

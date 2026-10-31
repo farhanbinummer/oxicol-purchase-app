@@ -18,6 +18,14 @@
 
   <table style="width:auto" id="whoBox"></table>
 
+  <div id="wsPref" hidden>
+    <h3>Default workspace</h3>
+    <form id="wsForm">
+      <p><label>Open this workspace when I sign in<br><select id="defaultWs"></select></label></p>
+      <p><button type="submit">Save default</button></p>
+    </form>
+  </div>
+
   <h3>Change password</h3>
   <form id="pwForm">
     <p><label>Current password<br><input id="current" type="password" required></label></p>
@@ -32,9 +40,27 @@
     try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
     if (user) {
       const t = document.getElementById('whoBox');
-      [['Name', user.name], ['Username', user.username], ['Role', user.role], ['Branch', user.branch || '-']]
+      const LABELS = { rd: 'R&D', admin: 'Administrator', manager: 'Manager', purchase: 'Purchase', accounts: 'Accounts', store: 'Stores', qc: 'Quality check', production: 'Production', branch: 'Branch staff' };
+      [['Name', user.name], ['Username', user.username], ['Roles', (user.roles || [user.role]).map(r => LABELS[r] || r).join(', ')]]
         .forEach(([k, v]) => { const tr = document.createElement('tr'); addCell(tr, k); addCell(tr, v); t.appendChild(tr); });
     }
+    // Branches and the default workspace come from the server.
+    api('/api/workspace/me').then(me => {
+      if (!me.success) return;
+      const t = document.getElementById('whoBox');
+      const tr = document.createElement('tr'); addCell(tr, 'Branches'); addCell(tr, me.scope.branches === null ? 'All branches' : (me.scope.branches.join(', ') || '-')); t.appendChild(tr);
+      if (me.workspaces.length > 1) {
+        document.getElementById('wsPref').hidden = false;
+        const sel = document.getElementById('defaultWs');
+        const none = document.createElement('option'); none.value = ''; none.textContent = 'No default (use the last one I worked in)'; sel.appendChild(none);
+        me.workspaces.forEach(w => { const o = document.createElement('option'); o.value = w.id; o.textContent = w.title; if (w.id === me.default) o.selected = true; sel.appendChild(o); });
+      }
+    });
+    document.getElementById('wsForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = await api('/api/workspace/preference', 'PUT', { default: document.getElementById('defaultWs').value || null });
+      if (d.success) show('Default workspace saved. You will land there when you sign in.', true); else show(d.error, false);
+    });
 
     document.getElementById('pwForm').addEventListener('submit', async (e) => {
       e.preventDefault();

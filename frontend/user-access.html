@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edit access</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; Administration &rsaquo; <a href="users.html">Users</a> &rsaquo; Edit access</p>
+  <h1 id="who">Edit access</h1>
+  <p class="oxi-page-sub">Choose what this person is responsible for and which branches each responsibility covers. A change applies to their very next click; they do not need to sign in again. Every change is recorded in Audit History.</p>
+  <p id="message"></p>
+
+  <form id="accessForm" hidden>
+    <fieldset class="oxi-fs">
+      <legend>Roles</legend>
+      <div id="roles"></div>
+    </fieldset>
+    <p>
+      <label>Default workspace<br>
+        <select id="defaultWs"></select>
+        <small>The workspace they land on after signing in. They can still switch between the workspaces their roles open.</small>
+      </label>
+    </p>
+    <p><button type="submit" id="saveBtn">Save access</button> <a class="oxi-btn oxi-btn-secondary" href="users.html">Back to users</a></p>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const id = Number(new URLSearchParams(location.search).get('id'));
+    const BRANCHES = ['Kannur', 'Thrissur', 'Trivandrum', 'Ernakulam'];
+    // what each role is for, in the words the Purchase / Stores / ... workspaces use
+    const ROLES = [
+      { key: 'admin', label: 'Administrator', desc: 'Users, permissions, audit history and master data. Also holds every approval today (see the limitations note).', ws: ['admin', 'manager'] },
+      { key: 'manager', label: 'Manager', desc: 'Approves branch requests and production requirements; sees overdue deliveries and exceptions.', ws: ['manager'] },
+      { key: 'purchase', label: 'Purchase', desc: 'Buys approved requirements, follows up suppliers, creates purchase orders.', ws: ['purchase'] },
+      { key: 'accounts', label: 'Accounts', desc: 'Records and confirms payments, checks invoices.', ws: ['accounts'] },
+      { key: 'store', label: 'Stores', desc: 'Receives goods, approves branch requests and production requirements.', ws: ['stores'] },
+      { key: 'qc', label: 'Quality check', desc: 'Inspects received goods and records the quality decision.', ws: ['qc'] },
+      { key: 'rd', label: 'R&D', desc: 'Runs R&D projects: assessment, stages, tasks and lab notes. Approvals are not included.', ws: ['rd'] },
+      { key: 'production', label: 'Production', desc: 'Plans materials and raises material requirements.', ws: ['production'] },
+      { key: 'branch', label: 'Branch staff', desc: 'Raises and tracks stock requests. Needs at least one branch.', ws: ['branch'], needsBranch: true }
+    ];
+    const WS_TITLES = { rd: 'R&D Workspace', admin: 'Administrator Workspace', manager: 'Manager Workspace', purchase: 'Purchase Workspace', accounts: 'Accounts Workspace', stores: 'Stores Workspace', qc: 'Quality Workspace', production: 'Production Workspace', branch: 'Branch Workspace' };
+    let user = null;
+
+    function selected() { return ROLES.filter(r => document.getElementById('role-' + r.key).checked); }
+    function paintWorkspaces() {
+      const sel = $('defaultWs'); const cur = sel.value || (user && user.default_workspace) || '';
+      const wsIds = [...new Set(selected().flatMap(r => r.ws))];
+      sel.innerHTML = '';
+      const none = el('option', null, 'No default (use the first one)'); none.value = ''; sel.appendChild(none);
+      wsIds.forEach(w => { const o = el('option', null, WS_TITLES[w]); o.value = w; if (w === cur) o.selected = true; sel.appendChild(o); });
+    }
+    function build() {
+      const box = $('roles'); box.innerHTML = '';
+      ROLES.forEach(r => {
+        const wrap = el('div', 'oxi-roleopt');
+        const label = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.id = 'role-' + r.key; cb.checked = user.roles.includes(r.key);
+        const name = el('span'); name.append(el('b', null, r.label), el('br'), el('small', null, r.desc));
+        label.append(cb, name); wrap.appendChild(label);
+        const br = el('div', 'oxi-branches'); br.id = 'br-' + r.key;
+        const legend = el('span', null, r.needsBranch ? 'Branches (at least one):' : 'Limit to branches (leave empty for all branches):'); legend.style.width = '100%'; br.appendChild(legend);
+        BRANCHES.forEach(b => {
+          const l = el('label'); const c = el('input'); c.type = 'checkbox'; c.value = b; c.dataset.role = r.key;
+          c.checked = ((user.scopes || {})[r.key] || []).includes(b);
+          l.append(c, document.createTextNode(' ' + b)); br.appendChild(l);
+        });
+        if (r.key !== 'admin') wrap.appendChild(br); // an administrator is never limited to branches
+        const sync = () => { br.hidden = !cb.checked; paintWorkspaces(); };
+        cb.addEventListener('change', sync); box.appendChild(wrap); br.hidden = !cb.checked;
+      });
+      paintWorkspaces();
+    }
+
+    async function init() {
+      const d = await api('/api/auth/users');
+      if (!d.success) { show(d.error || 'Only an administrator can edit access.', false); return; }
+      user = d.users.find(u => u.id === id);
+      if (!user) { show('That account was not found.', false); return; }
+      $('who').textContent = 'Edit access: ' + user.name;
+      document.title = 'Edit access - ' + user.name;
+      build(); $('accessForm').hidden = false;
+    }
+
+    $('accessForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const roles = selected().map(r => r.key);
+      if (!roles.length) { show('Choose at least one role.', false); return; }
+      const scopes = {};
+      roles.forEach(r => { const picked = [...document.querySelectorAll('#br-' + r + ' input:checked')].map(i => i.value); if (picked.length) scopes[r] = picked; });
+      const btn = $('saveBtn'); btn.disabled = true;
+      const r = await api('/api/auth/users/' + id + '/access', 'PUT', { roles, scopes, default_workspace: $('defaultWs').value || null });
+      btn.disabled = false;
+      if (!r.success) { show(r.error || 'Could not save.', false); return; }
+      show('Access saved for ' + user.name + '. It applies from their next click.', true);
+      user.roles = roles; user.scopes = scopes; user.default_workspace = $('defaultWs').value || null;
+    });
+    init().catch(() => show('Could not reach the server.', false));
+  </script>
+</body>
+</html>

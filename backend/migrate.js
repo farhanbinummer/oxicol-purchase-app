@@ -8,7 +8,7 @@
 // Runs automatically at server start, after the older ensure* helpers in notify.js / bom.js.
 
 const { pool } = require('./database');
-const { DEFAULTS } = require('./permissions');
+const { DEFAULTS, LEGACY_ROLES } = require('./permissions');
 const { packSizeFromName } = require('./catalog-search');
 
 // Finished goods named in the BOM sheet's "No BOM data" tab. They exist in the catalogue so a branch can
@@ -145,7 +145,253 @@ const STEPS = [
     async run(db) {
       // New permission keys only. Existing grants are never touched, so edits an admin made stay as they are.
       for (const [role, keys] of Object.entries(DEFAULTS)) {
+        if (!LEGACY_ROLES.includes(role)) continue; // roles added later are seeded by their own migration
         for (const key of keys.filter(k => k.startsWith('catalog.'))) {
+          await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
+        }
+      }
+    }
+  },
+  {
+    // One person, several roles; scope (which branches) belongs to a role assignment; a remembered workspace.
+    // users.role stays as the person's PRIMARY role so every existing query and screen keeps working.
+    name: '007_roles_scopes_workspaces',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS user_roles (
+          user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role        VARCHAR(20) NOT NULL,
+          assigned_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, role)
+        );
+        CREATE TABLE IF NOT EXISTS user_scopes (
+          user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role        VARCHAR(20) NOT NULL,
+          scope_type  VARCHAR(20) NOT NULL,
+          scope_value VARCHAR(60) NOT NULL,
+          PRIMARY KEY (user_id, role, scope_type, scope_value)
+        );
+        CREATE TABLE IF NOT EXISTS user_workspace_prefs (
+          user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          default_workspace VARCHAR(30),
+          last_workspace    VARCHAR(30),
+          updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+        )`);
+      // Every existing person keeps exactly the one role and branch they have today.
+      await db.query('INSERT INTO user_roles (user_id, role) SELECT id, role FROM users ON CONFLICT DO NOTHING');
+      await db.query(`INSERT INTO user_scopes (user_id, role, scope_type, scope_value)
+                       SELECT id, 'branch', 'branch', branch FROM users WHERE role = 'branch' AND branch IS NOT NULL
+                       ON CONFLICT DO NOTHING`);
+      // Two new roles (qc, manager) must be allowed in the two tables that listed the original ones.
+      const NEW_LIST = "('branch','production','store','purchase','accounts','admin','qc','manager')";
+      await db.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
+      await db.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ${NEW_LIST})`);
+      await db.query('ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check');
+      await db.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('branch','production','store','purchase','accounts','qc','manager'))`);
+    }
+  },
+  {
+    // Permission keys that did not exist before. Existing action grants are never touched, so an administrator's
+    // earlier edits stay. The one deliberate narrowing: the Stores role is NOT given the two restricted-field keys,
+    // so it no longer receives prices or supplier bank details unless an administrator ticks them.
+    name: '008_field_visibility_and_new_roles',
+    async run(db) {
+      for (const [role, keys] of Object.entries(DEFAULTS)) {
+        if (!['branch', 'production', 'store', 'purchase', 'accounts', 'qc', 'manager'].includes(role)) continue; // later roles have their own steps
+        const fresh = LEGACY_ROLES.includes(role) ? keys.filter(k => k.startsWith('field.') && k !== 'field.rd_technical') : keys.filter(k => !k.startsWith('rd.') && k !== 'field.rd_technical');
+        for (const key of fresh) {
+          await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
+        }
+      }
+    }
+  },
+  {
+    // R&D projects: requests, assessment, the eight stages and their checklists, tasks, notes and approvals.
+    // Business dates are DATE columns (no time zone); moments are TIMESTAMPTZ. Nothing existing is changed except the two
+    // role lists, which gain 'rd'.
+    name: '009_rd_projects',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_number_counters (
+          period      CHAR(4) PRIMARY KEY,                 -- 'YYMM'
+          last_serial INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS rd_projects (
+          id                   SERIAL PRIMARY KEY,         -- stable internal id; the project number is a label
+          project_number       VARCHAR(20) UNIQUE,         -- OXRD + serial + MM + YY; empty while a request is only a draft
+          is_draft             BOOLEAN NOT NULL DEFAULT TRUE,
+          title                VARCHAR(200) NOT NULL,
+          project_type         VARCHAR(60),
+          status               VARCHAR(20) NOT NULL DEFAULT 'Received'
+                               CHECK (status IN ('Received','Under Review','Approved','In Lab Trials','Sample Sent','Plant Trial','Completed','On Hold','Rejected')),
+          status_before_hold   VARCHAR(20),
+          priority             VARCHAR(10) CHECK (priority IN ('High','Medium','Low')),
+          department           VARCHAR(40),
+          requested_by_user    INTEGER REFERENCES users(id),
+          requested_by_name    VARCHAR(100),
+          request_date         DATE,
+          target_launch_date   DATE,
+          target_tbc           BOOLEAN NOT NULL DEFAULT FALSE,
+          customer_oem         VARCHAR(150),
+          brand_product        VARCHAR(150),
+          product_category     VARCHAR(60),
+          base_system          VARCHAR(30),
+          description          TEXT,
+          application_method   TEXT,
+          substrate            TEXT,
+          end_user_market      TEXT,
+          benchmark            TEXT,
+          appearance_notes     TEXT,
+          target_cost          NUMERIC(12,2),
+          cost_basis           VARCHAR(10),
+          labelling_claims     TEXT,
+          monthly_volume       NUMERIC(14,2),
+          volume_unit          VARCHAR(20),
+          pack_sizes           TEXT,
+          packaging_type       TEXT,
+          voc_limit_required   BOOLEAN,
+          voc_target_gl        NUMERIC(10,2),
+          sds_ghs_required     BOOLEAN,
+          restricted_substances TEXT,
+          standards            TEXT,
+          lead_user_id         INTEGER REFERENCES users(id),
+          est_trial_days       INTEGER CHECK (est_trial_days IS NULL OR est_trial_days > 0),
+          feasibility          VARCHAR(30),
+          technical_approach   TEXT,                       -- confidential (field.rd_technical)
+          risks                TEXT,                       -- confidential (field.rd_technical)
+          completed_on         DATE,
+          version              INTEGER NOT NULL DEFAULT 1, -- every change checks and bumps it, so two editors cannot overwrite each other
+          imported_from        VARCHAR(80),
+          created_by           INTEGER REFERENCES users(id),
+          created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          submitted_at         TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_rd_projects_status ON rd_projects(status);
+        CREATE INDEX IF NOT EXISTS idx_rd_projects_lead ON rd_projects(lead_user_id);
+        CREATE INDEX IF NOT EXISTS idx_rd_projects_requester ON rd_projects(requested_by_user);
+
+        CREATE TABLE IF NOT EXISTS rd_requirements (
+          id               SERIAL PRIMARY KEY,
+          project_id       INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          position         INTEGER NOT NULL,
+          parameter        VARCHAR(150) NOT NULL DEFAULT '',
+          target           VARCHAR(250) NOT NULL DEFAULT '',
+          acceptable_range VARCHAR(250) NOT NULL DEFAULT '',
+          test_method      VARCHAR(250) NOT NULL DEFAULT '',
+          benchmark_value  VARCHAR(250) NOT NULL DEFAULT '',
+          remarks          VARCHAR(500) NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_rd_requirements_project ON rd_requirements(project_id);
+
+        CREATE TABLE IF NOT EXISTS rd_project_members (
+          project_id  INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          added_by    INTEGER REFERENCES users(id),
+          added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (project_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS rd_stages (
+          id             SERIAL PRIMARY KEY,
+          project_id     INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          stage_no       INTEGER NOT NULL CHECK (stage_no BETWEEN 1 AND 8),
+          planned_date   DATE,
+          actual_date    DATE,                              -- the completion date; set only when the stage is completed
+          owner_user_id  INTEGER REFERENCES users(id),      -- explicit owner; empty means "the project lead"
+          remarks        TEXT NOT NULL DEFAULT '',
+          completed_at   TIMESTAMPTZ,                       -- when it was recorded
+          completed_by   INTEGER REFERENCES users(id),
+          review_flag    TEXT,                              -- set when an earlier stage was reopened after this one was completed
+          version        INTEGER NOT NULL DEFAULT 1,
+          UNIQUE (project_id, stage_no)
+        );
+        CREATE TABLE IF NOT EXISTS rd_stage_history (
+          id          BIGSERIAL PRIMARY KEY,
+          stage_id    INTEGER NOT NULL REFERENCES rd_stages(id) ON DELETE CASCADE,
+          action      VARCHAR(20) NOT NULL CHECK (action IN ('completed','reopened')),
+          action_date DATE,
+          reason      TEXT,
+          actor_id    INTEGER REFERENCES users(id),
+          at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS rd_checklist_items (
+          id        SERIAL PRIMARY KEY,
+          stage_id  INTEGER NOT NULL REFERENCES rd_stages(id) ON DELETE CASCADE,
+          position  INTEGER NOT NULL,
+          label     VARCHAR(250) NOT NULL,
+          done      BOOLEAN NOT NULL DEFAULT FALSE,
+          done_by   INTEGER REFERENCES users(id),
+          done_at   TIMESTAMPTZ
+        );
+
+        CREATE TABLE IF NOT EXISTS rd_tasks (
+          id             SERIAL PRIMARY KEY,
+          project_id     INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          stage_no       INTEGER CHECK (stage_no IS NULL OR stage_no BETWEEN 1 AND 8),
+          title          VARCHAR(250) NOT NULL,
+          description    TEXT NOT NULL DEFAULT '',
+          status         VARCHAR(12) NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','in_progress','blocked','done')),
+          priority       VARCHAR(10) NOT NULL DEFAULT 'Medium' CHECK (priority IN ('High','Medium','Low')),
+          assignee_id    INTEGER REFERENCES users(id),      -- one accountable person
+          team           VARCHAR(40),                       -- a team task nobody has claimed yet (assignee empty)
+          due_date       DATE,
+          completed_at   TIMESTAMPTZ,
+          created_by     INTEGER REFERENCES users(id),
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          version        INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_rd_tasks_project ON rd_tasks(project_id);
+        CREATE INDEX IF NOT EXISTS idx_rd_tasks_assignee ON rd_tasks(assignee_id);
+
+        CREATE TABLE IF NOT EXISTS rd_updates (
+          id          BIGSERIAL PRIMARY KEY,
+          project_id  INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          task_id     INTEGER REFERENCES rd_tasks(id) ON DELETE CASCADE,
+          kind        VARCHAR(10) NOT NULL CHECK (kind IN ('comment','lab_note','system')),
+          author_id   INTEGER REFERENCES users(id),
+          author_name VARCHAR(100),
+          body        TEXT NOT NULL,
+          at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_rd_updates_project ON rd_updates(project_id, at DESC);
+
+        CREATE TABLE IF NOT EXISTS rd_approvals (
+          id             SERIAL PRIMARY KEY,
+          project_id     INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          stage_no       INTEGER,
+          kind           VARCHAR(20) NOT NULL CHECK (kind IN ('submission','rd_head','management','qc_signoff','customer','handover_ack')),
+          decision       VARCHAR(10) NOT NULL CHECK (decision IN ('submitted','approved','rejected','returned')),
+          decision_date  DATE,
+          remarks        TEXT NOT NULL DEFAULT '',
+          external_rep   VARCHAR(150),                      -- customer representative, for customer evidence
+          evidence       TEXT NOT NULL DEFAULT '',          -- reference to the written evidence
+          decided_by     INTEGER REFERENCES users(id),      -- the internal person who made or recorded the decision
+          at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_rd_approvals_project ON rd_approvals(project_id);
+
+        CREATE TABLE IF NOT EXISTS rd_user_projects (
+          user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          project_id   INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          favourite    BOOLEAN NOT NULL DEFAULT FALSE,
+          last_opened  TIMESTAMPTZ,
+          PRIMARY KEY (user_id, project_id)
+        )`);
+      const NEW_LIST = "('branch','production','store','purchase','accounts','admin','qc','manager','rd')";
+      await db.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
+      await db.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ${NEW_LIST})`);
+      await db.query('ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check');
+      await db.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('branch','production','store','purchase','accounts','qc','manager','rd'))`);
+    }
+  },
+  {
+    // The R&D permission keys, seeded once. Existing grants are never touched. Only the R&D role may edit projects and only the
+    // keys listed in permissions.js are granted; NO role receives an approval key (decision still needed), but administrators hold all.
+    name: '010_rd_permissions',
+    async run(db) {
+      for (const [role, keys] of Object.entries(DEFAULTS)) {
+        for (const key of keys.filter(k => k.startsWith('rd.') || k === 'field.rd_technical')) {
           await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
         }
       }

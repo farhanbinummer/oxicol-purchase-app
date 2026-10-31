@@ -109,6 +109,7 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); -webkit-text-size-adjust: 100%; }
 html, body { min-height: 100%; }
+[hidden] { display: none !important; }
 
 body {
   font-family: var(--font);
@@ -529,6 +530,12 @@ td a { font-weight: 600; }
   table:not(.oxi-kv) thead th { position: sticky; top: var(--topbar-h); z-index: 2; }
 }
 
+.oxi-table-scroll { max-width: 100%; margin: var(--s2) 0 var(--s4); overflow-x: auto; border-radius: var(--r-card); }
+.oxi-table-scroll > table { margin: 0; min-width: 100%; width: max-content; }
+.oxi-table-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* inside a sideways-scrolling box the header must not stick to the page top (it would cover the first rows) */
+.oxi-table-scroll > table thead th { position: static; }
+
 /* totals and key/value summaries (small tables set to width:auto by the pages) */
 table[style*="width:auto"], table[style*="width: auto"] {
   width: auto !important; min-width: 280px; background: transparent; border: none; border-radius: 0; margin: var(--s2) 0 var(--s4);
@@ -716,7 +723,7 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
 @media (max-width: 900px) {
   /* the sidebar becomes an overlay drawer; hidden (and unfocusable) until opened */
   .oxi-sidebar { transform: translateX(-100%); visibility: hidden; width: min(86vw, 300px); transition: transform 0.2s ease, visibility 0s linear 0.2s; }
-  body.oxi-sidebar-open .oxi-sidebar { transform: translateX(0); visibility: visible; transition: transform 0.2s ease; box-shadow: 0 0 0 100vmax rgba(10, 17, 24, 0.5); }
+  body.oxi-sidebar-open .oxi-sidebar { z-index: 60; transform: translateX(0); visibility: visible; transition: transform 0.2s ease; box-shadow: 0 0 0 100vmax rgba(10, 17, 24, 0.5); }
   .oxi-nav-label { max-width: 220px; margin-left: var(--s3); opacity: 1; }
   .oxi-nav-group { height: auto; margin: var(--s4) 14px 4px; background: none; font-size: 12px; font-weight: 600; color: var(--sidebar-muted); }
   .oxi-nav-toggle { display: none; }
@@ -784,6 +791,7 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
   }
   table.oxi-rowcards td::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 12px; font-weight: 500; color: var(--text-2); }
   table.oxi-rowcards td.oxi-num { text-align: left; }
+  table.oxi-rowcards td .badge { white-space: normal; max-width: 100%; }
   table.oxi-rowcards td:first-child { grid-column: 1 / -1; background: none; padding: 0 0 2px; font-size: 16px; font-weight: 600; }
   table.oxi-rowcards td:first-child::before { display: none; }
   table.oxi-rowcards td.oxi-card-full, table.oxi-rowcards td.oxi-card-action { grid-column: 1 / -1; background: none; padding: 2px 0 0; }
@@ -903,6 +911,212 @@ body.oxi-login { display: flex; align-items: center; justify-content: center; mi
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
+
+/* ============================================================
+   13b. WORKSPACES: switcher, metric cards, work queue, deliveries, approvals
+   ============================================================ */
+.oxi-ws { margin: 0 var(--s3) var(--s2); position: relative; flex: none; }
+.oxi-ws-btn {
+  display: flex; align-items: center; width: 100%; min-height: 48px; margin: 0; padding: 6px 14px; text-align: left; gap: 0;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; border-radius: var(--r-control);
+  font-weight: 500; justify-content: flex-start;
+}
+button.oxi-ws-btn:hover { background: var(--sidebar-hover); border-color: rgba(255, 255, 255, 0.2); color: #fff; }
+.oxi-ws-btn svg { flex: none; }
+.oxi-ws-btn .oxi-nav-label { display: inline-flex; flex-direction: column; flex: 1; line-height: 1.2; }
+body.oxi-nav-pinned .oxi-ws-btn .oxi-nav-label, body.oxi-sidebar-open .oxi-ws-btn .oxi-nav-label { max-width: 190px; }
+.oxi-ws-btn small { display: block; color: var(--sidebar-muted); font-size: 11px; font-weight: 500; }
+.oxi-ws-btn b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oxi-ws-menu {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 50; min-width: 250px; padding: 6px;
+  background: var(--sidebar); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: var(--r-card); box-shadow: var(--shadow-md);
+}
+.oxi-ws-menu[hidden] { display: none; }
+.oxi-ws-menu button { display: block; width: 100%; margin: 0; padding: 8px 10px; min-height: 0; text-align: left; justify-content: flex-start; background: transparent; border: 0; color: #fff; border-radius: 8px; font-weight: 500; }
+.oxi-ws-menu button:hover { background: var(--sidebar-hover); color: #fff; }
+.oxi-ws-menu button small { display: block; margin-top: 2px; color: var(--sidebar-muted); font-weight: 400; font-size: 12px; white-space: normal; }
+.oxi-ws-menu button[aria-checked="true"] span { color: var(--sidebar-accent); font-weight: 600; }
+.oxi-ws-menu i { float: right; font-style: normal; color: var(--sidebar-accent); }
+@media (max-width: 900px) { .oxi-ws-btn .oxi-nav-label { max-width: 220px; } }
+
+.oxi-controls { display: flex; flex-wrap: wrap; gap: var(--s3); margin: 0 0 var(--s3); }
+.oxi-controls label { display: inline-flex; align-items: center; gap: var(--s2); font-weight: 500; }
+.oxi-controls select { margin: 0; }
+.oxi-controls[hidden] { display: none; }
+
+.oxi-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s3); margin: 0 0 var(--s5); }
+.oxi-metric {
+  display: flex; flex-direction: column; gap: 4px; padding: var(--s4); color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border-strong); border-radius: var(--r-card); box-shadow: var(--shadow-sm);
+}
+a.oxi-metric:hover { text-decoration: none; border-color: var(--accent); box-shadow: var(--shadow-md); }
+.oxi-metric-label { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.oxi-metric-value { font-size: 28px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.oxi-metric-hint { font-size: 12.5px; color: var(--text-2); }
+.oxi-metric.oxi-tone-good { border-left-color: var(--success); }
+.oxi-metric.oxi-tone-warn { border-left-color: var(--warn); }
+.oxi-metric.oxi-tone-bad { border-left-color: var(--danger); }
+.oxi-metric.oxi-skeleton { border-left-color: var(--border); }
+
+.oxi-section { margin: 0 0 var(--s5); }
+.oxi-section[hidden] { display: none; }
+.oxi-section > h2 { display: flex; align-items: center; gap: var(--s2); margin: 0 0 var(--s1); font-size: 20px; }
+.oxi-section-sub { margin: 0 0 var(--s3); color: var(--text-2); font-size: 13.5px; }
+.oxi-count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--primary-soft); color: var(--accent); font-size: 13px; font-weight: 600; }
+
+.oxi-tasks { display: grid; gap: var(--s2); }
+.oxi-task {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); padding: var(--s3) var(--s4);
+  background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--info); border-radius: var(--r-card); box-shadow: var(--shadow-sm);
+}
+.oxi-task.oxi-tone-warn { border-left-color: var(--warn); }
+.oxi-task.oxi-tone-bad { border-left-color: var(--danger); }
+.oxi-task.oxi-tone-good { border-left-color: var(--success); }
+.oxi-task-main { flex: 1; min-width: 0; }
+.oxi-task-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s3); }
+.oxi-task-type { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.oxi-task-number { font-size: 15px; font-weight: 700; }
+.oxi-task-party { font-size: 13.5px; color: var(--text-2); }
+.oxi-task-reason { margin: 2px 0 6px; font-size: 14px; }
+.oxi-task-facts { display: flex; flex-wrap: wrap; gap: 2px var(--s5); margin: 0; }
+.oxi-task-facts > div { display: flex; gap: 6px; font-size: 13px; }
+.oxi-task-facts dt { margin: 0; color: var(--text-2); }
+.oxi-task-facts dd { margin: 0; font-weight: 500; }
+.oxi-task-facts dd.oxi-late { color: var(--danger); font-weight: 600; }
+.oxi-task-side { flex: none; align-self: center; display: flex; align-items: center; }
+.oxi-task-side .oxi-btn { margin: 0; min-height: 36px; font-size: 13.5px; }
+.oxi-task-wait { max-width: 170px; text-align: right; font-size: 13px; color: var(--text-2); }
+.oxi-empty-line { margin: 0; padding: var(--s4); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--r-card); color: var(--text-2); font-size: 14px; }
+.oxi-more { margin: var(--s2) 0 0; color: var(--text-2); font-size: 13px; }
+.oxi-error-state { padding: var(--s5); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: var(--r-card); color: var(--danger); }
+.oxi-error-state p { margin: 0 0 var(--s3); font-weight: 500; }
+.oxi-notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--s3); }
+.oxi-note { padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); }
+.oxi-note b { margin-right: var(--s2); }
+.oxi-note p { margin: 6px 0 0; font-size: 13.5px; color: var(--text-2); }
+.oxi-activity { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }
+.oxi-activity-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s4); padding: 10px var(--s4); border-bottom: 1px solid var(--border); color: var(--text); font-size: 14px; }
+.oxi-activity-row:last-child { border-bottom: 0; }
+.oxi-activity-row:hover { background: var(--surface-2); text-decoration: none; }
+.oxi-activity-type { min-width: 120px; color: var(--text-2); font-size: 13px; }
+.oxi-activity-party { color: var(--text-2); }
+.oxi-activity-amount { font-variant-numeric: tabular-nums; }
+.oxi-activity-when { margin-left: auto; color: var(--text-2); font-size: 13px; }
+
+.oxi-filter-note { margin: 0 0 var(--s3); padding: var(--s2) var(--s3); background: var(--info-bg); color: var(--info); border-radius: var(--r-control); font-size: 14px; font-weight: 500; }
+.oxi-linklike, .oxi-linklike:hover { display: inline; min-height: 0; margin: 0 0 0 var(--s2); padding: 0; background: none; border: 0; color: var(--info); text-decoration: underline; font-weight: 600; }
+
+/* expected deliveries, approvals, access editor */
+.oxi-delivery { margin: 0 0 var(--s3); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--info); border-radius: var(--r-card); box-shadow: var(--shadow-sm); }
+.oxi-delivery.late { border-left-color: var(--danger); }
+.oxi-delivery-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--s4); margin-bottom: var(--s2); }
+.oxi-delivery-head a { font-weight: 700; font-size: 15px; }
+.oxi-delivery table { margin: var(--s2) 0 0; }
+.oxi-approval { margin: 0 0 var(--s3); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--warn); border-radius: var(--r-card); box-shadow: var(--shadow-sm); }
+.oxi-approval.late { border-left-color: var(--danger); }
+.oxi-approval-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3); }
+.oxi-approval-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--s2) var(--s4); margin: var(--s3) 0 0; }
+.oxi-approval-facts div { font-size: 14px; }
+.oxi-approval-facts dt { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.oxi-approval-facts dd { margin: 0; font-weight: 500; }
+.oxi-previous { margin: var(--s3) 0 0; padding: var(--s2) var(--s3); background: var(--surface-2); border-radius: var(--r-control); font-size: 13px; color: var(--text-2); }
+.oxi-previous ul { margin: 4px 0 0; padding-left: 18px; }
+fieldset.oxi-fs { margin: 0 0 var(--s4); padding: var(--s3) var(--s4); border: 1px solid var(--border); border-radius: var(--r-card); }
+fieldset.oxi-fs legend { padding: 0 var(--s2); font-weight: 600; }
+.oxi-roleopt { margin: 0 0 var(--s3); padding: var(--s3); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--surface-2); }
+.oxi-roleopt .oxi-branches { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin: var(--s2) 0 0 26px; }
+
+@media (max-width: 640px) {
+  .oxi-task { flex-direction: column; align-items: stretch; }
+  .oxi-task-side { align-self: stretch; }
+  .oxi-task-side .oxi-btn { width: 100%; min-height: 44px; }
+  .oxi-task-wait { max-width: none; text-align: left; }
+  .oxi-activity-when { margin-left: 0; }
+}
+
+/* ============================================================
+   13c. R&D PROJECTS: directory, project workspace, stage bar, tabs
+   ============================================================ */
+.oxi-band-title { font-size: 15px; font-weight: 600; margin: 0 0 var(--s2); color: var(--text-2); }
+.oxi-nav-proj .oxi-nav-label { overflow: hidden; text-overflow: ellipsis; }
+.oxi-tabs { display: flex; gap: var(--s1); margin: 0 0 var(--s4); border-bottom: 1px solid var(--border); }
+.oxi-tabs button { margin: 0; min-height: 40px; padding: 0 var(--s4); background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; color: var(--text-2); font-weight: 600; }
+.oxi-tabs button:hover { background: var(--surface-2); color: var(--text); }
+.oxi-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--primary); }
+.oxi-filterbar { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin: 0 0 var(--s3); }
+.oxi-filterbar input, .oxi-filterbar select { margin: 0; }
+.oxi-filterbar input[type="search"] { min-width: 240px; flex: 1 1 240px; max-width: 360px; }
+.oxi-filterbar label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.oxi-scopechips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 var(--s3); }
+.oxi-scopechips button { min-height: 34px; margin: 0; padding: 0 var(--s3); border-radius: 17px; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); font-weight: 500; font-size: 13.5px; }
+.oxi-scopechips button[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
+.oxi-scopechips button b { font-variant-numeric: tabular-nums; margin-left: 4px; }
+.oxi-fav { margin: 0; min-height: 30px; width: 30px; padding: 0; background: transparent; border: 0; color: var(--text-2); font-size: 18px; line-height: 1; }
+.oxi-fav:hover { background: var(--surface-2); color: var(--warn); }
+.oxi-fav[aria-pressed="true"] { color: var(--warn); }
+.oxi-progress { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.oxi-bar { display: inline-flex; gap: 2px; }
+.oxi-bar i { display: block; width: 12px; height: 8px; border-radius: 2px; background: var(--border-strong); }
+.oxi-bar i.done { background: var(--success); }
+.oxi-bar i.cur { background: var(--info); }
+.oxi-bar i.late { background: var(--danger); }
+.oxi-stagebar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin: 0 0 var(--s4); padding: 0; list-style: none; }
+.oxi-stagebar li { min-width: 0; padding: 8px 8px 10px; background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--border-strong); border-radius: 8px; font-size: 12px; }
+.oxi-stagebar li b { display: block; font-size: 12px; color: var(--text-2); font-weight: 600; }
+.oxi-stagebar li span { display: block; overflow-wrap: anywhere; line-height: 1.25; margin-top: 2px; font-weight: 500; }
+.oxi-stagebar li.done { border-top-color: var(--success); }
+.oxi-stagebar li.cur { border-top-color: var(--info); background: var(--info-bg); }
+.oxi-stagebar li.late { border-top-color: var(--danger); }
+.oxi-stagebar li em { display: block; margin-top: 4px; font-style: normal; font-size: 11.5px; font-weight: 600; }
+.oxi-stagebar li.done em { color: var(--success); } .oxi-stagebar li.cur em { color: var(--info); } .oxi-stagebar li.late em { color: var(--danger); }
+.oxi-pmeta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin: 0 0 var(--s4); font-size: 14px; }
+.oxi-pmeta > span { display: inline-flex; align-items: center; gap: 6px; }
+.oxi-pmeta small { color: var(--text-2); }
+.oxi-card2 { margin: 0 0 var(--s4); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: var(--shadow-sm); }
+.oxi-card2 > h3, .oxi-card2 > h2 { margin: 0 0 var(--s3); font-size: 17px; }
+.oxi-card2.next { border-left: 4px solid var(--info); }
+.oxi-card2.next.late { border-left-color: var(--danger); }
+.oxi-checklist { list-style: none; margin: var(--s2) 0; padding: 0; }
+.oxi-checklist li { margin: 0; }
+.oxi-checklist label { padding: 4px 0; font-weight: 500; }
+.oxi-missing { margin: var(--s2) 0; padding: var(--s2) var(--s3); background: var(--warn-bg); color: var(--warn); border-radius: var(--r-control); font-size: 13.5px; font-weight: 500; }
+.oxi-missing ul { margin: 4px 0 0; padding-left: 18px; }
+.oxi-flag { margin-top: 4px; font-size: 12.5px; color: var(--warn); font-weight: 500; }
+.oxi-conflict { margin: 0 0 var(--s3); padding: var(--s2) var(--s3); background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); border-radius: var(--r-control); font-size: 14px; }
+.oxi-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s3) var(--s4); }
+.oxi-grid2 label { font-weight: 600; }
+.oxi-grid2 select, .oxi-grid2 input, .oxi-grid2 textarea { width: 100%; max-width: 100%; }
+.oxi-kvlist { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s2) var(--s4); margin: 0; }
+.oxi-kvlist div { min-width: 0; font-size: 14px; }
+.oxi-kvlist dt { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.oxi-kvlist dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+details.oxi-details { margin: 0 0 var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); }
+details.oxi-details > summary { padding: var(--s3) var(--s4); cursor: pointer; font-weight: 600; }
+details.oxi-details[open] > summary { border-bottom: 1px solid var(--border); }
+details.oxi-details > div { padding: var(--s4); }
+.oxi-feed { list-style: none; margin: 0; padding: 0; }
+.oxi-feed li { padding: var(--s3) 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.oxi-feed li:last-child { border-bottom: 0; }
+.oxi-feed .who { font-weight: 600; }
+.oxi-feed .when { color: var(--text-2); font-size: 12.5px; margin-left: 6px; }
+.oxi-feed p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.oxi-feed .k-system { color: var(--text-2); }
+.oxi-banner { position: sticky; top: var(--topbar-h); z-index: 6; margin: 0 0 var(--s3); padding: var(--s2) var(--s3); background: var(--info-bg); color: var(--info); border: 1px solid var(--info); border-radius: var(--r-control); font-weight: 500; }
+.oxi-banner button { margin-left: var(--s2); min-height: 30px; }
+.oxi-grouphead { margin: var(--s4) 0 var(--s1); font-size: 14px; font-weight: 600; color: var(--text-2); }
+td select.inline { min-height: 32px; margin: 0; padding: 0 6px; font-size: 13px; }
+.oxi-errtext { color: var(--danger); font-size: 13px; margin-top: 4px; }
+.oxi-req-table td input { min-width: 100px; }
+.oxi-cap { max-width: 300px; } .oxi-cap.narrow { max-width: 170px; }
+.oxi-rd-table td:nth-child(2) a { overflow-wrap: anywhere; }
+.oxi-section-note { color: var(--text-2); font-size: 13px; margin: 0 0 var(--s3); }
+dialog.oxi-dlg { width: min(94vw, 560px); }
+dialog.oxi-dlg h3 { margin: 0 0 var(--s3); }
+dialog.oxi-dlg .row { display: flex; gap: var(--s2); justify-content: flex-end; margin-top: var(--s4); }
+dialog.oxi-dlg .row button { margin: 0; }
+dialog.oxi-dlg table { margin: var(--s2) 0; }
+@media (max-width: 640px) { .oxi-stagebar { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .oxi-tabs, .oxi-filterbar, .oxi-scopechips, .oxi-banner, .oxi-fav { display: none !important; } details.oxi-details { border: 1px solid #999; } details.oxi-details > div { display: block; } }
 
 /* ============================================================
    14. PRINT: only the record prints, always on white

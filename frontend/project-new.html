@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>R&amp;D Request</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">Home</a> &rsaquo; <a href="projects.html">R&amp;D Projects</a></p>
+  <h1 id="pageTitle">New R&amp;D request</h1>
+  <p class="oxi-page-sub" id="pageSub">Describe what is wanted. Save a draft while you are still gathering details; submit when it is ready for R&amp;D to assess. A project number is given when you submit.</p>
+  <p id="message" role="status"></p>
+  <div id="errorSummary" class="oxi-conflict" role="alert" tabindex="-1" hidden></div>
+
+  <form id="form" novalidate autocomplete="off">
+    <div id="sections"></div>
+
+    <section class="oxi-card2" aria-labelledby="reqTitle">
+      <h2 id="reqTitle">Performance requirements</h2>
+      <p class="oxi-section-note">Start from the usual parameters and fill in only what the customer or market needs. Rows with nothing written in them are ignored when you save. Remove a row you do not need.</p>
+      <table class="oxi-req-table" id="reqTable">
+        <thead><tr><th scope="col">Parameter</th><th scope="col">Target</th><th scope="col">Acceptable range</th><th scope="col">Test method</th><th scope="col">Benchmark value</th><th scope="col">Remarks</th><th scope="col"><span class="oxi-sr-only">Remove</span></th></tr></thead>
+        <tbody id="reqBody"></tbody>
+      </table>
+      <p><button type="button" id="addRow" class="oxi-btn-secondary">+ Add a row</button></p>
+    </section>
+
+    <div class="oxi-form-actions" id="actions" style="display:flex;flex-wrap:wrap;gap:var(--s2);margin:var(--s4) 0">
+      <button type="button" id="saveBtn" class="oxi-btn-secondary">Save draft</button>
+      <button type="submit" id="submitBtn">Submit request</button>
+      <a href="projects.html" id="cancel" class="oxi-btn oxi-btn-secondary">Cancel</a>
+    </div>
+  </form>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const qs = new URLSearchParams(location.search);
+    const editId = Number(qs.get('id')) || null;
+    let meta = null, project = null, version = null, dirty = false, busy = false;
+
+    // [field, label, kind, options]. kind: text | area | list | number | yesno ; required marks what a submitted request must have.
+    function sections() {
+      const L = meta.lists;
+      return [
+        { id: 'identity', title: '1. Project identification', rows: [
+          ['title', 'Project title', 'text', null, true], ['project_type', 'Project type', 'list', L.project_types, true],
+          ['priority', 'Priority', 'list', L.priorities, true], ['department', 'Requesting department', 'list', L.departments, true],
+          ['target_launch_date', 'Target launch date', 'date', null, true], ['customer_oem', 'Customer / OEM', 'text'], ['brand_product', 'Brand / product name', 'text']] },
+        { id: 'product', title: '2. Product definition', rows: [
+          ['product_category', 'Product category', 'list', L.product_categories, true], ['base_system', 'Base system', 'list', L.base_systems, true],
+          ['description', 'Product description and intended use', 'area', null, true], ['application_method', 'Application method', 'area'],
+          ['substrate', 'Substrate / surface', 'text'], ['end_user_market', 'End-user / market segment', 'text'],
+          ['benchmark', 'Benchmark products or competitors', 'area'], ['appearance_notes', 'Appearance, colour, odour or finish', 'area']] },
+        { id: 'commercial', title: '3. Commercial and packaging', rows: [
+          ['target_cost', 'Target cost', 'number'], ['cost_basis', 'Cost basis', 'list', L.cost_bases], ['monthly_volume', 'Expected monthly volume', 'number'],
+          ['volume_unit', 'Volume unit (for example kg, L or units)', 'text'], ['pack_sizes', 'Pack sizes', 'text'], ['packaging_type', 'Packaging type', 'text'],
+          ['labelling_claims', 'Labelling or marketing claims wanted', 'area']] },
+        { id: 'regulatory', title: '4. Regulatory and safety information', note: 'This records what the requester states. It does not certify that a product complies with any law or standard; compliance is confirmed separately.', rows: [
+          ['voc_limit_required', 'Is a VOC limit required?', 'yesno'], ['voc_target_gl', 'VOC target (g/L)', 'number'], ['sds_ghs_required', 'SDS / GHS classification required?', 'yesno'],
+          ['restricted_substances', 'Restricted or banned substances to avoid', 'area'], ['standards', 'Standards or specifications to refer to', 'area']] }
+      ];
+    }
+
+    function fieldEl(row) {
+      const [name, label, kind, opts, req] = row;
+      const wrap = el('div');
+      const lab = el('label', null, label + (req ? ' *' : '')); lab.htmlFor = 'f_' + name; wrap.appendChild(lab);
+      let ctl;
+      if (kind === 'area') { ctl = el('textarea'); ctl.rows = 3; }
+      else if (kind === 'list') { ctl = el('select'); const o = el('option', null, 'Select...'); o.value = ''; ctl.appendChild(o); opts.forEach(v => { const x = el('option', null, v); x.value = v; ctl.appendChild(x); }); }
+      else if (kind === 'yesno') { ctl = el('select'); [['', 'Not stated'], ['true', 'Yes'], ['false', 'No']].forEach(([v, t]) => { const x = el('option', null, t); x.value = v; ctl.appendChild(x); }); }
+      else if (kind === 'number') { ctl = el('input'); ctl.type = 'number'; ctl.min = '0'; ctl.step = 'any'; ctl.inputMode = 'decimal'; }
+      else if (kind === 'date') { ctl = el('input'); ctl.type = 'date'; }
+      else { ctl = el('input'); ctl.type = 'text'; }
+      ctl.id = 'f_' + name; ctl.name = name; ctl.dataset.field = name;
+      if (name === 'title') ctl.maxLength = 200;
+      wrap.appendChild(ctl);
+      if (kind === 'date') {
+        const tbc = el('label'); tbc.style.cssText = 'display:flex;align-items:center;gap:8px;font-weight:500;margin-top:6px';
+        const cb = el('input'); cb.type = 'checkbox'; cb.id = 'f_target_tbc'; cb.style.cssText = 'width:auto;min-height:0;margin:0'; cb.dataset.field = 'target_tbc';
+        tbc.append(cb, document.createTextNode(' To be confirmed'));
+        cb.addEventListener('change', () => { ctl.disabled = cb.checked; if (cb.checked) ctl.value = ''; });
+        wrap.appendChild(tbc);
+      }
+      const err = el('div', 'oxi-errtext'); err.id = 'e_' + name; err.hidden = true; wrap.appendChild(err);
+      return wrap;
+    }
+
+    function reqRow(r) {
+      r = r || {};
+      const tr = el('tr');
+      ['parameter', 'target', 'acceptable_range', 'test_method', 'benchmark_value', 'remarks'].forEach((k, i) => {
+        const td = el('td'); const inp = el('input'); inp.type = 'text'; inp.value = r[k] || ''; inp.dataset.k = k; inp.maxLength = 300;
+        inp.setAttribute('aria-label', ['Parameter', 'Target', 'Acceptable range', 'Test method', 'Benchmark value', 'Remarks'][i]);
+        td.appendChild(inp); tr.appendChild(td);
+      });
+      const td = el('td'); const rm = el('button', 'oxi-btn-secondary', 'Remove'); rm.type = 'button'; rm.onclick = () => { tr.remove(); dirty = true; }; td.appendChild(rm); tr.appendChild(td);
+      $('reqBody').appendChild(tr);
+    }
+
+    function collect() {
+      const out = {};
+      document.querySelectorAll('[data-field]').forEach(c => {
+        const k = c.dataset.field;
+        if (c.type === 'checkbox') { out[k] = c.checked; return; }
+        let v = c.value;
+        if (c.tagName === 'SELECT' && (c.id === 'f_voc_limit_required' || c.id === 'f_sds_ghs_required')) { out[k] = v === '' ? null : v === 'true'; return; }
+        out[k] = v === '' ? null : (c.type === 'number' ? Number(v) : v.trim());
+      });
+      out.requirements = [...$('reqBody').querySelectorAll('tr')].map(tr => Object.fromEntries([...tr.querySelectorAll('input')].map(i => [i.dataset.k, i.value.trim()])));
+      return out;
+    }
+
+    function fill(p) {
+      document.querySelectorAll('[data-field]').forEach(c => {
+        const k = c.dataset.field, v = p[k];
+        if (c.type === 'checkbox') { c.checked = !!v; if (k === 'target_tbc') $('f_target_launch_date').disabled = !!v; return; }
+        c.value = v == null ? '' : String(v);
+      });
+      if (p.target_launch_date) $('f_target_launch_date').value = String(p.target_launch_date).slice(0, 10);
+    }
+
+    function clearErrors() {
+      $('errorSummary').hidden = true; $('errorSummary').innerHTML = '';
+      document.querySelectorAll('.oxi-errtext').forEach(e => { e.hidden = true; e.textContent = ''; });
+      document.querySelectorAll('[aria-invalid]').forEach(c => c.removeAttribute('aria-invalid'));
+    }
+    function showErrors(r) {
+      const errs = r.errors && r.errors.length ? r.errors : [{ message: r.error || 'Could not save' }];
+      const box = $('errorSummary'); box.innerHTML = ''; box.appendChild(el('b', null, errs.length === 1 ? 'One thing needs attention' : errs.length + ' things need attention'));
+      const ul = el('ul');
+      errs.forEach(e => {
+        const li = el('li'); const c = e.field && $('f_' + e.field);
+        if (c) {
+          const a = el('a', null, e.message); a.href = '#f_' + e.field; a.onclick = (ev) => { ev.preventDefault(); c.focus(); }; li.appendChild(a);
+          c.setAttribute('aria-invalid', 'true'); c.setAttribute('aria-describedby', 'e_' + e.field);
+          const m = $('e_' + e.field); m.textContent = e.message; m.hidden = false;
+        } else li.textContent = e.message;
+        ul.appendChild(li);
+      });
+      box.appendChild(ul); box.hidden = false; box.focus(); box.scrollIntoView({ block: 'center' });
+    }
+
+    function setBusy(on) { busy = on; ['saveBtn', 'submitBtn'].forEach(id => { $(id).disabled = on; }); }
+
+    // Saves the draft (creating it the first time). Returns the id, or null when it failed.
+    async function save(submit) {
+      clearErrors(); show('', true);
+      const body = collect();
+      if (!project) {
+        body.submit = !!submit;
+        const r = await api('/api/rd/projects', 'POST', body);
+        if (!r.success) { showErrors(r); return null; }
+        dirty = false; return r;
+      }
+      body.version = version;
+      const r = await api('/api/rd/projects/' + project.id, 'PATCH', body);
+      if (!r.success) { showErrors(r); return null; }
+      version = r.version; dirty = false;
+      if (submit) {
+        const s = await api('/api/rd/projects/' + project.id + '/submit', 'POST', {});
+        if (!s.success) { showErrors(s); return null; }
+        return { ...s, id: project.id };
+      }
+      return { success: true, id: project.id };
+    }
+
+    $('saveBtn').addEventListener('click', async () => {
+      if (busy) return; setBusy(true);
+      try {
+        const wasEdit = project && !project.is_draft;
+        const r = await save(false);
+        if (r) {
+          if (wasEdit) { location.href = 'project.html?id=' + r.id; return; }
+          // a new draft: reopen it by id so a further save updates it instead of creating another
+          location.replace('project-new.html?id=' + r.id + '&saved=1');
+        }
+      } finally { setBusy(false); }
+    });
+    $('form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (busy) return;
+      if (project && !project.is_draft) { $('saveBtn').click(); return; }
+      setBusy(true);
+      try {
+        const r = await save(true);
+        if (r) location.href = 'project.html?id=' + r.id + '&submitted=' + encodeURIComponent(r.project_number || '');
+      } finally { setBusy(false); }
+    });
+    $('addRow').addEventListener('click', () => { reqRow(); const last = $('reqBody').lastElementChild; last.querySelector('input').focus(); dirty = true; });
+    $('form').addEventListener('input', () => { dirty = true; });
+    window.addEventListener('beforeunload', (e) => { if (dirty && !busy) { e.preventDefault(); e.returnValue = ''; } });
+
+    (async function init() {
+      const m = await api('/api/rd/meta');
+      if (!m.success) { show(m.error || 'You may not open R&D requests.', false); $('form').hidden = true; return; }
+      meta = m;
+      const host = $('sections');
+      sections().forEach(s => {
+        const sec = el('section', 'oxi-card2'); sec.setAttribute('aria-labelledby', 'h_' + s.id);
+        const h = el('h2', null, s.title); h.id = 'h_' + s.id; sec.appendChild(h);
+        if (s.note) sec.appendChild(el('p', 'oxi-section-note', s.note));
+        const g = el('div', 'oxi-grid2'); s.rows.forEach(r => g.appendChild(fieldEl(r))); sec.appendChild(g); host.appendChild(sec);
+        if (s.id === 'identity') {
+          const who = el('p', 'oxi-section-note'); who.id = 'whoLine'; sec.insertBefore(who, g);
+          try { const u = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); who.textContent = u ? 'Requested by ' + u.name + ' (recorded automatically).' : ''; } catch (e) {}
+        }
+      });
+      if (editId) {
+        const d = await api('/api/rd/projects/' + editId);
+        if (!d.success) { show(d.error || 'Could not open this request.', false); $('form').hidden = true; return; }
+        project = d.project; version = d.project.version;
+        if (!d.can.edit) { show('You may not edit this request.', false); $('form').hidden = true; return; }
+        fill(project);
+        (d.requirements.length ? d.requirements : []).forEach(reqRow);
+        if (!project.is_draft) {
+          $('pageTitle').textContent = 'Edit request ' + project.project_number;
+          $('pageSub').textContent = 'Changing a submitted request is recorded in the project activity.';
+          $('saveBtn').hidden = true; $('submitBtn').textContent = 'Save changes'; $('cancel').href = 'project.html?id=' + project.id;
+        } else {
+          $('pageTitle').textContent = 'Edit draft';
+          if (qs.get('saved')) show('Draft saved. It has no project number until you submit it.', true);
+        }
+      } else {
+        m.default_requirement_rows.forEach(name => reqRow({ parameter: name }));
+      }
+      dirty = false;
+      if (!m.can.create && !project) { show('Your role may view projects but not start requests.', false); $('form').hidden = true; }
+    })().catch(() => show('Could not reach the server.', false));
+  </script>
+</body>
+</html>

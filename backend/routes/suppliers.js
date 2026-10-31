@@ -13,6 +13,9 @@ router.get('/', requirePermission(KEYS.SUPPLIERS_VIEW), async (req, res) => {
       "SELECT id, name, contact_person, phone, email, bank_name, account_number, ifsc_code " +
       "FROM suppliers WHERE status = 'active' ORDER BY name"
     );
+    const { fieldAccess } = require('../access');
+    const fa = fieldAccess(req.access);
+    if (!fa.supplier_bank) result.rows.forEach(r => { delete r.bank_name; delete r.account_number; delete r.ifsc_code; });
     res.json({ success: true, suppliers: result.rows });
   } catch (err) {
     console.error(err);

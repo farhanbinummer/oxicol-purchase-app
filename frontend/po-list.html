@@ -46,7 +46,10 @@
       const rows = document.getElementById('rows');
       rows.innerHTML = '';
       if (!d.success) { document.getElementById('message').textContent = d.error; return; }
-      if (d.pos.length === 0) { rows.innerHTML = '<tr><td colspan="6">No POs yet.</td></tr>'; return; }
+      // People without access to prices receive no totals at all; the column is dropped rather than shown as zero.
+      if (d.prices_hidden) { const th = document.querySelector('thead th:nth-child(5)'); if (th) th.remove(); }
+      const cols = d.prices_hidden ? 5 : 6;
+      if (d.pos.length === 0) { rows.innerHTML = '<tr><td colspan="' + cols + '">No POs yet.</td></tr>'; return; }
       d.pos.forEach(po => {
         const tr = document.createElement('tr');
         tr.dataset.status = po.status;
@@ -56,7 +59,7 @@
         link.textContent = po.po_number;
         const first = document.createElement('td'); first.appendChild(link);
         tr.appendChild(first);
-        [day(po.po_date), po.supplier_name, day(po.delivery_date), money(po.total_amount)]
+        [day(po.po_date), po.supplier_name, day(po.delivery_date)].concat(d.prices_hidden ? [] : [money(po.total_amount)])
           .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
         const statusTd = document.createElement('td');
         statusTd.appendChild(badge(po.status));

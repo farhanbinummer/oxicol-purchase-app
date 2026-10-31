@@ -17,7 +17,7 @@
   <p id="message"></p>
 
   <table>
-    <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Branch</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Username</th><th>Name</th><th>Roles</th><th>Branches</th><th>Status</th><th></th></tr></thead>
     <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
   </table>
 
@@ -57,7 +57,9 @@
       if (!d.success) { show(d.error, false); return; }
       d.users.forEach(u => {
         const tr = document.createElement('tr');
-        addCell(tr, u.username); addCell(tr, u.name); addCell(tr, u.role); addCell(tr, u.branch || '-');
+        const LABELS = { rd: 'R&D', admin: 'Administrator', manager: 'Manager', purchase: 'Purchase', accounts: 'Accounts', store: 'Stores', qc: 'Quality check', production: 'Production', branch: 'Branch staff' };
+        const scopeText = Object.values(u.scopes || {}).flat().filter((b, i, a) => a.indexOf(b) === i).join(', ');
+        addCell(tr, u.username); addCell(tr, u.name); addCell(tr, (u.roles || [u.role]).map(r => LABELS[r] || r).join(', ')); addCell(tr, scopeText || '-');
         addBadge(tr, u.active ? 'active' : 'disabled');
         const td = document.createElement('td');
 
@@ -81,23 +83,8 @@
         };
 
         const roleBtn = document.createElement('button');
-        roleBtn.textContent = 'Change role';
-        roleBtn.onclick = async () => {
-          const roles = ['branch', 'production', 'store', 'purchase', 'accounts', 'admin'];
-          const newRole = prompt('New role for ' + u.name + '.\nOne of: ' + roles.join(', '), u.role);
-          if (newRole === null) return;
-          if (!roles.includes(newRole)) { show('Role must be one of: ' + roles.join(', '), false); return; }
-          let branch = null;
-          if (newRole === 'branch') {
-            const branches = ['Kannur', 'Thrissur', 'Trivandrum', 'Ernakulam'];
-            branch = prompt('Which branch?\nOne of: ' + branches.join(', '), u.branch || '');
-            if (branch === null) return;
-            if (!branches.includes(branch)) { show('Branch must be one of: ' + branches.join(', '), false); return; }
-          }
-          const r = await api('/api/auth/users/' + u.id, 'PUT', { role: newRole, branch });
-          if (r.success) { show('Role changed - they must log in again', true); load(); }
-          else show(r.error, false);
-        };
+        roleBtn.textContent = 'Edit access';
+        roleBtn.onclick = () => { location.href = 'user-access.html?id=' + u.id; }; // roles and branches have their own page
 
         const resetBtn = document.createElement('button');
         resetBtn.textContent = 'Reset password';

@@ -12,6 +12,7 @@ const express = require('express');
 const { pool } = require('../database');
 const { fail } = require('../utils');
 const { requirePermission, requireRole } = require('../auth');
+const { branchScope, branchClause, inBranchScope } = require('../access');
 const { KEYS } = require('../permissions');
 const { audit } = require('../audit');
 const { rankItems, normalize } = require('../catalog-search');
@@ -136,11 +137,13 @@ router.delete('/aliases/:id', requireRole('admin'), async (req, res) => {
 // ---------- legacy mapping review ----------
 router.get('/unmapped', requirePermission(KEYS.CATALOG_MAP_ITEMS), async (req, res) => {
   try {
+    const scopeParams = [];
+    const scoped = branchClause(branchScope(req.access, KEYS.CATALOG_MAP_ITEMS), 'b.branch', scopeParams);
     const r = await pool.query(
       `SELECT i.id AS item_id, i.item_name, i.quantity::float AS quantity, i.unit,
               b.id AS request_id, b.request_number, b.branch, b.status
          FROM branch_request_items i JOIN branch_stock_requests b ON b.id = i.request_id
-        WHERE i.mapping_status = 'needs_review' AND i.product_id IS NULL ORDER BY b.id DESC, i.id`);
+        WHERE i.mapping_status = 'needs_review' AND i.product_id IS NULL${scoped} ORDER BY b.id DESC, i.id`, scopeParams);
     const products = await loadProducts(pool, true);
     const items = r.rows.map(row => ({
       ...row,
@@ -160,7 +163,7 @@ router.put('/map-item', requirePermission(KEYS.CATALOG_MAP_ITEMS), async (req, r
       `SELECT i.id, i.item_name, i.product_id, b.request_number, b.branch FROM branch_request_items i
          JOIN branch_stock_requests b ON b.id = i.request_id WHERE i.id = $1 FOR UPDATE OF i`, [item_id]);
     if (it.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 404, 'Request item not found'); }
-    if (req.user.role === 'branch' && it.rows[0].branch !== req.user.branch) { await client.query('ROLLBACK'); return fail(res, 403, 'That request belongs to a different branch'); }
+    if (!inBranchScope(branchScope(req.access, KEYS.CATALOG_MAP_ITEMS), it.rows[0].branch)) { await client.query('ROLLBACK'); return fail(res, 403, 'That request belongs to a different branch'); }
     const p = await client.query('SELECT id, code, name FROM products WHERE id = $1 AND active', [product_id]);
     if (p.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 400, 'That product is not active or does not exist'); }
     await client.query("UPDATE branch_request_items SET product_id = $1, mapping_status = 'mapped' WHERE id = $2", [product_id, item_id]);

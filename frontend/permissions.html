@@ -36,7 +36,9 @@
       cannot view or approve a Thrissur request, even with "View requests" ticked for Branch.</li>
     <li>Every signed-in user, of any role, can change their own password and log out
       (<a href="account.html">My Account</a>) - that's not role-gated, so it isn't listed below.</li>
-    <li>Search results are automatically limited to what that role could open anyway.</li>
+    <li>Search results, dashboard counts and notifications are automatically limited to what that role could open anyway.</li>
+    <li><b>Restricted fields</b> decide whether prices, tax and totals (or suppliers' bank details) are included in what a role can already open. A role without them still sees the order, just not the money.</li>
+    <li>Which <em>branches</em> a person covers, and whether they hold several roles, is set per person on <a href="users.html">Users</a> &rarr; Edit access, not here.</li>
   </ul>
 
   <script src="common.js"></script>
@@ -48,7 +50,7 @@
       if (!u || u.role !== 'admin') location.href = 'index.html';
     })();
 
-    const ROLE_LABEL = { branch: 'Branch', production: 'Production', store: 'Store', purchase: 'Purchase', accounts: 'Accounts' };
+    const ROLE_LABEL = { branch: 'Branch', production: 'Production', store: 'Store', purchase: 'Purchase', accounts: 'Accounts', qc: 'Quality check', manager: 'Manager', rd: 'R&D' };
 
     async function load() {
       const d = await api('/api/auth/role-permissions');

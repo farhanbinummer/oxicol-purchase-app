@@ -66,8 +66,9 @@
       d.invoice_variances.forEach(i => {
         const tr = document.createElement('tr');
         addCell(tr, i.reference); addCell(tr, i.po_number); addCell(tr, i.supplier_name); addCell(tr, i.status);
-        addCell(tr, money(i.po_total)); addCell(tr, money(i.grn_total)); addCell(tr, money(i.invoice_total));
-        addCell(tr, money(i.variance_amount)).className = 'error';
+        const mv = (v) => (v === undefined || v === null ? '\u2014' : money(v));
+        addCell(tr, mv(i.po_total)); addCell(tr, mv(i.grn_total)); addCell(tr, mv(i.invoice_total));
+        addCell(tr, mv(i.variance_amount)).className = 'error';
         addCell(tr, i.notes);
         ir.appendChild(tr);
       });

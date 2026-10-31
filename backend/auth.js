@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { pool } = require('./database');
 const { fail } = require('./utils');
 const { CATALOG } = require('./permissions');
+const { loadAccess, can } = require('./access');
 
 const VALID_KEYS = new Set(CATALOG.map(c => c.key));
 
@@ -40,7 +41,10 @@ async function requireAuth(req, res, next) {
       return fail(res, 401, 'Session expired - please log in again');
     }
     if (!row.active) return fail(res, 403, 'This account has been disabled');
-    req.user = { id: row.id, username: row.username, name: row.name, role: row.role, branch: row.branch };
+    // Roles, scope and granted actions are read on every request, so a change made by an administrator
+    // (a role removed, a permission revoked) applies to the very next call, without anyone signing out.
+    req.access = await loadAccess(pool, row.id);
+    req.user = { id: row.id, username: row.username, name: row.name, role: row.role, branch: row.branch, roles: req.access.roles };
     next();
   } catch (err) {
     console.error('Auth check failed:', err);
@@ -55,7 +59,8 @@ async function requireAuth(req, res, next) {
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) return fail(res, 401, 'Not logged in');
-    if (req.user.role === 'admin' || roles.includes(req.user.role)) return next();
+    const held = (req.access && req.access.roles) || [req.user.role];
+    if (held.includes('admin') || roles.some(r => held.includes(r))) return next();
     fail(res, 403, `Your role ("${req.user.role}") is not allowed to do this`);
   };
 }
@@ -72,27 +77,17 @@ function requireRole(...roles) {
 /** True when this user may use the permission (admin always can). Used where one endpoint serves two powers. */
 async function hasPermission(user, key) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
-  const r = await pool.query('SELECT 1 FROM role_permissions WHERE role = $1 AND permission_key = $2', [user.role, key]);
-  return r.rowCount > 0;
+  return can(await loadAccess(pool, user.id), key);
 }
 
 function requirePermission(key) {
   if (!VALID_KEYS.has(key)) {
     throw new Error(`requirePermission("${key}") is not in permissions.js's CATALOG - fix the route file.`);
   }
-  return async (req, res, next) => {
+  return (req, res, next) => {
     if (!req.user) return fail(res, 401, 'Not logged in');
-    if (req.user.role === 'admin') return next();
-    try {
-      const r = await pool.query(
-        'SELECT 1 FROM role_permissions WHERE role = $1 AND permission_key = $2', [req.user.role, key]);
-      if (r.rowCount > 0) return next();
-      fail(res, 403, `Your role ("${req.user.role}") is not allowed to do this`);
-    } catch (err) {
-      console.error('Permission check failed:', err);
-      fail(res, 500, 'Could not verify permission');
-    }
+    if (can(req.access, key)) return next();
+    fail(res, 403, `Your role ("${req.user.role}") is not allowed to do this`);
   };
 }
 
