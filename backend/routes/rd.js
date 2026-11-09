@@ -231,6 +231,19 @@ router.get('/projects', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), as
   } catch (err) { console.error('rd list failed:', err); fail(res, 500, 'Could not load projects'); }
 });
 
+// open tasks assigned to the signed-in person, on projects they may open (same visibility clause as the list)
+router.get('/my-tasks', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), async (req, res) => {
+  try {
+    const vis = visibleClause(req.access, req.user.id, 'p', 0);
+    const r = await pool.query(
+      `SELECT t.id, t.title, t.status, t.priority, t.due_date, t.project_id, p.project_number, p.title AS project_title
+         FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id
+        WHERE t.assignee_id = $1 AND t.status <> 'done' AND p.is_draft = FALSE AND ${vis.clause}
+        ORDER BY t.due_date NULLS LAST, t.id LIMIT 50`, vis.params);
+    res.json({ success: true, tasks: r.rows.map(x => norm(x)) });
+  } catch (err) { console.error('rd my-tasks failed:', err); fail(res, 500, 'Could not load your tasks'); }
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // create (draft or submit), read, edit
 // ---------------------------------------------------------------------------------------------------------------

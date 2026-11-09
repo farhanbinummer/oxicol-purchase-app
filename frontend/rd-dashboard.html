@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>R&amp;D Dashboard</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="projects.html">All projects</a> | <a href="project-new.html">+ New R&amp;D request</a></p>
+  <h1>R&amp;D Dashboard</h1>
+  <p class="oxi-page-sub">Where every active project stands, what is late, and what is next. Counts use the same rules as the project list.</p>
+  <p id="message" role="status"></p>
+  <div id="dash" aria-busy="true"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const STAGES = ['Literature / Raw-Material Sourcing', 'First Lab Batch', 'Lab Trials & Optimisation', 'Internal Testing / QC Approval', 'Sample to Requester / Customer', 'Customer Approval', 'Plant Trial / Scale-up', 'Handover to Production'];
+
+    function tile(label, value, cls, href) {
+      const a = el(href ? 'a' : 'div', 'oxi-kpi-chip' + (cls ? ' ' + cls : '')); if (href) a.href = href;
+      a.append(el('span'), el('span')); a.lastChild.append(el('b', null, String(value)), document.createTextNode(label));
+      return a;
+    }
+    function card(title, id) { const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', id); const h = el('h2', null, title); h.id = id; c.appendChild(h); return c; }
+    function daysTo(iso, today) { return Math.round((Date.parse(iso.slice(0, 10)) - Date.parse(today)) / 86400000); }
+
+    async function load() {
+      const [pr, tk] = await Promise.all([api('/api/rd/projects?scope=active&sort=target'), api('/api/rd/my-tasks')]);
+      const box = $('dash'); box.setAttribute('aria-busy', 'false'); box.innerHTML = '';
+      if (!pr.success) { box.appendChild(el('p', 'error', pr.error || 'Could not load the dashboard.')); return; }
+      const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      const P = pr.projects, tasks = tk.success ? tk.tasks : [];
+      const late = P.filter(p => p.overdue_stages), lab = P.filter(p => p.current_stage_no === 3);
+      const soon = P.filter(p => p.target_launch_date && !p.target_tbc && daysTo(p.target_launch_date, today) >= 0 && daysTo(p.target_launch_date, today) <= 30);
+      const myLate = tasks.filter(t => t.due_date && t.due_date < today);
+
+      const tiles = el('div', 'oxi-kpi-chips'); tiles.setAttribute('role', 'list');
+      tiles.append(
+        tile('Active projects', pr.counts.active, '', 'projects.html?scope=active'),
+        tile('In lab trials', lab.length, ''),
+        tile('With overdue stages', late.length, late.length ? 'bad' : 'good', 'projects.html?overdue=1'),
+        tile('On hold', pr.counts.hold, pr.counts.hold ? 'warn' : '', 'projects.html?scope=hold'),
+        tile('Launching in 30 days', soon.length, soon.length ? 'warn' : ''),
+        tile('My overdue tasks', myLate.length, myLate.length ? 'bad' : 'good'));
+      box.appendChild(tiles);
+
+      const grid = el('div', 'oxi-grid2');
+
+      // needs attention
+      const att = card('Needs attention', 'dAtt');
+      const rows = [];
+      P.forEach(p => {
+        if (p.overdue_stages) rows.push([p, p.overdue_stages + ' stage' + (p.overdue_stages === 1 ? '' : 's') + ' overdue', 2]);
+        if (p.overdue_tasks) rows.push([p, p.overdue_tasks + ' task' + (p.overdue_tasks === 1 ? '' : 's') + ' overdue', 1]);
+      });
+      P.filter(p => p.status === 'Received').forEach(p => rows.push([p, 'Waiting for review', 0]));
+      rows.sort((a, b) => b[2] - a[2]);
+      if (!rows.length) att.appendChild(el('p', null, 'Nothing needs attention right now.'));
+      else { const ul = el('ul', 'oxi-feed'); rows.slice(0, 8).forEach(([p, why, sev]) => { const li = el('li'); const a = el('a', null, p.project_number + ' ' + p.title); a.href = 'project.html?id=' + p.id; li.append(a, el('p', sev ? 'oxi-late' : null, why)); ul.appendChild(li); }); att.appendChild(ul); }
+
+      // my tasks
+      const my = card('My tasks', 'dMy');
+      if (!tasks.length) my.appendChild(el('p', null, 'No open tasks assigned to you.'));
+      else { const ul = el('ul', 'oxi-feed'); tasks.slice(0, 8).forEach(t => { const li = el('li'); const a = el('a', null, t.title); a.href = 'project.html?id=' + t.project_id + '#list'; li.append(a, el('p', t.due_date && t.due_date < today ? 'oxi-late' : null, t.project_number + ' - ' + (t.due_date ? 'due ' + dmy(t.due_date) : 'no due date'))); ul.appendChild(li); }); my.appendChild(ul); }
+      grid.append(att, my);
+
+      // pipeline by stage
+      const pipe = card('Pipeline by stage', 'dPipe');
+      const counts = STAGES.map((n, i) => P.filter(p => p.current_stage_no === i + 1).length), max = Math.max(1, ...counts);
+      const ul = el('ul', 'oxi-pipeline');
+      counts.forEach((n, i) => {
+        const li = el('li'); const bar = el('span', 'bar'); const fill = el('i'); fill.style.width = (n / max * 100) + '%'; bar.appendChild(fill);
+        li.append(el('span', 'lbl', (i + 1) + '. ' + STAGES[i]), bar, el('b', null, String(n))); ul.appendChild(li);
+      });
+      pipe.appendChild(ul);
+
+      // upcoming launches
+      const up = card('Upcoming launch dates', 'dUp');
+      const dated = P.filter(p => p.target_launch_date && !p.target_tbc).sort((a, b) => a.target_launch_date.localeCompare(b.target_launch_date)).slice(0, 6);
+      if (!dated.length) up.appendChild(el('p', null, 'No projects have a confirmed launch date.'));
+      else { const l = el('ul', 'oxi-feed'); dated.forEach(p => { const d = daysTo(p.target_launch_date, today); const li = el('li'); const a = el('a', null, p.project_number + ' ' + p.title); a.href = 'project.html?id=' + p.id; li.append(a, el('p', d < 0 ? 'oxi-late' : null, dmy(p.target_launch_date) + (d < 0 ? ' (' + (-d) + ' days past)' : ' (in ' + d + ' days)'))); l.appendChild(li); }); up.appendChild(l); }
+      grid.append(pipe, up);
+      box.appendChild(grid);
+
+      // table
+      const tc = card('Active projects', 'dTab');
+      if (!P.length) tc.appendChild(el('p', null, 'No active projects.'));
+      else {
+        const t = el('table'); t.innerHTML = '<thead><tr><th scope="col">Project</th><th scope="col">Stage</th><th scope="col">Progress</th><th scope="col">Lead</th><th scope="col">Target</th><th scope="col">Status</th></tr></thead>';
+        const tb = el('tbody');
+        P.slice(0, 15).forEach(p => {
+          const tr = el('tr'); const c0 = el('td'); const a = el('a', null, p.project_number + ' ' + p.title); a.href = 'project.html?id=' + p.id; c0.appendChild(a);
+          const prog = el('td'); const b = el('span', 'oxi-bar'); for (let i = 1; i <= 8; i++) b.appendChild(el('i', i <= p.stages_done ? 'done' : (i === p.current_stage_no ? (p.overdue_stages ? 'late' : 'cur') : ''))); prog.append(b, document.createTextNode(' ' + p.stages_done + '/8'));
+          const st = el('td'); st.appendChild(rdBadge(p.status));
+          tr.append(c0, el('td', null, p.current_stage || 'All done'), prog, el('td', null, p.lead_name || '-'), el('td', null, p.target_tbc ? 'TBC' : (p.target_launch_date ? dmy(p.target_launch_date) : '-')), st);
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb); tc.appendChild(t);
+        if (P.length > 15) { const m = el('p'); const a = el('a', null, 'See all ' + P.length + ' projects'); a.href = 'projects.html'; m.appendChild(a); tc.appendChild(m); }
+      }
+      box.appendChild(tc);
+    }
+    load().catch(() => { $('message').textContent = 'Could not reach the server.'; $('message').className = 'error'; });
+  </script>
+</body>
+</html>

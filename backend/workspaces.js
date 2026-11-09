@@ -239,10 +239,11 @@ const WORKSPACES = {
   rd: {
     title: 'R&D Workspace', roles: ['rd'],
     description: 'Your current stages, tasks that are due, the projects you lead and requests waiting to be assessed.',
-    tabs: [{ label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }, { label: 'New request', icon: 'plus', href: 'project-new.html' }],
+    tabs: [{ label: 'Dashboard', icon: 'dashboard', href: 'rd-dashboard.html' }, { label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }, { label: 'New request', icon: 'plus', href: 'project-new.html' }],
     nav: [
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Projects', items: [
+        { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW },
         { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html'] },
         { label: 'New R&D Request', href: 'project-new.html', icon: 'plus', perm: KEYS.RD_CREATE } ] },
       { title: 'Master Data', items: [{ label: 'Finished Products', href: 'catalog.html', icon: 'tag', perm: KEYS.CATALOG_VIEW }] }
@@ -271,7 +272,7 @@ const WORKSPACES = {
 // wider permission, all of them).
 for (const [id, w] of Object.entries(WORKSPACES)) {
   if (id === 'rd') continue;
-  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
+  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
 }
 
 /** Workspaces a person is assigned: those that list any of the roles they hold. Switching never adds permissions. */
