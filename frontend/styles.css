@@ -1167,3 +1167,14 @@ dialog.oxi-dlg table { margin: var(--s2) 0; }
   .oxi-print-signatures { display: flex; justify-content: space-between; margin-top: 48px; }
   .oxi-print-signatures div { width: 40%; border-top: 1px solid #000; padding-top: 6px; font-size: 12px; text-align: center; }
 }
+
+/* project page: attention box, task side panel */
+.oxi-card2.attention { border-left: 4px solid var(--success); }
+.oxi-card2.attention.late { border-left-color: var(--warn); }
+.oxi-card2.attention ul { margin: 0; padding-left: 20px; }
+.oxi-linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; text-align: left; cursor: pointer; min-height: 0; box-shadow: none; }
+.oxi-linkbtn:hover { text-decoration: underline; background: none; }
+.oxi-sidebg { position: fixed; inset: 0; background: rgba(10, 20, 35, .45); z-index: 60; display: flex; justify-content: flex-end; }
+.oxi-sidepanel { width: min(440px, 100%); height: 100%; overflow-y: auto; background: var(--surface); color: var(--text); padding: var(--s4); box-shadow: var(--shadow-md, -4px 0 24px rgba(0,0,0,.25)); }
+.oxi-sidehead { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); margin-bottom: var(--s3); }
+.oxi-sidehead h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
