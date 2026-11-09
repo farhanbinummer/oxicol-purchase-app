@@ -483,9 +483,43 @@
       d.appendChild(box); return d;
     }
 
+    // ------------------------------------------------------------------ KPI tiles and attention box
+    function daysBetween(a, b) { return Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 86400000); }
+    function kpiTiles() {
+      const p = D.project, done = D.stages.filter(s => s.state === 'done').length;
+      const open = D.tasks.filter(t => t.status !== 'done');
+      const overdue = open.filter(t => t.due_date && t.due_date < D.today).length;
+      const blocked = open.filter(t => t.status === 'blocked').length;
+      const g = el('div', 'oxi-kpi-chips'); g.setAttribute('role', 'list');
+      const tile = (label, value, cls) => { const c = el('div', 'oxi-kpi-chip' + (cls ? ' ' + cls : '')); c.setAttribute('role', 'listitem'); c.append(el('span'), el('span')); c.lastChild.append(el('b', null, value), document.createTextNode(label)); g.appendChild(c); };
+      tile('Stages complete', done + ' of ' + D.stages.length, done === D.stages.length ? 'good' : '');
+      tile('Open tasks', String(open.length) + (blocked ? ' (' + blocked + ' blocked)' : ''), blocked ? 'warn' : '');
+      tile('Overdue tasks', String(overdue), overdue ? 'bad' : 'good');
+      let days = '-', cls = '';
+      if (p.target_launch_date && !p.target_tbc) { const d = daysBetween(D.today, p.target_launch_date); days = d >= 0 ? d + ' days' : Math.abs(d) + ' days past'; cls = d < 0 ? 'bad' : d <= 14 ? 'warn' : ''; }
+      tile('To target launch', days, cls);
+      return g;
+    }
+    function attentionCard() {
+      const items = [], p = D.project;
+      if (['Completed', 'Rejected'].includes(p.status)) return document.createDocumentFragment();
+      if (p.status === 'On Hold') items.push('Project is on hold.');
+      D.stages.filter(s => s.overdue).forEach(s => items.push('Stage ' + s.no + ' (' + s.name + ') is overdue by ' + s.delay + ' day' + (s.delay === 1 ? '' : 's') + '.'));
+      D.stages.filter(s => s.review_flag).forEach(s => items.push('Stage ' + s.no + ' needs review: ' + s.review_flag));
+      D.tasks.filter(t => t.status === 'blocked').forEach(t => items.push('Task blocked: ' + t.title));
+      D.tasks.filter(t => t.status !== 'done' && t.due_date && t.due_date < D.today).forEach(t => items.push('Task overdue: ' + t.title + ' (due ' + dmy(t.due_date) + ')'));
+      D.tasks.filter(t => t.status !== 'done' && !t.assignee_id).forEach(t => items.push('Task unclaimed: ' + t.title));
+      const c = el('section', 'oxi-card2 attention' + (items.length ? ' late' : '')); c.setAttribute('aria-labelledby', 'atT');
+      const h = el('h2', null, 'Attention needed'); h.id = 'atT'; c.appendChild(h);
+      if (!items.length) { c.appendChild(el('p', null, 'Nothing needs attention right now.')); return c; }
+      const ul = el('ul'); items.slice(0, 8).forEach(t => ul.appendChild(el('li', null, t))); c.appendChild(ul);
+      if (items.length > 8) c.appendChild(el('p', 'oxi-section-note', '+ ' + (items.length - 8) + ' more'));
+      return c;
+    }
+
     function renderOverview() {
       const o = $('overview'); o.innerHTML = ''; o.setAttribute('aria-busy', 'false');
-      o.append(nextStepCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard());
+      o.append(kpiTiles(), attentionCard(), nextStepCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard());
     }
 
     // ------------------------------------------------------------------ List tab (tasks)
@@ -501,7 +535,7 @@
         const tb = el('tbody');
         [...open, ...done].forEach(tk => {
           const tr = el('tr'); const late = tk.status !== 'done' && tk.due_date && tk.due_date < D.today;
-          const c0 = el('td'); c0.appendChild(el('strong', null, tk.title)); if (tk.description) c0.appendChild(el('small', null, tk.description)).style.display = 'block';
+          const c0 = el('td'); const tl = el('button', 'oxi-linkbtn', tk.title); tl.type = 'button'; tl.onclick = () => taskPanel(tk, tl); c0.appendChild(tl); if (tk.description) c0.appendChild(el('small', null, tk.description)).style.display = 'block';
           const c1 = el('td', null, tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : '-');
           const c2 = el('td', null, tk.assignee_name ? tk.assignee_name : (tk.team ? 'Unclaimed (' + tk.team + ' team)' : 'Unassigned'));
           const c3 = el('td', null, tk.due_date ? dmy(tk.due_date) : '-'); if (late) { c3.className = 'oxi-late'; c3.appendChild(el('div', 'oxi-flag', 'Overdue')); }
@@ -520,6 +554,42 @@
       }
       box.appendChild(c);
       if (D.can.create_task) box.appendChild(taskForm());
+    }
+
+    // ------------------------------------------------------------------ task side panel
+    function taskPanel(tk, opener) {
+      const old = document.getElementById('taskPanel'); if (old) old.remove();
+      const bg = el('div', 'oxi-sidebg'); bg.id = 'taskPanel';
+      const pn = el('aside', 'oxi-sidepanel'); pn.setAttribute('role', 'dialog'); pn.setAttribute('aria-modal', 'true'); pn.setAttribute('aria-labelledby', 'tpT'); pn.tabIndex = -1;
+      const close = () => { bg.remove(); document.removeEventListener('keydown', esc); if (opener && opener.isConnected) opener.focus(); };
+      const esc = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', esc);
+      bg.addEventListener('mousedown', (e) => { if (e.target === bg) close(); });
+      const head = el('div', 'oxi-sidehead'); const h = el('h2', null, tk.title); h.id = 'tpT';
+      const x = el('button', 'oxi-btn-secondary', 'Close'); x.type = 'button'; x.onclick = close; head.append(h, x);
+      const canAll = D.can.edit, canStatus = canAll || (tk.assignee_id && D.me_id === tk.assignee_id);
+      const desc = el('p', null, tk.description || 'No description.');
+      const status = select(TASK_STATUS, tk.status); status.disabled = !canStatus;
+      const prio = select(meta.lists.priorities, tk.priority); prio.disabled = !canAll;
+      const due = dateInput(tk.due_date); due.disabled = !canAll;
+      const who = select(personOptions(), tk.assignee_id || '', 'Unclaimed'); who.disabled = !canAll;
+      const form = el('form'); form.noValidate = true;
+      form.append(field('Status', status, 'tpS'), field('Priority', prio, 'tpP'), field('Due date', due, 'tpD'), field('Accountable person', who, 'tpW'));
+      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
+      const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+      const save = el('button', null, 'Save changes'); save.type = 'submit'; save.disabled = !canStatus;
+      form.append(err, save);
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); if (save.disabled) return;
+        const body = { version: tk.version, status: status.value };
+        if (canAll) Object.assign(body, { priority: prio.value, due_date: due.value || null, assignee_id: who.value || null });
+        save.disabled = true; err.hidden = true;
+        const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', body);
+        save.disabled = false;
+        if (!r.success) { fail(r, err); return; }
+        close(); note('Task updated.', true); load(true);
+      });
+      pn.append(head, desc, info, form); bg.appendChild(pn); document.body.appendChild(bg); status.focus();
     }
 
     function taskForm() {
