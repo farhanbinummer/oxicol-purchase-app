@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R&amp;D Project Workflow</title>
+<style>
+  :root { --bg:#f5f7fa; --card:#fff; --text:#142235; --muted:#5b6b7e; --line:#d5dce5; --navy:#142235; --teal:#0f766e; --blue:#2563eb; --amber:#b45309; --amberbg:#fef3c7; --tealbg:#e0f2f1; --bluebg:#e0ebff; --red:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1824; --card:#18273a; --text:#e8eef5; --muted:#9db0c4; --line:#2c4058; --tealbg:#12383a; --bluebg:#182b52; --amberbg:#3a2c10; --amber:#f5b862; --red:#f08a8a; --teal:#4fd1c5; --blue:#8fb4ff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 40px; }
+  h1 { margin:0 0 4px; font-size:26px; } h2 { font-size:17px; margin:0 0 10px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .flow { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .step { border:1px solid var(--line); border-top:5px solid var(--teal); border-radius:10px; padding:10px 12px; background:var(--card); position:relative; }
+  .step b { display:block; font-size:13px; color:var(--muted); }
+  .step.need { border-top-color:var(--amber); }
+  .step small { display:block; color:var(--muted); margin-top:4px; }
+  .tag { display:inline-block; margin-top:6px; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; background:var(--amberbg); color:var(--amber); }
+  .lane { display:flex; flex-wrap:wrap; gap:10px; align-items:stretch; }
+  .box { flex:1 1 200px; border-radius:10px; padding:10px 12px; border:1px solid var(--line); }
+  .box.a { background:var(--bluebg); } .box.b { background:var(--tealbg); } .box.c { background:var(--amberbg); }
+  .arrow { align-self:center; font-size:22px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-top:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; border-top:0; }
+  .warn { border-left:5px solid var(--red); }
+  .warn li { margin:4px 0; }
+  ul { margin:6px 0 0; padding-left:20px; }
+  @media (max-width: 800px) { .flow { grid-template-columns:repeat(2,1fr); } .arrow { transform:rotate(90deg); width:100%; text-align:center; } }
+  @media print { body { background:#fff; color:#000; } .card, .step, .box { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>R&amp;D Project Workflow</h1>
+  <p class="sub">Oxicol Purchase App &middot; from the boss's request to handover to Production</p>
+
+  <section class="card">
+    <h2>1. The journey</h2>
+    <div class="lane">
+      <div class="box a"><b>A. Request</b><br>Boss / Manager / Branch fills the R&amp;D request form. Saved as a draft, then submitted.<br><span class="tag">Gets number OXRD011126 &middot; status Received</span></div>
+      <div class="arrow">&rarr;</div>
+      <div class="box b"><b>B. R&amp;D takes over</b><br>R&amp;D sets the <b>Project lead</b>, trial estimate, feasibility and team, then auto-plans dates for all 8 stages.</div>
+      <div class="arrow">&rarr;</div>
+      <div class="box b"><b>C. Eight stages</b><br>Run in order. Each has a checklist; three need an outside sign-off.</div>
+      <div class="arrow">&rarr;</div>
+      <div class="box c"><b>D. Completed</b><br>After all 8 stages are done, R&amp;D clicks <b>Mark Project Completed</b>.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. The eight stages</h2>
+    <div class="flow">
+      <div class="step"><b>Stage 1 &middot; 7 days</b>Literature / Raw-Material Sourcing<small>Benchmark TDS and SDS, shortlist materials and suppliers, request samples and quotes</small></div>
+      <div class="step"><b>Stage 2 &middot; 5 days</b>First Lab Batch<small>Record formula and batch size, make the batch, check viscosity, solids, appearance</small></div>
+      <div class="step"><b>Stage 3 &middot; 21 days</b>Lab Trials &amp; Optimisation<small>Record trials, compare with requirements, pick the formula, calculate cost</small></div>
+      <div class="step need"><b>Stage 4 &middot; 14 days</b>Internal Testing / QC Approval<small>Run tests, compare with specs and benchmarks</small><span class="tag">Needs QC sign-off</span></div>
+      <div class="step"><b>Stage 5 &middot; 3 days</b>Sample to Requester / Customer<small>Pack and label, include test summary or draft TDS, record dispatch</small></div>
+      <div class="step need"><b>Stage 6 &middot; 14 days</b>Customer Approval<small>Written feedback, corrections and resubmissions, decision and evidence</small><span class="tag">Needs customer evidence</span></div>
+      <div class="step"><b>Stage 7 &middot; 7 days</b>Plant Trial / Scale-up<small>Plant batch card, trial with Production, compare plant and lab QC</small></div>
+      <div class="step need"><b>Stage 8 &middot; 5 days</b>Handover to Production<small>Hand over formula, SOP and QC specs; safety, label and packaging documents</small><span class="tag">Needs Production acknowledgement</span></div>
+    </div>
+    <p class="sub" style="margin-top:12px">To complete a stage: it must be the current one, every checklist item ticked, the sign-off recorded (where needed), a date that is not in the future, and the project not On Hold or Rejected. A stage can be reopened with a reason; later stages are then flagged for review.</p>
+  </section>
+
+  <section class="card">
+    <h2>3. Who is in charge</h2>
+    <table>
+      <thead><tr><th>Person</th><th>Role in the project</th></tr></thead>
+      <tbody>
+        <tr><td><b>Boss / Manager</b></td><td>Starts requests and sees all submitted projects. Cannot edit or complete stages by default.</td></tr>
+        <tr><td><b>Requester</b></td><td>Whoever starts the request (Boss, Manager or Branch staff). Can see their own projects.</td></tr>
+        <tr><td><b>R&amp;D team</b></td><td>Reviews the request, plans, runs stages, adds tasks and lab notes. Only R&amp;D sees the confidential technical fields.</td></tr>
+        <tr><td><b>Project lead</b></td><td>One R&amp;D person. Default owner of every stage that has no named owner.</td></tr>
+        <tr><td><b>Stage owner</b> (optional)</td><td>A named person for one particular stage.</td></tr>
+        <tr><td><b>QC</b></td><td>Gives the QC sign-off at stage 4.</td></tr>
+        <tr><td><b>Customer / OEM</b></td><td>Approval evidence for stage 6 is recorded by an internal person.</td></tr>
+        <tr><td><b>Production</b></td><td>Acknowledges the handover at stage 8; joins the plant trial at stage 7.</td></tr>
+        <tr><td><b>Administrator</b></td><td>Can do everything and decides who may record each approval.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>4. How the work is divided</h2>
+    <div class="lane">
+      <div class="box b"><b>Stages</b><br>Belong to the Project lead, or a named stage owner.</div>
+      <div class="box a"><b>Tasks</b><br>Smaller jobs inside a project. One accountable person each, or "Unclaimed (team)". Finishing a task never completes a stage.</div>
+      <div class="box c"><b>Approvals</b><br>Recorded by the department that gives them, under their own name.</div>
+      <div class="box a"><b>Comments &amp; lab notes</b><br>The running discussion. Lab notes are confidential to R&amp;D.</div>
+    </div>
+  </section>
+
+  <section class="card warn">
+    <h2>5. Gaps to know about</h2>
+    <ul>
+      <li><b>Nobody can record the sign-offs yet.</b> No role has approval permissions by default. An administrator must grant them under Administration &gt; Permissions, or stages 4, 6 and 8 cannot be completed.</li>
+      <li><b>No department hand-offs.</b> Purchase, QC and Production are not notified or given work automatically. R&amp;D creates tasks for them.</li>
+      <li><b>Status is changed by hand</b> (Received, Under Review, Approved, In Lab Trials, Sample Sent, Plant Trial). Completing a stage does not change it.</li>
+      <li>No file attachments, and no email or WhatsApp messages for R&amp;D events.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
