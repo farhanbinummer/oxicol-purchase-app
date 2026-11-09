@@ -21,10 +21,16 @@
   <div class="oxi-tabs" role="tablist" aria-label="Project views">
     <button type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview">Overview</button>
     <button type="button" role="tab" id="tab-list" aria-controls="panel-list" aria-selected="false" data-tab="list" tabindex="-1">List</button>
+    <button type="button" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="false" data-tab="board" tabindex="-1">Board</button>
+    <button type="button" role="tab" id="tab-timeline" aria-controls="panel-timeline" aria-selected="false" data-tab="timeline" tabindex="-1">Timeline</button>
+    <button type="button" role="tab" id="tab-activity" aria-controls="panel-activity" aria-selected="false" data-tab="activity" tabindex="-1">Activity</button>
   </div>
 
   <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview"><div id="overview" aria-busy="true"></div></div>
   <div id="panel-list" role="tabpanel" aria-labelledby="tab-list" hidden><div id="listview"></div></div>
+  <div id="panel-board" role="tabpanel" aria-labelledby="tab-board" hidden><div id="boardview"></div></div>
+  <div id="panel-timeline" role="tabpanel" aria-labelledby="tab-timeline" hidden><div id="timelineview"></div></div>
+  <div id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden><div id="activityview"></div></div>
 
   <script src="common.js"></script>
   <script>
@@ -617,16 +623,122 @@
       c.appendChild(form); return c;
     }
 
+    // ------------------------------------------------------------------ Board tab (tasks by status)
+    function renderBoard() {
+      const box = $('boardview'); box.innerHTML = '';
+      const intro = el('p', 'oxi-section-note', 'Drag a card to another column to change its status, or use the "Move to" box on the card. Completing a task never completes a stage.');
+      box.appendChild(intro);
+      if (!D.tasks.length) { box.appendChild(el('p', null, 'No tasks yet. Add tasks from the List tab.')); return; }
+      const cols = el('div', 'oxi-board');
+      const canMove = (tk) => D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id);
+      async function move(tk, to, card) {
+        if (to === tk.status) return;
+        const was = tk.status; card && card.setAttribute('aria-busy', 'true');
+        const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', { version: tk.version, status: to });
+        if (!r.success) { fail(r); card && card.removeAttribute('aria-busy'); return; }
+        note('Task moved to ' + TASK_STATUS.find(x => x[0] === to)[1] + '.', true); load(true);
+      }
+      TASK_STATUS.forEach(([key, label]) => {
+        const col = el('section', 'oxi-col'); col.dataset.status = key; col.setAttribute('aria-label', label);
+        const list = D.tasks.filter(t => t.status === key);
+        const h = el('h3'); h.append(document.createTextNode(label + ' '), el('span', 'count', String(list.length))); col.appendChild(h);
+        col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('over'); });
+        col.addEventListener('dragleave', () => col.classList.remove('over'));
+        col.addEventListener('drop', (e) => { e.preventDefault(); col.classList.remove('over'); const id = Number(e.dataTransfer.getData('text/plain')); const tk = D.tasks.find(t => t.id === id); if (tk && canMove(tk)) move(tk, key, null); });
+        list.forEach(tk => {
+          const late = tk.status !== 'done' && tk.due_date && tk.due_date < D.today;
+          const card = el('article', 'oxi-tcard' + (late ? ' late' : '')); card.draggable = canMove(tk);
+          card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', String(tk.id)); e.dataTransfer.effectAllowed = 'move'; });
+          const t = el('button', 'oxi-linkbtn', tk.title); t.type = 'button'; t.onclick = () => taskPanel(tk, t);
+          const meta2 = el('div', 'meta'); meta2.append(prioBadge(tk.priority));
+          meta2.append(el('span', late ? 'oxi-late' : null, tk.due_date ? 'Due ' + dmy(tk.due_date) : 'No due date'));
+          const who = el('div', 'meta', tk.assignee_name || (tk.team ? 'Unclaimed (' + tk.team + ')' : 'Unassigned'));
+          card.append(t, meta2, who);
+          if (tk.stage_no) card.appendChild(el('div', 'meta', 'Stage ' + tk.stage_no));
+          if (canMove(tk)) { const sel = select(TASK_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Move to: ' + tk.title); sel.onchange = () => move(tk, sel.value, card); card.appendChild(sel); }
+          col.appendChild(card);
+        });
+        if (!list.length) col.appendChild(el('p', 'empty', 'Nothing here'));
+        cols.appendChild(col);
+      });
+      box.appendChild(cols);
+    }
+
+    // ------------------------------------------------------------------ Timeline tab (stages and task due dates on a calendar)
+    function renderTimeline() {
+      const box = $('timelineview'); box.innerHTML = '';
+      const day = 86400000, ms = (iso) => Date.parse(iso.slice(0, 10));
+      const rows = D.stages.map(s => {
+        const end = s.actual || s.planned; if (!end) return { s, start: null, end: null };
+        const start = new Date(ms(end) - Math.max(0, (s.days || 1) - 1) * day).toISOString().slice(0, 10);
+        return { s, start, end };
+      });
+      const dated = rows.filter(r => r.end), tdated = D.tasks.filter(t => t.due_date && t.status !== 'done');
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'tlT'); const h = el('h2', null, 'Timeline'); h.id = 'tlT'; c.appendChild(h);
+      if (!dated.length && !tdated.length) { c.appendChild(el('p', null, 'No planned dates yet. Plan the stages from the Overview tab to see them here.')); box.appendChild(c); return; }
+      const all = [D.today, ...dated.flatMap(r => [r.start, r.end]), ...tdated.map(t => t.due_date)];
+      if (D.project.target_launch_date && !D.project.target_tbc) all.push(D.project.target_launch_date);
+      const min = Math.min(...all.map(ms)) - 3 * day, max = Math.max(...all.map(ms)) + 3 * day, span = Math.max(day, max - min);
+      const pct = (iso) => ((ms(iso) - min) / span * 100);
+      const g = el('div', 'oxi-gantt'); g.setAttribute('role', 'table'); g.setAttribute('aria-label', 'Stage timeline');
+      // month scale
+      const scale = el('div', 'scale'); const first = new Date(min); first.setUTCDate(1);
+      for (let d = new Date(first); d.getTime() <= max; d.setUTCMonth(d.getUTCMonth() + 1)) { const x = (d.getTime() - min) / span * 100; if (x < 0) continue; const m = el('span', null, d.toLocaleString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' })); m.style.left = x + '%'; scale.appendChild(m); }
+      g.appendChild(el('div', 'lane head')); g.lastChild.append(el('div', 'lbl'), scale);
+      const lineAt = (iso, cls, label) => { const l = el('i', 'vline ' + cls); l.style.left = pct(iso) + '%'; l.title = label; return l; };
+      const addLane = (label, track) => { const lane = el('div', 'lane'); lane.setAttribute('role', 'row'); const lb = el('div', 'lbl', label); lb.setAttribute('role', 'rowheader'); const tr = el('div', 'track'); tr.setAttribute('role', 'cell'); track(tr); tr.appendChild(lineAt(D.today, 'today', 'Today')); lane.append(lb, tr); g.appendChild(lane); };
+      rows.forEach(({ s, start, end }) => addLane(s.no + '. ' + s.name, (tr) => {
+        if (!end) { tr.appendChild(el('span', 'nodate', 'Not planned')); return; }
+        const b = el('span', 'bar ' + (s.state === 'done' ? 'done' : s.overdue ? 'late' : s.state === 'current' ? 'cur' : ''));
+        b.style.left = pct(start) + '%'; b.style.width = Math.max(1.2, pct(end) - pct(start) + 100 / (span / day)) + '%';
+        const txt = (s.state === 'done' ? 'Done ' + dmy(s.actual) : s.overdue ? 'Overdue' : s.state === 'current' ? 'Current' : 'Planned') + ': ' + dmy(start) + ' to ' + dmy(end);
+        b.title = txt; b.setAttribute('aria-label', 'Stage ' + s.no + ' ' + txt); tr.appendChild(b);
+      }));
+      if (tdated.length) addLane('Open tasks (due dates)', (tr) => tdated.forEach(t => { const m = el('span', 'mark' + (t.due_date < D.today ? ' late' : '')); m.style.left = pct(t.due_date) + '%'; m.title = t.title + ' - due ' + dmy(t.due_date); m.setAttribute('aria-label', m.title); tr.appendChild(m); }));
+      if (D.project.target_launch_date && !D.project.target_tbc) addLane('Target launch', (tr) => { const m = el('span', 'mark launch'); m.style.left = pct(D.project.target_launch_date) + '%'; m.title = 'Target launch ' + dmy(D.project.target_launch_date); tr.appendChild(m); });
+      c.appendChild(g);
+      c.appendChild(el('p', 'oxi-section-note', 'Bars show each stage from its start to its planned (or actual) end date. The vertical line is today. Durations are in calendar days.'));
+      box.appendChild(c);
+    }
+
+    // ------------------------------------------------------------------ Activity tab
+    let actFilter = 'all';
+    function renderActivity() {
+      const box = $('activityview'); box.innerHTML = '';
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'acT'); const h = el('h2', null, 'Activity'); h.id = 'acT'; c.appendChild(h);
+      const chips = el('div', 'oxi-scopechips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Show');
+      [['all', 'Everything'], ['comment', 'Comments'], ['lab_note', 'Lab notes'], ['system', 'Changes']].forEach(([k, label]) => {
+        if (k === 'lab_note' && !D.updates.some(u => u.kind === 'lab_note')) return;
+        const b = el('button', null, label); b.type = 'button'; b.setAttribute('aria-pressed', String(actFilter === k)); b.onclick = () => { actFilter = k; renderActivity(); }; chips.appendChild(b);
+      });
+      c.appendChild(chips);
+      const items = D.updates.filter(u => actFilter === 'all' || u.kind === actFilter);
+      const feed = el('ul', 'oxi-feed');
+      if (!items.length) feed.appendChild(el('li', null, 'Nothing to show.'));
+      items.forEach(u => {
+        const li = el('li'); const kind = u.kind === 'lab_note' ? ' - lab note' : u.kind === 'system' ? ' - change' : '';
+        li.append(el('span', 'who', u.author_name || (u.kind === 'system' ? 'System' : '-')), el('span', 'when', timeAgo(u.at) + kind), el('p', u.kind === 'system' ? 'k-system' : null, u.body)); feed.appendChild(li);
+      });
+      c.appendChild(feed);
+      c.appendChild(el('p', 'oxi-section-note', 'To add a comment or lab note, use "Discussion and lab updates" on the Overview tab. Showing the latest 100 entries.'));
+      box.appendChild(c);
+    }
+
     // ------------------------------------------------------------------ tabs and loading
+    const TABS = ['overview', 'list', 'board', 'timeline', 'activity'];
     function setTab(name, focus) {
       document.querySelectorAll('[role=tab]').forEach(t => { const on = t.dataset.tab === name; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); });
-      $('panel-overview').hidden = name !== 'overview'; $('panel-list').hidden = name !== 'list';
-      history.replaceState(null, '', location.pathname + location.search + (name === 'list' ? '#list' : ''));
+      TABS.forEach(n => { $('panel-' + n).hidden = n !== name; });
+      history.replaceState(null, '', location.pathname + location.search + (name === 'overview' ? '' : '#' + name));
     }
     document.querySelectorAll('[role=tab]').forEach(t => {
       t.addEventListener('click', () => setTab(t.dataset.tab));
-      t.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { setTab(t.dataset.tab === 'overview' ? 'list' : 'overview', true); e.preventDefault(); } });
+      t.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const i = TABS.indexOf(t.dataset.tab); setTab(TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length], true); e.preventDefault();
+      });
     });
+    window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && D) setTab(h); });
     window.addEventListener('beforeunload', (e) => { if (dirtyAssess) { e.preventDefault(); e.returnValue = ''; } });
 
     async function load(quiet) {
@@ -641,13 +753,13 @@
       D = d; D.me_id = (() => { try { return JSON.parse(localStorage.getItem('oxicol_user')).id; } catch (e) { return null; } })();
       if (!meta) { meta = await api('/api/rd/meta'); if (!meta.success) { note(meta.error, false); return; } }
       if (D.can.edit && !people.length) { const p = await api('/api/rd/people'); if (p.success) people = p.people; }
-      renderHeader(); renderOverview(); renderList();
+      renderHeader(); renderOverview(); renderList(); renderBoard(); renderTimeline(); renderActivity();
       $('banner').hidden = true;
     }
 
     const sp = new URLSearchParams(location.search);
     if (sp.get('submitted') !== null) note('Request submitted' + (sp.get('submitted') ? ' as ' + sp.get('submitted') : '') + '. R&D can now assess it.', true);
-    load().then(() => { if (location.hash === '#list') setTab('list'); }).catch(() => note('Could not reach the server.', false));
+    load().then(() => { const h = location.hash.slice(1); if (TABS.includes(h)) setTab(h); }).catch(() => note('Could not reach the server.', false));
   </script>
 </body>
 </html>
