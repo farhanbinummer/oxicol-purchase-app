@@ -16,7 +16,10 @@
   <p id="message" role="status"></p>
   <div id="banner" class="oxi-banner" role="alert" hidden></div>
   <div id="meta" class="oxi-pmeta"></div>
-  <ol class="oxi-stagebar" id="stagebar" aria-label="Development stages"></ol>
+  <section class="oxi-prog" aria-labelledby="progHead">
+    <h2 class="oxi-prog-head" id="progHead"></h2>
+    <div class="oxi-steps-scroll" id="stepsScroll" role="region" aria-label="Development stages" tabindex="0"><ol class="oxi-steps" id="stagebar"></ol></div>
+  </section>
 
   <div class="oxi-tabs" role="tablist" aria-label="Project views">
     <button type="button" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview">Overview</button>
@@ -72,6 +75,58 @@
     const personOptions = () => people.map(p => [p.id, p.name]);
     function dateInput(value, max) { const i = el('input'); i.type = 'date'; i.value = value || ''; if (max) i.max = max; return i; }
 
+
+    // ------------------------------------------------------------------ presentation helpers (inline SVG and CSS only)
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const ICON = {
+      check: 'M5 13l4 4L19 7', alert: 'M12 9v4m0 4h.01M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+      clock: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z', user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+      userplus: 'M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M19 8v6M16 11h6', calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+      flag: 'M5 21V4M5 4h12l-2 4 2 4H5', tag: 'M3 12V4h8l10 10-8 8zM7.5 8.5h.01', pause: 'M8 5v14M16 5v14', tasks: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
+      stop: 'M5.6 5.6l12.8 12.8M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'
+    };
+    function svgEl(tag, attrs) { const e = document.createElementNS(SVGNS, tag); Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; }
+    function icon(name, size) { const s = svgEl('svg', { viewBox: '0 0 24 24', width: size || 16, height: size || 16, fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' }); s.appendChild(svgEl('path', { d: ICON[name] || ICON.flag })); return s; }
+    const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+    const avatar = (name) => el('span', 'oxi-avatar', initials(name));
+    /** A small pill: icon, a quiet label and the value. children are appended after the label. */
+    function chip(iconName, label, ...value) {
+      const c = el('span', 'oxi-chip'); const ic = el('span', 'ci'); ic.appendChild(icon(iconName, 14)); c.appendChild(ic);
+      const t = el('span'); t.append(el('small', null, label + ' '), ...value.map(v => typeof v === 'string' ? document.createTextNode(v) : v)); c.appendChild(t); return c;
+    }
+    /** Donut ring. segs = [{ value, color }] (a CSS colour or token); the centre shows big and small text. The svg is described by `label`. */
+    function ringChart(segs, total, opt) {
+      const size = opt.size || 112, sw = opt.stroke || 12, r = (size - sw) / 2, C = 2 * Math.PI * r;
+      const svg = svgEl('svg', { viewBox: '0 0 ' + size + ' ' + size, width: size, height: size, role: 'img', 'aria-label': opt.label, class: 'oxi-ring' });
+      svg.appendChild(svgEl('circle', { cx: size / 2, cy: size / 2, r, fill: 'none', stroke: 'var(--border)', 'stroke-width': sw }));
+      let acc = 0; const live = [];
+      segs.filter(g => g.value > 0 && total > 0).forEach(g => {
+        const len = g.value / total * C;
+        const c = svgEl('circle', { cx: size / 2, cy: size / 2, r, fill: 'none', stroke: g.color, 'stroke-width': sw, 'stroke-dasharray': (REDUCED ? len : 0) + ' ' + C, 'stroke-dashoffset': -acc, transform: 'rotate(-90 ' + size / 2 + ' ' + size / 2 + ')', class: 'seg' });
+        svg.appendChild(c); live.push([c, len, C]); acc += len;
+      });
+      if (!REDUCED) requestAnimationFrame(() => requestAnimationFrame(() => live.forEach(([c, len, CC]) => c.setAttribute('stroke-dasharray', len + ' ' + CC))));
+      const big = svgEl('text', { x: size / 2, y: size / 2 + (opt.small ? 2 : 7), 'text-anchor': 'middle', class: 'ring-big' }); big.textContent = opt.big; svg.appendChild(big);
+      if (opt.small) { const sm = svgEl('text', { x: size / 2, y: size / 2 + 20, 'text-anchor': 'middle', class: 'ring-small' }); sm.textContent = opt.small; svg.appendChild(sm); }
+      return svg;
+    }
+    /** Horizontal stacked bar. segs = [{ value, cls }]; `label` is the text alternative. */
+    function stackBar(segs, label) {
+      const total = segs.reduce((a, g) => a + g.value, 0); const b = el('div', 'oxi-stack'); b.setAttribute('role', 'img'); b.setAttribute('aria-label', label);
+      segs.filter(g => g.value > 0).forEach(g => { const i = el('i', g.cls); i.style.flexGrow = String(g.value); b.appendChild(i); });
+      if (!total) b.classList.add('empty'); return b;
+    }
+    /** Determinate progress bar. */
+    function progressBar(pct, cls, label) {
+      const b = el('div', 'oxi-meter' + (cls ? ' ' + cls : '')); b.setAttribute('role', 'progressbar'); b.setAttribute('aria-valuemin', '0'); b.setAttribute('aria-valuemax', '100'); b.setAttribute('aria-valuenow', String(Math.round(pct))); b.setAttribute('aria-label', label);
+      const i = el('i'); i.style.width = (REDUCED ? Math.round(pct) : 0) + '%'; b.appendChild(i);
+      if (!REDUCED) requestAnimationFrame(() => requestAnimationFrame(() => { i.style.width = Math.round(pct) + '%'; })); return b;
+    }
+    const shortStage = (name) => String(name).split(/ \/ | & /)[0];
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    function focusLead() { const f = $('aLead'); if (f) { f.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' }); f.focus({ preventScroll: true }); } }
+
     /** A modal dialog. build(body) fills it and returns a function that reads the answers; onOk(answers, errBox, okButton) must return true to close. */
     function dialog(title, build, okLabel, onOk, opts) {
       lastFocus = document.activeElement;
@@ -102,66 +157,100 @@
       return dlg;
     }
 
-    // ------------------------------------------------------------------ header and stage bar
+    // ------------------------------------------------------------------ header and stage tracker
     function renderHeader() {
       const p = D.project;
       $('pageTitle').textContent = p.project_number + ' ' + p.title;
       document.title = p.project_number + ' - R&D Project';
       const m = $('meta'); m.innerHTML = '';
-      const add = (...nodes) => { const s = el('span'); nodes.forEach(n => s.append(typeof n === 'string' ? document.createTextNode(n) : n)); m.appendChild(s); return s; };
-      add(rdBadge(p.status)); add(prioBadge(p.priority));
-      if (p.status === 'On Hold') add(el('small', null, 'Paused: no stage can be completed until work resumes.'));
-      add(el('small', null, 'Lead'), D.lead ? D.lead.name : 'Not assigned');
-      add(el('small', null, 'Target launch'), p.target_tbc ? 'To be confirmed' : (p.target_launch_date ? dmy(p.target_launch_date) : '-'));
-      add(el('small', null, 'Requested by'), (p.requested_by_name || '-') + (p.request_date ? ' on ' + dmy(p.request_date) : ''));
-      if (p.project_type) add(el('small', null, 'Type'), p.project_type);
+      m.className = 'oxi-chips';
+      // status and priority keep their badges; everything else is a labelled chip with an icon
+      const sp = el('span', 'oxi-chip plain'); sp.append(rdBadge(p.status), prioBadge(p.priority)); m.appendChild(sp);
+      if (p.status === 'On Hold') { const h = el('span', 'oxi-chip warn'); const ic = el('span', 'ci'); ic.appendChild(icon('pause', 14)); h.append(ic, el('span', null, 'Paused: no stage can be completed until work resumes.')); m.appendChild(h); }
+      m.appendChild(chip('user', 'Lead', D.lead ? D.lead.name : 'Not assigned'));
+      m.appendChild(chip('flag', 'Target launch', p.target_tbc ? 'To be confirmed' : (p.target_launch_date ? dmy(p.target_launch_date) : '-')));
+      m.appendChild(chip('calendar', 'Requested by', (p.requested_by_name || '-') + (p.request_date ? ' on ' + dmy(p.request_date) : '')));
+      if (p.project_type) m.appendChild(chip('tag', 'Type', p.project_type));
       const fav = el('button', 'oxi-fav'); fav.type = 'button'; fav.textContent = D.favourite ? '★' : '☆'; fav.setAttribute('aria-pressed', String(D.favourite));
       fav.setAttribute('aria-label', D.favourite ? 'Remove from favourites' : 'Add to favourites');
       fav.onclick = async () => { fav.disabled = true; const r = await api('/api/rd/projects/' + pid + '/favourite', 'PUT', { favourite: !D.favourite }); fav.disabled = false; if (r.success) { D.favourite = r.favourite; renderHeader(); } else fail(r); };
       m.appendChild(fav);
       if (D.can.edit) { const e = el('a', 'oxi-btn oxi-btn-secondary', 'Edit request'); e.href = 'project-new.html?id=' + pid; m.appendChild(e); }
       if (D.can.edit) { const sb = el('button', 'oxi-btn-secondary', 'Change status'); sb.type = 'button'; sb.onclick = statusDialog; m.appendChild(sb); }
+      renderStepper();
+    }
 
+    /** One connected stepper: tick when complete, pulsing ring for the current stage, amber warning when it needs review. */
+    function renderStepper() {
+      const done = D.stages.filter(s => s.state === 'done').length, total = D.stages.length, pct = Math.round(done / total * 100);
+      const head = $('progHead'); head.innerHTML = '';
+      head.append(document.createTextNode(done === total ? 'All ' + total + ' stages complete' : 'Stage ' + (D.current_stage_no || done + 1) + ' of ' + total), el('span', 'pct', '- ' + pct + '% complete'));
       const bar = $('stagebar'); bar.innerHTML = '';
       D.stages.forEach(s => {
-        const li = el('li', s.state === 'done' ? 'done' : s.overdue ? 'late' : s.state === 'current' ? 'cur' : '');
-        const word = s.state === 'done' ? 'Done ' + dmy(s.actual) : s.overdue ? 'Overdue' : s.state === 'current' ? 'Current' : 'Not started';
-        li.append(el('b', null, 'Stage ' + s.no), el('span', null, s.name), el('em', null, word + (s.review_flag ? ' - needs review' : '')));
-        li.setAttribute('aria-label', 'Stage ' + s.no + ', ' + s.name + ': ' + word + (s.review_flag ? ', needs review' : ''));
+        const review = !!s.review_flag;
+        const cls = [s.state === 'done' ? 'done' : '', s.state === 'current' ? 'cur' : '', s.state === 'current' && s.overdue ? 'late' : '', review ? 'rev' : ''].filter(Boolean).join(' ');
+        const li = el('li', cls);
+        const dot = el('span', 'dot'); dot.appendChild(review ? icon('alert', 18) : s.state === 'done' ? icon('check', 18) : document.createTextNode(String(s.no)));
+        const status = review ? 'Needs review' : s.state === 'done' ? 'Done ' + dmy(s.actual) : s.overdue ? 'Overdue ' + plural(s.delay, 'day') : s.state === 'current' ? 'Current' : 'Not started';
+        li.append(dot, el('span', 'nm', shortStage(s.name)), el('span', 'st', status));
+        if (s.planned && s.state !== 'done') li.appendChild(el('span', 'pl', 'Planned ' + dmy(s.planned)));
+        li.title = s.name;
+        li.setAttribute('aria-label', 'Stage ' + s.no + ', ' + s.name + ': ' + status + (s.planned && s.state !== 'done' ? ', planned ' + dmy(s.planned) : '') + (s.review_flag && s.state === 'done' ? ', done ' + dmy(s.actual) : ''));
         if (s.state === 'current') li.setAttribute('aria-current', 'step');
         bar.appendChild(li);
+      });
+      // a scroll container is only a tab stop when it really scrolls; bring the current stage into view inside it
+      const sc = $('stepsScroll'); requestAnimationFrame(() => {
+        const over = sc.scrollWidth > sc.clientWidth + 1;
+        if (over) sc.setAttribute('tabindex', '0'); else sc.removeAttribute('tabindex');
+        const cur = bar.querySelector('li.cur'); if (over && cur) sc.scrollLeft = Math.max(0, cur.offsetLeft - (sc.clientWidth - cur.offsetWidth) / 2);
       });
     }
 
     // ------------------------------------------------------------------ next step and stage completion
+    function banner2(cls, iconName, title, text) {
+      const c = el('section', 'oxi-card2 next ' + cls); c.setAttribute('aria-labelledby', 'nsT');
+      const row = el('div', 'oxi-state'); const ic = el('span', 'oxi-state-ic'); ic.appendChild(icon(iconName, 22));
+      const t = el('div'); const h = el('h2', null, title); h.id = 'nsT'; t.append(h, el('p', null, text)); row.append(ic, t); c.appendChild(row); return c;
+    }
     function nextStepCard() {
-      const p = D.project, c = el('section', 'oxi-card2 next'); c.setAttribute('aria-labelledby', 'nsT');
-      const h = el('h2', null, 'Next step'); h.id = 'nsT'; c.appendChild(h);
-      if (p.status === 'Completed') {
-        c.appendChild(el('p', null, 'This project was completed on ' + dmy(p.completed_on) + '.'));
-        return c;
-      }
-      if (p.status === 'Rejected') { c.appendChild(el('p', null, 'This request was rejected. Change the status if it should be reconsidered.')); return c; }
-      if (p.status === 'On Hold') { c.appendChild(el('p', null, 'This project is on hold (paused). Stages cannot be completed until it is resumed.')); return c; }
+      const p = D.project;
+      if (p.status === 'Completed') return banner2('ok', 'check', 'Project completed', 'This project was completed on ' + dmy(p.completed_on) + '.');
+      if (p.status === 'Rejected') return banner2('bad', 'stop', 'Request rejected', 'This request was rejected. Change the status if it should be reconsidered.');
+      if (p.status === 'On Hold') return banner2('warn', 'pause', 'Project on hold', 'This project is on hold (paused). Stages cannot be completed until it is resumed.');
+      const c = el('section', 'oxi-card2 next'); c.setAttribute('aria-labelledby', 'nsT');
       const n = D.next_step;
       if (!n) {
-        c.appendChild(el('p', null, 'All eight stages are complete. Marking the project completed closes it.'));
-        if (D.can.stage) {
-          const b = el('button', null, 'Mark Project Completed'); b.type = 'button'; b.onclick = completeProjectDialog; c.appendChild(b);
-        }
+        const row = el('div', 'oxi-state'); const ic = el('span', 'oxi-state-ic ok'); ic.appendChild(icon('check', 22));
+        const t = el('div'); const h = el('h2', null, 'All stages complete'); h.id = 'nsT'; t.append(h, el('p', null, 'All eight stages are complete. Marking the project completed closes it.')); row.append(ic, t); c.appendChild(row);
+        if (D.can.stage) { const b = el('button', null, 'Mark Project Completed'); b.type = 'button'; b.onclick = completeProjectDialog; c.appendChild(b); }
         return c;
       }
       if (n.overdue) c.classList.add('late');
       const stage = D.stages[n.stage - 1];
-      c.appendChild(el('p', null, 'Stage ' + n.stage + ': ' + n.name));
-      const kv = el('dl', 'oxi-kvlist');
-      const kvp = (k, v, cls) => { const d = el('div'); d.append(el('dt', null, k), el('dd', cls, v)); kv.appendChild(d); };
-      kvp('Owner', n.owner ? n.owner.name + (n.owner.explicit ? '' : ' (project lead)') : 'No owner yet: assign a project lead');
-      kvp('Planned date', n.due ? dmy(n.due) : 'Not planned yet');
-      if (n.overdue) kvp('Status', 'Overdue by ' + stage.delay + ' calendar day' + (stage.delay === 1 ? '' : 's'), 'oxi-late');
-      c.appendChild(kv);
-      if (stage.review_flag) c.appendChild(el('div', 'oxi-flag', stage.review_flag));
+      const eyebrow = el('div', 'oxi-eyebrow', 'Next step - Stage ' + n.stage + ' of ' + D.stages.length);
+      const h = el('h2', null, n.name); h.id = 'nsT'; c.append(eyebrow, h);
 
+      // owner and planned date
+      const facts = el('div', 'oxi-facts');
+      const own = el('div', 'oxi-fact'); own.appendChild(el('small', null, 'Owner'));
+      if (n.owner) { const r = el('div', 'oxi-ownerrow'); r.append(avatar(n.owner.name), el('span', null, n.owner.name + (n.owner.explicit ? '' : ' (project lead)'))); own.appendChild(r); }
+      else {
+        const r = el('div', 'oxi-noowner'); const ic = el('span', 'ci'); ic.appendChild(icon('userplus', 16));
+        const t = el('span', null, D.can.edit ? 'No owner yet - assign a project lead' : 'No owner yet - a project lead needs to be assigned'); r.append(ic, t);
+        if (D.can.edit) { const bt = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Assign project lead'); bt.type = 'button'; bt.onclick = focusLead; r.appendChild(bt); }
+        own.appendChild(r);
+      }
+      const due = el('div', 'oxi-fact'); due.appendChild(el('small', null, 'Planned date'));
+      const dr = el('div', 'oxi-duerow'); dr.appendChild(icon('calendar', 16)); dr.appendChild(el('span', null, n.due ? dmy(n.due) : 'Not planned yet'));
+      if (n.overdue) { const od = el('span', 'oxi-tag bad'); od.append(icon('alert', 13), document.createTextNode(' ' + plural(stage.delay, 'day') + ' overdue')); dr.appendChild(od); }
+      due.appendChild(dr); facts.append(own, due); c.appendChild(facts);
+      if (stage.review_flag) { const f = el('div', 'oxi-flag'); f.append(icon('alert', 15), document.createTextNode(' ' + stage.review_flag)); c.appendChild(f); }
+
+      // checklist with a progress bar (check / uncheck behaves exactly as before)
+      const doneN = n.checklist.filter(ci => ci.done).length, totalN = n.checklist.length;
+      const ph = el('div', 'oxi-checkhead'); ph.append(el('strong', null, 'Checklist'), el('span', null, doneN + ' of ' + totalN + ' done'));
+      c.appendChild(ph); c.appendChild(progressBar(totalN ? doneN / totalN * 100 : 0, doneN === totalN && totalN ? 'ok' : '', 'Checklist progress: ' + doneN + ' of ' + totalN + ' done'));
       const ul = el('ul', 'oxi-checklist'); ul.setAttribute('aria-label', 'Stage ' + n.stage + ' checklist');
       n.checklist.forEach(ci => {
         const li = el('li'); const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = ci.done; cb.disabled = !D.can.edit;
@@ -489,43 +578,97 @@
       d.appendChild(box); return d;
     }
 
-    // ------------------------------------------------------------------ KPI tiles and attention box
+    // ------------------------------------------------------------------ summary cards and attention panel
     function daysBetween(a, b) { return Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 86400000); }
-    function kpiTiles() {
-      const p = D.project, done = D.stages.filter(s => s.state === 'done').length;
-      const open = D.tasks.filter(t => t.status !== 'done');
-      const overdue = open.filter(t => t.due_date && t.due_date < D.today).length;
-      const blocked = open.filter(t => t.status === 'blocked').length;
-      const g = el('div', 'oxi-kpi-chips'); g.setAttribute('role', 'list');
-      const tile = (label, value, cls) => { const c = el('div', 'oxi-kpi-chip' + (cls ? ' ' + cls : '')); c.setAttribute('role', 'listitem'); c.append(el('span'), el('span')); c.lastChild.append(el('b', null, value), document.createTextNode(label)); g.appendChild(c); };
-      tile('Stages complete', done + ' of ' + D.stages.length, done === D.stages.length ? 'good' : '');
-      tile('Open tasks', String(open.length) + (blocked ? ' (' + blocked + ' blocked)' : ''), blocked ? 'warn' : '');
-      tile('Overdue tasks', String(overdue), overdue ? 'bad' : 'good');
-      let days = '-', cls = '';
-      if (p.target_launch_date && !p.target_tbc) { const d = daysBetween(D.today, p.target_launch_date); days = d >= 0 ? d + ' days' : Math.abs(d) + ' days past'; cls = d < 0 ? 'bad' : d <= 14 ? 'warn' : ''; }
-      tile('To target launch', days, cls);
-      return g;
+    const isOpen = (t) => t.status !== 'done';
+    const isLate = (t) => isOpen(t) && t.due_date && t.due_date < D.today;
+
+    function sumCard(title, id) { const c = el('article', 'oxi-sum'); c.setAttribute('aria-labelledby', id); const h = el('h3', null, title); h.id = id; c.appendChild(h); return c; }
+
+    function stagesCard() {
+      const total = D.stages.length, done = D.stages.filter(s => s.state === 'done').length, cur = D.stages.find(s => s.state === 'current');
+      const c = sumCard('Stages', 'sumS'); const body = el('div', 'oxi-sumbody');
+      body.appendChild(ringChart([{ value: done, color: 'var(--success)' }], total, { big: done + ' of ' + total, small: 'stages', label: done + ' of ' + total + ' stages complete' }));
+      const t = el('div', 'oxi-sumtext'); t.append(el('strong', null, Math.round(done / total * 100) + '% complete'), el('span', null, done === total ? 'All stages done' : plural(total - done, 'stage') + ' to go'));
+      if (cur) t.appendChild(el('span', 'muted', 'Now: ' + shortStage(cur.name)));
+      body.appendChild(t); c.appendChild(body); return c;
+    }
+    function tasksCard() {
+      const done = D.tasks.filter(t => !isOpen(t)).length, open = D.tasks.filter(isOpen), late = open.filter(isLate).length, onTrack = open.length - late;
+      const c = sumCard('Tasks', 'sumT');
+      if (!D.tasks.length) {
+        c.appendChild(el('p', 'oxi-sumbig', 'No tasks yet'));
+        c.appendChild(el('p', 'oxi-sum-note', 'Tasks are the smaller jobs inside this project.'));
+        if (D.can.create_task) { const b = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Add a task'); b.type = 'button'; b.onclick = () => setTab('list', true); c.appendChild(b); }
+        return c;
+      }
+      const big = el('p', 'oxi-sumbig'); big.append(document.createTextNode(plural(open.length, 'open task')));
+      const sub = el('p', 'oxi-sum-note' + (late ? ' bad' : ''), late ? plural(late, 'task') + ' overdue' : 'None overdue'); if (late) sub.prepend(icon('alert', 14), document.createTextNode(' '));
+      c.append(big, sub, stackBar([{ value: done, cls: 'ok' }, { value: onTrack, cls: 'info' }, { value: late, cls: 'bad' }], 'Tasks: ' + done + ' done, ' + onTrack + ' open and on track, ' + late + ' overdue'));
+      const lg = el('ul', 'oxi-legend');
+      [['ok', 'Done', done], ['info', 'On track', onTrack], ['bad', 'Overdue', late]].forEach(([k, l, v]) => { const li = el('li'); li.append(el('i', k), document.createTextNode(l + ' '), el('b', null, String(v))); lg.appendChild(li); });
+      c.appendChild(lg); return c;
+    }
+    function launchCard() {
+      const p = D.project, c = sumCard('Launch countdown', 'sumL');
+      if (p.status === 'Completed') { c.appendChild(el('p', 'oxi-sumbig', 'Completed')); c.appendChild(el('p', 'oxi-sum-note', p.completed_on ? 'Completed on ' + dmy(p.completed_on) : '')); return c; }
+      if (p.target_tbc || !p.target_launch_date) { c.appendChild(el('p', 'oxi-sumbig', 'To be confirmed')); c.appendChild(el('p', 'oxi-sum-note', 'No target launch date has been set.')); return c; }
+      const left = daysBetween(D.today, p.target_launch_date), late = left < 0;
+      const big = el('p', 'oxi-sumbig' + (late ? ' bad' : ''));
+      if (late) big.append(icon('alert', 20), document.createTextNode(' ' + plural(-left, 'day') + ' overdue'));
+      else big.append(document.createTextNode(left === 0 ? 'Launch is today' : plural(left, 'day') + ' to go'));
+      c.appendChild(big);
+      const start = (p.request_date || (p.created_at || '').slice(0, 10) || '').slice(0, 10);
+      if (start && daysBetween(start, p.target_launch_date) > 0) {
+        const span = daysBetween(start, p.target_launch_date), used = Math.min(span, Math.max(0, daysBetween(start, D.today)));
+        c.appendChild(progressBar(late ? 100 : used / span * 100, late ? 'bad' : left <= 14 ? 'warn' : '', 'Time used: ' + used + ' of ' + span + ' days between the request and the target launch'));
+        const ends = el('div', 'oxi-ends'); ends.append(el('span', null, 'Requested ' + dmy(start)), el('span', null, 'Target ' + dmy(p.target_launch_date))); c.appendChild(ends);
+      } else c.appendChild(el('p', 'oxi-sum-note', 'Target ' + dmy(p.target_launch_date)));
+      return c;
+    }
+    function summaryRow() { const g = el('div', 'oxi-sumgrid'); g.append(stagesCard(), tasksCard(), launchCard()); return g; }
+
+    /** Everything that needs a person, worst first. An action is only attached when the existing permission checks allow it. */
+    function attentionItems() {
+      const items = [], p = D.project;
+      if (['Completed', 'Rejected'].includes(p.status)) return items;
+      if (p.status === 'On Hold') items.push({ sev: 'warn', icon: 'pause', tag: 'Paused', title: 'Project is on hold', detail: 'No stage can be completed until work resumes.', act: D.can.edit ? { label: 'Change status', run: statusDialog } : null });
+      D.stages.filter(s => s.overdue).forEach(s => items.push({ sev: 'bad', icon: 'clock', tag: 'Overdue', title: 'Stage ' + s.no + ': ' + s.name, detail: plural(s.delay, 'day') + ' overdue (planned ' + dmy(s.planned) + ')', act: D.can.edit ? { label: 'Edit dates', run: () => stageEditDialog(s) } : null }));
+      D.stages.filter(s => s.review_flag).forEach(s => items.push({ sev: 'warn', icon: 'alert', tag: 'Needs review', title: 'Stage ' + s.no + ': ' + s.name, detail: s.review_flag, act: null }));
+      if (!D.lead && D.next_step && !D.next_step.owner) items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: 'No project lead assigned', detail: 'Stages without a named owner have nobody accountable.', act: D.can.edit ? { label: 'Assign owner', run: focusLead } : null });
+      D.tasks.filter(t => t.status === 'blocked').forEach(t => items.push({ sev: 'warn', icon: 'stop', tag: 'Blocked', title: t.title, detail: 'Task is blocked' + (t.assignee_name ? ' - ' + t.assignee_name : ''), act: { label: 'Open task', task: t } }));
+      D.tasks.filter(isLate).forEach(t => items.push({ sev: 'bad', icon: 'tasks', tag: 'Overdue', title: t.title, detail: plural(daysBetween(t.due_date, D.today), 'day') + ' overdue' + ' - ' + (t.assignee_name || 'Unclaimed'), act: { label: 'Open task', task: t } }));
+      D.tasks.filter(t => isOpen(t) && !t.assignee_id).forEach(t => items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: t.title, detail: 'Nobody has claimed this task' + (t.team ? ' (' + t.team + ' team)' : ''), act: D.can.edit ? { label: 'Assign owner', task: t } : null }));
+      const rank = { bad: 0, warn: 1 }; return items.sort((a, b) => rank[a.sev] - rank[b.sev]);
     }
     function attentionCard() {
-      const items = [], p = D.project;
-      if (['Completed', 'Rejected'].includes(p.status)) return document.createDocumentFragment();
-      if (p.status === 'On Hold') items.push('Project is on hold.');
-      D.stages.filter(s => s.overdue).forEach(s => items.push('Stage ' + s.no + ' (' + s.name + ') is overdue by ' + s.delay + ' day' + (s.delay === 1 ? '' : 's') + '.'));
-      D.stages.filter(s => s.review_flag).forEach(s => items.push('Stage ' + s.no + ' needs review: ' + s.review_flag));
-      D.tasks.filter(t => t.status === 'blocked').forEach(t => items.push('Task blocked: ' + t.title));
-      D.tasks.filter(t => t.status !== 'done' && t.due_date && t.due_date < D.today).forEach(t => items.push('Task overdue: ' + t.title + ' (due ' + dmy(t.due_date) + ')'));
-      D.tasks.filter(t => t.status !== 'done' && !t.assignee_id).forEach(t => items.push('Task unclaimed: ' + t.title));
-      const c = el('section', 'oxi-card2 attention' + (items.length ? ' late' : '')); c.setAttribute('aria-labelledby', 'atT');
-      const h = el('h2', null, 'Attention needed'); h.id = 'atT'; c.appendChild(h);
-      if (!items.length) { c.appendChild(el('p', null, 'Nothing needs attention right now.')); return c; }
-      const ul = el('ul'); items.slice(0, 8).forEach(t => ul.appendChild(el('li', null, t))); c.appendChild(ul);
-      if (items.length > 8) c.appendChild(el('p', 'oxi-section-note', '+ ' + (items.length - 8) + ' more'));
+      const items = attentionItems(), c = el('section', 'oxi-card2 oxi-att'); c.setAttribute('aria-labelledby', 'atT');
+      const h = el('h2'); h.id = 'atT'; h.appendChild(document.createTextNode('Attention needed')); if (items.length) h.appendChild(el('span', 'oxi-count', String(items.length))); c.appendChild(h);
+      if (!items.length) {
+        const row = el('div', 'oxi-clear'); const ic = el('span', 'oxi-state-ic ok'); ic.appendChild(icon('check', 22));
+        const t = el('div'); t.append(el('strong', null, 'All clear'), el('p', null, ['Completed', 'Rejected'].includes(D.project.status) ? 'This project is closed.' : 'Nothing needs attention right now.')); row.append(ic, t); c.appendChild(row); return c;
+      }
+      const ul = el('ul', 'oxi-attlist'); let open = false; const LIMIT = 5;
+      const draw = () => {
+        ul.innerHTML = '';
+        (open ? items : items.slice(0, LIMIT)).forEach(it => {
+          const li = el('li', 'oxi-att-item ' + it.sev);
+          const ic = el('span', 'oxi-att-ic'); ic.appendChild(icon(it.icon, 18));
+          const t = el('div', 'oxi-att-text'); const top = el('div'); top.append(el('span', 'oxi-tag ' + it.sev, it.tag), el('strong', null, ' ' + it.title)); t.append(top, el('span', 'detail', it.detail));
+          li.append(ic, t);
+          if (it.act) { const b = el('button', 'oxi-btn-secondary oxi-btn-sm', it.act.label); b.type = 'button'; b.setAttribute('aria-label', it.act.label + ': ' + it.title); b.onclick = it.act.task ? () => taskPanel(it.act.task, b) : it.act.run; li.appendChild(b); }
+          ul.appendChild(li);
+        });
+      };
+      draw(); c.appendChild(ul);
+      if (items.length > LIMIT) { const m = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Show all ' + items.length); m.type = 'button'; m.setAttribute('aria-expanded', 'false'); m.onclick = () => { open = !open; m.textContent = open ? 'Show fewer' : 'Show all ' + items.length; m.setAttribute('aria-expanded', String(open)); draw(); }; c.appendChild(m); }
       return c;
     }
 
     function renderOverview() {
       const o = $('overview'); o.innerHTML = ''; o.setAttribute('aria-busy', 'false');
-      o.append(kpiTiles(), attentionCard(), nextStepCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard());
+      const top = el('div', 'oxi-ovgrid'); top.append(nextStepCard(), attentionCard());
+      o.append(summaryRow(), top, milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard());
     }
 
     // ------------------------------------------------------------------ List tab (tasks)
