@@ -9,6 +9,48 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    :root { --k1:#2563eb; --k2:#7c3aed; --k3:#0d9488; --k5:#d97706; --k7:#64748b; --ok:#16a34a; --bad:#dc2626; --amb:#d97706; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --k1:#6ea0ff; --k2:#b794f6; --k3:#4fd1c5; --k5:#f6ad55; --k7:#9db0c4; --ok:#5fd08a; --bad:#f08a8a; --amb:#f6ad55; } }
+    :root[data-theme="dark"] { --k1:#6ea0ff; --k2:#b794f6; --k3:#4fd1c5; --k5:#f6ad55; --k7:#9db0c4; --ok:#5fd08a; --bad:#f08a8a; --amb:#f6ad55; }
+    /* colourful metric tiles */
+    .oxi-metric.cm { --c: var(--k1); position: relative; overflow: hidden; border-left-width: 1px; padding-top: 18px; min-height: 118px; transition: transform .18s ease, box-shadow .18s ease, border-color .18s; }
+    .oxi-metric.cm.oxi-tone-good { --c: var(--ok); } .oxi-metric.cm.oxi-tone-warn { --c: var(--amb); } .oxi-metric.cm.oxi-tone-bad { --c: var(--bad); } .oxi-metric.cm.oxi-tone-urgent { --c: var(--bad); } .oxi-metric.cm.oxi-tone-neutral { --c: var(--k7); }
+    .oxi-metric.cm::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--c); }
+    .oxi-metric.cm::after { content: ""; position: absolute; right: -26px; top: -26px; width: 96px; height: 96px; border-radius: 50%; background: var(--c); opacity: .11; pointer-events: none; }
+    a.oxi-metric.cm:hover { transform: translateY(-3px); border-color: var(--c); box-shadow: 0 8px 22px rgba(15,30,55,.14); }
+    a.oxi-metric.cm:active { transform: scale(.98); }
+    .oxi-metric.cm .mic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); margin-bottom: 4px; }
+    .oxi-metric.cm .mic svg { width: 19px; height: 19px; }
+    .oxi-metric.cm .oxi-metric-value { color: var(--c); }
+    .appear { opacity: 0; transform: translateY(10px); animation: up .5s ease forwards; }
+    @keyframes up { to { opacity: 1; transform: none; } }
+    /* charts */
+    .oxi-charts { display: grid; gap: var(--s3); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin: 0 0 var(--s5); }
+    .oxi-charts[hidden] { display: none; }
+    .cc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 16px; box-shadow: var(--shadow-sm); }
+    .cc h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+    .cc h2 small { font-weight: 500; color: var(--text-2); font-size: 12.5px; }
+    .hb { display: grid; gap: 6px; }
+    .hb a { --c: var(--k1); display: grid; grid-template-columns: minmax(90px, 38%) 1fr 36px; gap: 8px; align-items: center; min-height: 38px; padding: 0 8px; border-radius: 10px; color: var(--text); text-decoration: none; font-size: 13px; transition: background .15s, transform .1s; }
+    .hb a:hover { background: var(--surface-2); text-decoration: none; } .hb a:active { transform: scale(.98); }
+    .hb .tr { height: 14px; border-radius: 8px; background: var(--border); overflow: hidden; }
+    .hb .tr i { display: block; width: 0; height: 100%; border-radius: 8px; background: var(--c); transition: width .9s cubic-bezier(.2,.8,.2,1); }
+    .hb b { text-align: right; font-variant-numeric: tabular-nums; }
+    .dn { display: grid; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); gap: 16px; align-items: center; }
+    .dn .ring { position: relative; aspect-ratio: 1; } .dn svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .dn circle { fill: none; stroke-width: 6.2; transition: stroke-dasharray .9s cubic-bezier(.2,.8,.2,1), stroke-width .18s, opacity .18s; }
+    .dn circle.bg { stroke: var(--border); opacity: .6; } .dn .ring:hover circle.seg { opacity: .6; } .dn circle.seg:hover { opacity: 1; stroke-width: 7.6; }
+    .dn .mid { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; } .dn .mid b { font-size: 26px; line-height: 1; } .dn .mid span { font-size: 12px; color: var(--text-2); }
+    .dn .lg { display: grid; gap: 4px; } .dn .lg div { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; min-height: 30px; font-size: 13.5px; white-space: nowrap; }
+    .dn .lg i { width: 12px; height: 12px; border-radius: 4px; background: var(--c); }
+    /* colour the recent-activity status */
+    .oxi-activity-status { font-weight: 700; }
+    .oxi-activity-status.s-ok { color: var(--ok); } .oxi-activity-status.s-bad { color: var(--bad); } .oxi-activity-status.s-amb { color: var(--amb); }
+    .oxi-task { transition: transform .15s, box-shadow .15s; } .oxi-task:hover { transform: translateX(2px); box-shadow: var(--shadow-md); }
+    @media (max-width: 520px) { .dn { grid-template-columns: 1fr; } .dn .ring { max-width: 170px; margin: 0 auto; } }
+    @media (prefers-reduced-motion: reduce) { .appear { animation: none; opacity: 1; transform: none; } .hb .tr i, .dn circle, .oxi-metric.cm, .oxi-task { transition: none; } }
+  </style>
 </head>
 <body>
   <div class="oxi-page-head">
@@ -24,6 +66,7 @@
 
   <div id="controls" class="oxi-controls" hidden></div>
   <div class="oxi-metrics" id="cards" aria-busy="true"></div>
+  <section class="oxi-charts" id="charts" hidden aria-label="Charts"></section>
   <section id="extraBox" hidden aria-labelledby="extraTitle">
     <h2 class="oxi-band-title" id="extraTitle">R&amp;D projects</h2>
     <div class="oxi-metrics" id="extraCards"></div>
@@ -57,6 +100,73 @@
     const $ = (id) => document.getElementById(id);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     const fmtDay = (d) => { if (!d) return null; const p = String(d).slice(0, 10).split('-'); return p[2] + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1]) - 1] + ' ' + p[0]; };
+
+
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const svg = (tag, attrs) => { const e = document.createElementNS(SVGNS, tag); Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; };
+    const ICONS = {
+      shield: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z', box: 'M3 7l9-4 9 4-9 4zM3 7v10l9 4 9-4V7M12 11v10', card: 'M3 6h18v12H3zM3 10h18', doc: 'M7 3h8l4 4v14H7zM15 3v4h4M10 12h6M10 16h6',
+      alert: 'M12 9v4m0 4h.01M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z', refresh: 'M20 11a8 8 0 0 0-14-4M4 4v4h4M4 13a8 8 0 0 0 14 4M20 20v-4h-4',
+      check: 'M5 13l4 4L19 7', rupee: 'M7 5h10M7 9h10M7 5c6 0 6 8 0 8l8 6', truck: 'M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19a1.5 1.5 0 1 0 0-.01M17 19a1.5 1.5 0 1 0 0-.01', flask: 'M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2.2h12.4a1.5 1.5 0 0 0 1.3-2.2L14 9V3', clock: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z', dot: 'M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0'
+    };
+    function iconFor(label) {
+      const l = String(label).toLowerCase();
+      if (/reject|exception|late|overdue|problem|mismatch|variance/.test(l)) return 'alert';
+      if (/replace/.test(l)) return 'refresh';
+      if (/inspect|quality|qc/.test(l)) return 'shield';
+      if (/approv|decision|complete|done|paid|matched/.test(l)) return 'check';
+      if (/spend|amount|value|payable|₹|cost|outstanding/.test(l)) return 'rupee';
+      if (/transit|expected|deliver|dispatch/.test(l)) return 'truck';
+      if (/payment|advance/.test(l)) return 'card';
+      if (/receipt|goods|grn|stock|store|received/.test(l)) return 'box';
+      if (/recipe|trial|lab|r&d|project/.test(l)) return 'flask';
+      if (/wait|pending|due|await/.test(l)) return 'clock';
+      if (/order|po |request|indent|invoice/.test(l)) return 'doc';
+      return 'dot';
+    }
+    function icon(name) { const s = svg('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }); s.appendChild(svg('path', { d: ICONS[name] || ICONS.dot })); return s; }
+    function countUp(node, to, text) {
+      if (!Number.isFinite(to) || to === 0 || matchMedia('(prefers-reduced-motion: reduce)').matches) { node.textContent = text; return; }
+      const t0 = performance.now(), dur = 700;
+      (function f(now) { const k = Math.min(1, (now - t0) / dur); node.textContent = k < 1 ? String(Math.round(to * (1 - Math.pow(1 - k, 3)))) : text; if (k < 1) requestAnimationFrame(f); })(t0);
+    }
+    function metricCard(c, i) {
+      const a = el('a', 'oxi-metric cm oxi-tone-' + c.tone + ' appear'); a.href = c.href; a.style.animationDelay = Math.min(i, 8) * 60 + 'ms';
+      const ic = el('span', 'mic'); ic.appendChild(icon(iconFor(c.label)));
+      const val = el('span', 'oxi-metric-value', '0'); countUp(val, /^\d+$/.test(String(c.value)) ? Number(c.value) : NaN, String(c.value));
+      a.append(ic, el('span', 'oxi-metric-label', c.label), val);
+      if (c.hint) a.appendChild(el('span', 'oxi-metric-hint', c.hint));
+      return a;
+    }
+    const toneVar = (t) => ({ good: '--ok', warn: '--amb', bad: '--bad', urgent: '--bad', neutral: '--k7' }[t] || '--k1');
+    const statusClass = (st) => { const x = String(st || '').toLowerCase(); if (x.length > 22) return ''; if (/reject|fail|overdue|late|cancel/.test(x)) return 's-bad'; if (/approv|paid|complete|received|matched|closed|accepted/.test(x)) return 's-ok'; if (/pend|wait|transit|partial|created|open|await/.test(x)) return 's-amb'; return ''; };
+    const statusVar = (st) => ({ 's-bad': '--bad', 's-ok': '--ok', 's-amb': '--amb' }[statusClass(st)] || '--k1');
+
+    function barsChart(cards) {
+      const num = cards.filter(c => /^\d+$/.test(String(c.value)));
+      if (num.length < 2 || !num.some(c => Number(c.value) > 0)) return null;   // nothing to compare
+      const max = Math.max(1, ...num.map(c => Number(c.value)));
+      const box = el('div', 'cc appear'); const h = el('h2'); h.append(document.createTextNode('At a glance'), el('small', null, 'tap a bar to open')); box.appendChild(h);
+      const list = el('div', 'hb'), fills = [];
+      num.forEach(c => { const a = el('a'); a.href = c.href; a.style.setProperty('--c', 'var(' + toneVar(c.tone) + ')'); const tr = el('span', 'tr'), f = el('i'); tr.appendChild(f); fills.push([f, Number(c.value) / max * 100]); a.append(el('span', null, c.label), tr, el('b', null, String(c.value))); list.appendChild(a); });
+      requestAnimationFrame(() => requestAnimationFrame(() => fills.forEach(([f, w]) => { f.style.width = w + '%'; })));
+      box.appendChild(list); return box;
+    }
+    function donutChart(activity) {
+      // only meaningful when statuses are short categories (Approved, Rejected...), not free-text audit lines
+      const labels = new Set(activity.map(a => a.status || 'Unknown'));
+      if (!activity.length || labels.size > 6 || [...labels].some(l => l.length > 22)) return null;
+      const counts = {}; activity.forEach(a => { const k = a.status || 'Unknown'; counts[k] = (counts[k] || 0) + 1; });
+      const entries = Object.entries(counts), total = activity.length;
+      const box = el('div', 'cc appear'); const h = el('h2'); h.append(document.createTextNode('Recent activity by status'), el('small', null, 'last ' + total)); box.appendChild(h);
+      const wrap = el('div', 'dn'), ring = el('div', 'ring'), s = svg('svg', { viewBox: '0 0 36 36', role: 'img', 'aria-label': 'Recent activity by status: ' + entries.map(e => e[0] + ' ' + e[1]).join(', ') });
+      s.appendChild(svg('circle', { class: 'bg', cx: 18, cy: 18, r: 15.9155 }));
+      let off = 0; const segs = []; const lg = el('div', 'lg');
+      entries.forEach(([st, n]) => { const len = n / total * 100; const c = svg('circle', { class: 'seg', cx: 18, cy: 18, r: 15.9155, stroke: 'var(' + statusVar(st) + ')', 'stroke-dasharray': '0 100', 'stroke-dashoffset': -off }); segs.push([c, len]); off += len; s.appendChild(c);
+        const row = el('div'); row.style.setProperty('--c', 'var(' + statusVar(st) + ')'); row.append(el('i'), el('span', null, st), el('b', null, String(n))); lg.appendChild(row); });
+      requestAnimationFrame(() => requestAnimationFrame(() => segs.forEach(([c, len]) => { const l = Math.max(0, len - 0.6); c.setAttribute('stroke-dasharray', l + ' ' + (100 - l)); })));
+      const mid = el('div', 'mid'); mid.append(el('b', null, String(total)), el('span', null, 'items')); ring.append(s, mid); wrap.append(ring, lg); box.appendChild(wrap); return box;
+    }
 
     function taskRow(t) {
       const row = el('div', 'oxi-task oxi-tone-' + (t.tone || 'info')); row.setAttribute('role', 'listitem');
@@ -141,21 +251,15 @@
 
       const cards = $('cards'); cards.innerHTML = ''; cards.setAttribute('aria-busy', 'false');
       if (!d.cards.length) cards.appendChild(el('p', 'oxi-empty-line', 'There is nothing to summarise for your account yet.'));
-      d.cards.forEach(c => {
-        const a = el('a', 'oxi-metric oxi-tone-' + c.tone); a.href = c.href;
-        a.append(el('span', 'oxi-metric-label', c.label), el('span', 'oxi-metric-value', String(c.value)));
-        if (c.hint) a.appendChild(el('span', 'oxi-metric-hint', c.hint));
-        cards.appendChild(a);
-      });
+      d.cards.forEach((c, i) => cards.appendChild(metricCard(c, i)));
 
       const ex = $('extraCards'); ex.innerHTML = '';
-      (d.extra_cards || []).forEach(c => {
-        const a = el('a', 'oxi-metric oxi-tone-' + c.tone); a.href = c.href;
-        a.append(el('span', 'oxi-metric-label', c.label), el('span', 'oxi-metric-value', String(c.value)));
-        if (c.hint) a.appendChild(el('span', 'oxi-metric-hint', c.hint));
-        ex.appendChild(a);
-      });
+      (d.extra_cards || []).forEach((c, i) => ex.appendChild(metricCard(c, i)));
       $('extraBox').hidden = !(d.extra_cards && d.extra_cards.length);
+
+      const ch = $('charts'); ch.innerHTML = '';
+      [barsChart(d.cards), donutChart(d.activity)].forEach(c => { if (c) ch.appendChild(c); });
+      ch.hidden = !ch.children.length;
 
       $('queueCount').hidden = d.queue.total === 0; $('queueCount').textContent = d.queue.total;
       fillList($('queue'), d.queue, 'Nothing is waiting for you. New work appears here as soon as it is ready.');
@@ -171,7 +275,7 @@
       const act = $('activity'); act.innerHTML = '';
       d.activity.forEach(a => {
         const li = el('a', 'oxi-activity-row'); li.href = a.href;
-        li.append(el('span', 'oxi-activity-type', a.type), el('b', null, a.reference), el('span', 'oxi-activity-party', a.party || ''), el('span', 'oxi-activity-status', a.status));
+        li.append(el('span', 'oxi-activity-type', a.type), el('b', null, a.reference), el('span', 'oxi-activity-party', a.party || ''), el('span', 'oxi-activity-status ' + statusClass(a.status), a.status));
         if (a.amount != null) li.appendChild(el('span', 'oxi-activity-amount', '₹' + money(a.amount)));
         li.appendChild(el('span', 'oxi-activity-when', timeAgo(a.at)));
         act.appendChild(li);
