@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>R&amp;D Report</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .rep-stage { margin: 0 0 var(--s5); break-inside: avoid-page; }
+    .rep-stage > h2 { margin: 0 0 4px; font-size: 18px; }
+    .rep-stage .state { margin: 0 0 var(--s2); color: var(--text-2); font-size: 14px; }
+    .rep-stage table { width: 100%; table-layout: fixed; }
+    .rep-stage th:nth-child(1) { width: 34%; } .rep-stage th:nth-child(2) { width: 38%; } .rep-stage th:nth-child(3) { width: 17%; } .rep-stage th:nth-child(4) { width: 11%; }
+    .rep-stage td { overflow-wrap: anywhere; }
+    .rep-result { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .rep-muted { color: var(--text-2); }
+    .rep-sign { margin: var(--s2) 0 0; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); font-size: 14px; }
+    .rep-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0 0 var(--s4); }
+    .rep-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 var(--s5); font-size: 14px; }
+    .rep-kv dt { color: var(--text-2); } .rep-kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+    @media print { .rep-actions { display: none !important; } .rep-sign { border-left: 3px solid #000; } }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="projects.html">R&amp;D Projects</a></p>
+  <h1 id="repTitle">R&amp;D report</h1>
+  <p class="oxi-page-sub" id="repSub">What was done and found at each stage, who recorded it and when.</p>
+  <p id="message" role="status"></p>
+
+  <div class="oxi-print-letterhead">
+    <h2>Oxicol Car Care Products</h2>
+    <div class="addr">Malappuram, Kerala</div>
+    <div class="doc-title" id="docTitle">R&amp;D REPORT</div>
+  </div>
+
+  <div class="rep-actions" id="actions" hidden></div>
+  <div id="report" aria-busy="true"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const qs = new URLSearchParams(location.search);
+    const pid = Number(qs.get('id')); const only = qs.get('stage') ? Number(qs.get('stage')) : null;
+    const KIND_FOR_STAGE = { 4: 'qc_signoff', 6: 'customer', 8: 'handover_ack' };
+    const DECISION = { approved: 'Approved', rejected: 'Rejected', returned: 'Returned for more information' };
+    const LABEL = { qc_signoff: 'QC sign-off', customer: 'Customer approval', handover_ack: 'Production handover acknowledgement' };
+    const when = (v) => v ? dmy(String(v).slice(0, 10)) : '-';
+
+    function summary(D) {
+      const p = D.project, kv = el('dl', 'rep-kv');
+      const add = (k, v) => { kv.append(el('dt', null, k), el('dd', null, v || '-')); };
+      add('Project', p.project_number + ' ' + p.title); add('Type', p.project_type); add('Status', p.status); add('Priority', p.priority);
+      add('Project lead', D.lead ? D.lead.name : 'Not assigned'); add('Requested by', (p.requested_by_name || '-') + (p.request_date ? ' on ' + dmy(p.request_date) : ''));
+      add('Target launch', p.target_tbc ? 'To be confirmed' : (p.target_launch_date ? dmy(p.target_launch_date) : '-'));
+      add('Progress', D.stages.filter(s => s.state === 'done').length + ' of ' + D.stages.length + ' stages complete'); add('Report date', dmy(D.today));
+      return kv;
+    }
+
+    function stageSection(D, s) {
+      const sec = el('section', 'rep-stage'); sec.setAttribute('aria-labelledby', 'st' + s.no);
+      const h = el('h2', null, 'Stage ' + s.no + ': ' + s.name); h.id = 'st' + s.no; sec.appendChild(h);
+      const state = s.state === 'done' ? 'Completed ' + dmy(s.actual) + (s.completed_by_name ? ' by ' + s.completed_by_name : '') : s.state === 'current' ? 'In progress' : 'Not started';
+      sec.appendChild(el('p', 'state', state + (s.planned ? ' - planned ' + dmy(s.planned) : '') + (s.owner ? ' - owner ' + s.owner.name : '')));
+      const t = el('table'); t.innerHTML = '<thead><tr><th scope="col">Checklist item</th><th scope="col">Result recorded</th><th scope="col">Ticked by</th><th scope="col">Date</th></tr></thead>';
+      const tb = el('tbody');
+      s.checklist.forEach(ci => {
+        const tr = el('tr'); tr.appendChild(el('td', null, ci.label));
+        const r = el('td');
+        if (ci.result) r.appendChild(el('div', 'rep-result', ci.result));
+        else if (ci.result_hidden) r.appendChild(el('span', 'rep-muted', 'Recorded - confidential to R&D'));
+        else if (!ci.needs_result) r.appendChild(el('span', 'rep-muted', ci.done ? 'Recorded as a sign-off below' : 'Recorded as a sign-off'));
+        else if (ci.done) r.appendChild(el('span', 'rep-muted', 'No result recorded (ticked before results were kept)'));
+        else r.appendChild(el('span', 'rep-muted', 'Not done yet'));
+        tr.append(r, el('td', null, ci.done ? (ci.done_by_name || '-') : '-'), el('td', null, ci.done ? when(ci.done_at) : '-')); tb.appendChild(tr);
+      });
+      t.appendChild(tb); sec.appendChild(t);
+      const kind = KIND_FOR_STAGE[s.no];
+      if (kind) {
+        const a = D.approvals.filter(x => x.kind === kind).pop();
+        const d = el('div', 'rep-sign');
+        if (!a) d.textContent = LABEL[kind] + ': not recorded.';
+        else {
+          d.append(el('strong', null, LABEL[kind] + ': '), document.createTextNode((DECISION[a.decision] || a.decision) + ' by ' + (a.decided_by_name || '-') + ' on ' + when(a.decision_date || a.at)));
+          if (a.external_rep) d.appendChild(document.createTextNode('. Customer representative: ' + a.external_rep));
+          if (a.evidence) d.appendChild(document.createTextNode('. Evidence: ' + a.evidence));
+          if (a.remarks) d.appendChild(document.createTextNode('. ' + a.remarks));
+        }
+        sec.appendChild(d);
+      }
+      if (s.remarks) sec.appendChild(el('p', 'rep-muted', 'Stage remarks: ' + s.remarks));
+      return sec;
+    }
+
+    async function load() {
+      if (!pid) { $('message').textContent = 'No project selected.'; $('message').className = 'error'; return; }
+      const D = await api('/api/rd/projects/' + pid);
+      const box = $('report'); box.setAttribute('aria-busy', 'false'); box.innerHTML = '';
+      if (!D.success) { $('message').textContent = D.error || 'Could not load this report.'; $('message').className = 'error'; return; }
+      if (D.project.is_draft) { location.replace('project-new.html?id=' + pid); return; }
+      const stage = only ? D.stages.find(s => s.no === only) : null;
+      if (only && !stage) { $('message').textContent = 'There is no stage ' + only + '.'; $('message').className = 'error'; return; }
+      const title = D.project.project_number + (stage ? ' - Stage ' + stage.no + ' report' : ' - project report');
+      $('repTitle').textContent = title; document.title = title + ' - Oxicol'; $('docTitle').textContent = stage ? 'R&D STAGE REPORT' : 'R&D PROJECT REPORT';
+      const act = $('actions'); act.hidden = false; act.innerHTML = '';
+      const pr = el('button', null, 'Print'); pr.type = 'button'; pr.onclick = () => window.print();
+      const back = el('a', 'oxi-btn oxi-btn-secondary', 'Back to project'); back.href = 'project.html?id=' + pid;
+      act.append(pr, back);
+      if (stage) { const all = el('a', 'oxi-btn oxi-btn-secondary', 'Full project report'); all.href = 'project-report.html?id=' + pid; act.appendChild(all); }
+      box.appendChild(summary(D));
+      if (D.confidential_hidden) box.appendChild(el('p', 'oxi-section-note', 'Results are confidential to R&D and are not shown for your role.'));
+      (stage ? [stage] : D.stages).forEach(s => box.appendChild(stageSection(D, s)));
+    }
+    load().catch(() => { $('message').textContent = 'Could not reach the server.'; $('message').className = 'error'; });
+  </script>
+</body>
+</html>

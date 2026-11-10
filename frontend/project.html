@@ -163,7 +163,7 @@
       $('pageTitle').textContent = p.project_number + ' ' + p.title;
       document.title = p.project_number + ' - R&D Project';
       const m = $('meta'); m.innerHTML = '';
-      m.className = 'oxi-chips';
+      m.className = 'oxi-metabar';
       // status and priority keep their badges; everything else is a labelled chip with an icon
       const sp = el('span', 'oxi-chip plain'); sp.append(rdBadge(p.status), prioBadge(p.priority)); m.appendChild(sp);
       if (p.status === 'On Hold') { const h = el('span', 'oxi-chip warn'); const ic = el('span', 'ci'); ic.appendChild(icon('pause', 14)); h.append(ic, el('span', null, 'Paused: no stage can be completed until work resumes.')); m.appendChild(h); }
@@ -213,6 +213,67 @@
       const row = el('div', 'oxi-state'); const ic = el('span', 'oxi-state-ic'); ic.appendChild(icon(iconName, 22));
       const t = el('div'); const h = el('h2', null, title); h.id = 'nsT'; t.append(h, el('p', null, text)); row.append(ic, t); c.appendChild(row); return c;
     }
+    /** One checklist item. Ticking an item that needs a result opens a "What was found?" box first; the tick is only saved with the result. */
+    function checklistItem(ci, stageNo) {
+      const url = '/api/rd/projects/' + pid + '/stages/' + stageNo + '/checklist/' + ci.id;
+      const li = el('li', 'oxi-ci'); const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = ci.done; cb.disabled = !D.can.edit;
+      lab.append(cb, document.createTextNode(' ' + ci.label)); li.appendChild(lab);
+      const canWrite = D.can.edit && D.can.technical;
+      const hasStored = !!ci.result || ci.result_hidden;
+      let formBox = null;
+
+      function closeForm(revert) { if (formBox) { formBox.remove(); formBox = null; } if (revert) cb.checked = ci.done; cb.disabled = !D.can.edit; }
+      function openForm() {
+        if (formBox) { formBox.querySelector('textarea').focus(); return; }
+        cb.disabled = true;
+        formBox = el('form', 'oxi-resultform'); formBox.noValidate = true;
+        const id = 'res' + ci.id; const l = el('label', null, 'What was found? ' + ci.label); l.htmlFor = id;
+        const ta = el('textarea'); ta.id = id; ta.rows = 3; ta.maxLength = 2000; ta.value = ci.result || '';
+        const hint = el('div', 'oxi-section-note', 'Saved under your name with the date. Only people with R&D technical access can read it. Up to 2000 characters.'); hint.style.margin = '2px 0 6px';
+        const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+        const row = el('div', 'row');
+        const save = el('button', null, ci.done ? 'Save result' : 'Save and tick'); save.type = 'submit';
+        const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { closeForm(true); cb.focus(); };
+        row.append(save, cancel); formBox.append(l, ta, hint, err, row);
+        ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeForm(true); cb.focus(); } });
+        formBox.addEventListener('submit', async (ev) => {
+          ev.preventDefault(); if (save.disabled) return;
+          if (!ta.value.trim()) { err.textContent = 'Write what was found first.'; err.hidden = false; ta.focus(); return; }
+          save.disabled = true; err.hidden = true;
+          const r = await api(url, 'POST', { done: true, result: ta.value });      // the typed text stays on screen if this fails
+          save.disabled = false; if (!r.success) { fail(r, err); return; }
+          note('Saved.', true); load(true);
+        });
+        li.appendChild(formBox); ta.focus();
+      }
+
+      cb.onchange = async () => {
+        if (cb.checked && ci.needs_result && !hasStored) {
+          if (!canWrite) { cb.checked = false; note('Recording a result needs R&D technical access.', false); return; }
+          cb.checked = false; openForm(); return;                                   // not ticked until the result is saved
+        }
+        cb.disabled = true;
+        const r = await api(url, 'POST', { done: cb.checked });
+        if (!r.success) { cb.checked = !cb.checked; cb.disabled = !D.can.edit; fail(r); return; }
+        load(true);
+      };
+
+      // who ticked it and when, then the result (or why there is none to show)
+      if (ci.done) li.appendChild(el('div', 'oxi-ci-meta', 'Ticked by ' + (ci.done_by_name || '-') + (ci.done_at ? ' on ' + dmy(String(ci.done_at).slice(0, 10)) : '')));
+      if (ci.result) {
+        const r = el('div', 'oxi-result'); r.append(el('strong', null, 'Result'), el('p', null, ci.result)); li.appendChild(r);
+      } else if (ci.result_hidden) {
+        li.appendChild(el('div', 'oxi-result oxi-result-hidden', 'A result has been recorded. It is confidential to R&D.'));
+      } else if (ci.done && ci.needs_result) {
+        li.appendChild(el('div', 'oxi-ci-meta', 'No result recorded (ticked before results were kept).'));
+      }
+      if (D.can.edit && canWrite && ci.done && ci.needs_result) {
+        const b = el('button', 'oxi-btn-secondary oxi-btn-sm', ci.result ? 'Edit result' : 'Add result'); b.type = 'button';
+        b.setAttribute('aria-label', (ci.result ? 'Edit result: ' : 'Add result: ') + ci.label); b.onclick = () => openForm(); li.appendChild(b);
+      }
+      return li;
+    }
+
     function nextStepCard() {
       const p = D.project;
       if (p.status === 'Completed') return banner2('ok', 'check', 'Project completed', 'This project was completed on ' + dmy(p.completed_on) + '.');
@@ -252,16 +313,7 @@
       const ph = el('div', 'oxi-checkhead'); ph.append(el('strong', null, 'Checklist'), el('span', null, doneN + ' of ' + totalN + ' done'));
       c.appendChild(ph); c.appendChild(progressBar(totalN ? doneN / totalN * 100 : 0, doneN === totalN && totalN ? 'ok' : '', 'Checklist progress: ' + doneN + ' of ' + totalN + ' done'));
       const ul = el('ul', 'oxi-checklist'); ul.setAttribute('aria-label', 'Stage ' + n.stage + ' checklist');
-      n.checklist.forEach(ci => {
-        const li = el('li'); const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = ci.done; cb.disabled = !D.can.edit;
-        cb.onchange = async () => {
-          cb.disabled = true;
-          const r = await api('/api/rd/projects/' + pid + '/stages/' + n.stage + '/checklist/' + ci.id, 'POST', { done: cb.checked });
-          if (!r.success) { cb.checked = !cb.checked; cb.disabled = !D.can.edit; fail(r); return; }
-          load(true);
-        };
-        lab.append(cb, document.createTextNode(' ' + ci.label)); li.appendChild(lab); ul.appendChild(li);
-      });
+      n.checklist.forEach(ci => ul.appendChild(checklistItem(ci, n.stage)));
       c.appendChild(ul);
       if (n.missing.length) { const m = el('div', 'oxi-missing'); m.append(document.createTextNode('Before this stage can be completed:')); const mu = el('ul'); n.missing.forEach(t => mu.appendChild(el('li', null, t))); m.appendChild(mu); c.appendChild(m); }
       if (D.can.stage) { const b = el('button', null, 'Mark stage ' + n.stage + ' done'); b.type = 'button'; b.onclick = () => completeStageDialog(stage); c.appendChild(b); }
@@ -400,11 +452,13 @@
         else c4.textContent = '-';
         const c5 = el('td', null, s.remarks || '');
         const c6 = el('td');
+        if (s.state === 'done') { const rp = el('a', 'oxi-btn oxi-btn-secondary', 'Report'); rp.href = 'project-report.html?id=' + pid + '&stage=' + s.no; rp.setAttribute('aria-label', 'Report for stage ' + s.no); c6.appendChild(rp); c6.appendChild(document.createTextNode(' ')); }
         if (D.can.edit) { const b = el('button', 'oxi-btn-secondary', 'Edit'); b.type = 'button'; b.setAttribute('aria-label', 'Edit stage ' + s.no); b.onclick = () => stageEditDialog(s); c6.appendChild(b); }
         if (D.can.stage && s.state === 'done' && D.project.status !== 'Completed') { const b = el('button', 'oxi-btn-secondary', 'Reopen'); b.type = 'button'; b.setAttribute('aria-label', 'Reopen stage ' + s.no); b.onclick = () => reopenDialog(s); c6.appendChild(b); }
         tr.append(c0, c1, c2, c3, c4, c5, c6); tb.appendChild(tr);
       });
       t.appendChild(tb); c.appendChild(t);
+      { const fr = el('p'); const fa = el('a', 'oxi-btn oxi-btn-secondary', 'Open full project report'); fa.href = 'project-report.html?id=' + pid; fr.appendChild(fa); c.appendChild(fr); }
       if (D.can.edit) {
         const row = el('p'); const a = el('button', 'oxi-btn-secondary', 'Fill in empty planned dates'); a.type = 'button'; a.onclick = planDialog;
         const b = el('button', 'oxi-btn-secondary', 'Re-plan from trial duration'); b.type = 'button'; b.onclick = replanDialog;

@@ -56,7 +56,7 @@ async function completeStage(token, id, no, date) {
   await pool.query("UPDATE rd_stages SET completed_at = completed_at - INTERVAL '1 minute' WHERE project_id = $1 AND completed_at IS NOT NULL", [id]);
   const d = await get(token, id);
   const st = d.stages.find(s => s.no === no);
-  for (const c of st.checklist) await api(token, 'POST', `/api/rd/projects/${id}/stages/${no}/checklist/${c.id}`, { done: true });
+  for (const c of st.checklist) await api(token, 'POST', `/api/rd/projects/${id}/stages/${no}/checklist/${c.id}`, { done: true, result: 'Test result' });
   return api(token, 'POST', `/api/rd/projects/${id}/stages/${no}/complete`, { date: date || R.todayIST(), confirm: true });
 }
 
@@ -129,9 +129,50 @@ test('only managers (and admins) can raise R&D requests: R&D and branch get 403 
   }
 });
 
+test('checklist results: needed to tick, kept on untick, locked once the stage is complete, confidential, and never copied into the audit log', async () => {
+  const SECRET = 'Formula FX-' + TAG + ': 42 percent resin, 3 percent additive';
+  const p = await newProject(tok.lead);
+  const item = async (who, no, i) => (await get(tok[who], p.id)).stages[no - 1].checklist[i];
+  const tick = (who, no, c, body) => api(tok[who], 'POST', `/api/rd/projects/${p.id}/stages/${no}/checklist/${c.id}`, body);
+  let c = await item('lead', 1, 0);
+  assert.equal(c.needs_result, true); assert.equal(c.result, null);
+  assert.equal((await tick('lead', 1, c, { done: true })).status, 400, 'an item that needs a result cannot be ticked without one');
+  assert.equal((await tick('lead', 1, c, { done: true, result: '   ' })).status, 400, 'a blank result does not count');
+  assert.equal((await tick('lead', 1, c, { done: true, result: 'x'.repeat(R.MAX_RESULT_LENGTH + 1) })).status, 400, 'an over-long result is refused');
+  assert.equal((await item('lead', 1, 0)).done, false, 'a refused tick changes nothing');
+  assert.equal((await tick('lead', 1, c, { done: true, result: SECRET })).success, true);
+  c = await item('lead', 1, 0);
+  assert.equal(c.done, true); assert.equal(c.result, SECRET); assert.ok(c.done_by_name && c.done_at && c.result_at, 'who, when and what are all recorded');
+  // untick keeps the result so no work is lost; ticking again needs no retyping
+  assert.equal((await tick('lead', 1, c, { done: false })).success, true);
+  assert.equal((await item('lead', 1, 0)).result, SECRET, 'the result survives an untick');
+  assert.equal((await tick('lead', 1, c, { done: true })).success, true, 'a stored result is enough to tick again');
+  // confidentiality: a person who can open the project but lacks technical access never receives the text
+  for (const who of ['manager', 'admin']) {
+    const seen = await item(who, 1, 0);
+    if (who === 'manager') { assert.equal(seen.result, null); assert.equal(seen.result_hidden, true, 'the page can say a result exists without showing it'); assert.ok(!JSON.stringify(await get(tok.manager, p.id)).includes(SECRET), 'the text is nowhere in the response'); }
+    else assert.equal(seen.result, SECRET, 'an administrator holds every permission');
+  }
+  assert.equal((await tick('manager', 1, c, { done: false })).status, 403, 'view-only people cannot change the checklist');
+  // the two sign-off items need no result: their record is the approval
+  const qc = (await get(tok.lead, p.id)).stages[3].checklist[2];
+  assert.equal(qc.label, 'Obtain QC sign-off'); assert.equal(qc.needs_result, false);
+  // finish stage 1 and check it locks
+  for (let i = 1; i < 3; i++) assert.equal((await tick('lead', 1, await item('lead', 1, i), { done: true, result: 'Done ' + i })).success, true);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: R.todayIST(), confirm: true })).success, true);
+  assert.equal((await tick('lead', 1, await item('lead', 1, 0), { done: true, result: 'Changed afterwards' })).status, 409, 'a completed stage keeps its record until it is reopened');
+  assert.equal((await item('lead', 1, 0)).result, SECRET);
+  // the audit trail says what happened but never what was found
+  const log = (await pool.query("SELECT summary, before_data, after_data FROM audit_log WHERE entity = 'rd_project' AND entity_id = $1 AND action = 'rd.checklist'", [p.id])).rows;
+  assert.ok(log.length >= 3, 'ticks are audited');
+  assert.ok(!JSON.stringify(log).includes('FX-' + TAG), 'the result text is not in the audit log');
+});
+
 test('migrations add the R&D tables and roles without touching existing data; the sample project does not exist', async () => {
   const names = (await pool.query('SELECT name FROM app_migrations')).rows.map(r => r.name);
-  assert.ok(names.includes('009_rd_projects') && names.includes('010_rd_permissions'));
+  assert.ok(names.includes('009_rd_projects') && names.includes('010_rd_permissions') && names.includes('012_rd_checklist_results'));
+  const cols = (await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'rd_checklist_items'")).rows.map(r => r.column_name);
+  assert.ok(cols.includes('result') && cols.includes('result_at'), 'items can hold a result');
   const before = names.length; await runMigrations();
   assert.equal((await pool.query('SELECT COUNT(*)::int n FROM app_migrations')).rows[0].n, before);
   assert.equal((await pool.query("SELECT COUNT(*)::int n FROM rd_projects WHERE project_number = 'OXRD011026' AND created_by IS NULL AND imported_from IS NULL")).rows[0].n, 0, 'nothing was invented: the migrations never create the historical project; it comes only from the reviewable import script');
@@ -297,7 +338,7 @@ test('stage completion needs the current stage, its checklist and its approvals,
   const empty = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: today, confirm: true });
   assert.equal(empty.status, 422); assert.deepEqual(empty.missing, ['3 checklist items not done'], 'the missing conditions are named');
   const d = await get(tok.lead, p.id);
-  for (const c of d.stages[0].checklist) await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/checklist/${c.id}`, { done: true });
+  for (const c of d.stages[0].checklist) await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/checklist/${c.id}`, { done: true, result: 'Test result' });
   assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: today })).status, 400, 'no confirmation, no completion');
   assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: R.addDays(today, 1), confirm: true })).status, 400, 'a future date is refused');
   assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { confirm: true })).status, 400, 'a date is required');
@@ -324,7 +365,7 @@ test('rapid or simultaneous clicks complete a stage once and never several stage
   const p = await newProject(tok.kannur);
   await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.lead });
   const d = await get(tok.lead, p.id);
-  for (const no of [1, 2]) for (const c of d.stages[no - 1].checklist) await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/${no}/checklist/${c.id}`, { done: true });
+  for (const no of [1, 2]) for (const c of d.stages[no - 1].checklist) await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/${no}/checklist/${c.id}`, { done: true, result: 'Test result' });
   const today = R.todayIST();
   const shots = await Promise.all([
     ...Array.from({ length: 6 }, () => api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: today, confirm: true })),

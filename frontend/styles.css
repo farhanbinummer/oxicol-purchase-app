@@ -1206,14 +1206,14 @@ a.oxi-kpi-chip:hover { border-color: var(--accent); }
    R&D project page: Overview redesign (header chips, stage stepper, summary cards, attention panel, next step)
    Uses only the app's colour tokens, so light and dark themes both work.
    ============================================================ */
-.oxi-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin: 0 0 var(--s4); }
+.oxi-metabar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin: 0 0 var(--s4); }
 .oxi-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 14px 4px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 14px; max-width: 100%; }
 .oxi-chip.plain { padding: 4px 10px; gap: 6px; }
 .oxi-chip .ci { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--primary-soft); color: var(--accent); }
 .oxi-chip small { color: var(--text-2); font-size: 12px; }
 .oxi-chip.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--text); }
 .oxi-chip.warn .ci { background: transparent; color: var(--warn); }
-.oxi-chips > .oxi-btn, .oxi-chips > button.oxi-btn-secondary { margin: 0; }
+.oxi-metabar > .oxi-btn, .oxi-metabar > button.oxi-btn-secondary { margin: 0; }
 .oxi-avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--primary-soft); color: var(--accent); border: 1px solid var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
 .oxi-btn-sm { min-height: 34px; padding: 0 12px; font-size: 13px; }
 .oxi-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--warn-bg); color: var(--warn); }
@@ -1306,3 +1306,15 @@ a.oxi-kpi-chip:hover { border-color: var(--accent); }
   .oxi-ring .seg, .oxi-meter i { transition: none; }
   .oxi-steps-scroll { scroll-behavior: auto; }
 }
+
+/* checklist results */
+.oxi-ci { padding: 2px 0 6px; }
+.oxi-ci-meta { margin: 0 0 2px 26px; font-size: 12.5px; color: var(--text-2); }
+.oxi-result { margin: 4px 0 4px 26px; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--surface-2); font-size: 14px; }
+.oxi-result p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.oxi-result-hidden { border-left-color: var(--border-strong); color: var(--text-2); }
+.oxi-ci > .oxi-btn-sm { margin: 2px 0 0 26px; }
+.oxi-resultform { margin: 6px 0 6px 26px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--surface); }
+.oxi-resultform label { display: block; font-weight: 600; margin-bottom: 4px; }
+.oxi-resultform textarea { width: 100%; min-height: 84px; }
+.oxi-resultform .row { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: 4px; }

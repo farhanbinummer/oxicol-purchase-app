@@ -127,3 +127,11 @@ test('submitting needs the required fields; a draft only needs a title', () => {
   assert.equal(R.validateRequest({ ...ok, priority: 'Urgent' }, true)[0].field, 'priority');
   assert.deepEqual(R.validateRequest({ ...ok, target_tbc: false, target_launch_date: '2027-01-01' }, true), []);
 });
+
+test('every checklist item needs a result except the two that are recorded as formal sign-offs', () => {
+  const labels = R.STAGES.flatMap(s => s.checklist);
+  const without = labels.filter(l => !R.needsResult(l));
+  assert.deepEqual(without, ['Obtain QC sign-off', 'Record handover acknowledgement']);
+  assert.equal(labels.filter(R.needsResult).length, 22);
+  assert.ok(R.MAX_RESULT_LENGTH >= 1000);
+});
