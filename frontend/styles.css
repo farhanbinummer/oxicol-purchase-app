@@ -1060,15 +1060,6 @@ fieldset.oxi-fs legend { padding: 0 var(--s2); font-weight: 600; }
 .oxi-bar i.done { background: var(--success); }
 .oxi-bar i.cur { background: var(--info); }
 .oxi-bar i.late { background: var(--danger); }
-.oxi-stagebar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin: 0 0 var(--s4); padding: 0; list-style: none; }
-.oxi-stagebar li { min-width: 0; padding: 8px 8px 10px; background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--border-strong); border-radius: 8px; font-size: 12px; }
-.oxi-stagebar li b { display: block; font-size: 12px; color: var(--text-2); font-weight: 600; }
-.oxi-stagebar li span { display: block; overflow-wrap: anywhere; line-height: 1.25; margin-top: 2px; font-weight: 500; }
-.oxi-stagebar li.done { border-top-color: var(--success); }
-.oxi-stagebar li.cur { border-top-color: var(--info); background: var(--info-bg); }
-.oxi-stagebar li.late { border-top-color: var(--danger); }
-.oxi-stagebar li em { display: block; margin-top: 4px; font-style: normal; font-size: 11.5px; font-weight: 600; }
-.oxi-stagebar li.done em { color: var(--success); } .oxi-stagebar li.cur em { color: var(--info); } .oxi-stagebar li.late em { color: var(--danger); }
 .oxi-pmeta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin: 0 0 var(--s4); font-size: 14px; }
 .oxi-pmeta > span { display: inline-flex; align-items: center; gap: 6px; }
 .oxi-pmeta small { color: var(--text-2); }
@@ -1115,7 +1106,6 @@ dialog.oxi-dlg h3 { margin: 0 0 var(--s3); }
 dialog.oxi-dlg .row { display: flex; gap: var(--s2); justify-content: flex-end; margin-top: var(--s4); }
 dialog.oxi-dlg .row button { margin: 0; }
 dialog.oxi-dlg table { margin: var(--s2) 0; }
-@media (max-width: 640px) { .oxi-stagebar { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media print { .oxi-tabs, .oxi-filterbar, .oxi-scopechips, .oxi-banner, .oxi-fav { display: none !important; } details.oxi-details { border: 1px solid #999; } details.oxi-details > div { display: block; } }
 
 /* ============================================================
@@ -1169,9 +1159,6 @@ dialog.oxi-dlg table { margin: var(--s2) 0; }
 }
 
 /* project page: attention box, task side panel */
-.oxi-card2.attention { border-left: 4px solid var(--success); }
-.oxi-card2.attention.late { border-left-color: var(--warn); }
-.oxi-card2.attention ul { margin: 0; padding-left: 20px; }
 .oxi-linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; text-align: left; cursor: pointer; min-height: 0; box-shadow: none; }
 .oxi-linkbtn:hover { text-decoration: underline; background: none; }
 .oxi-sidebg { position: fixed; inset: 0; background: rgba(10, 20, 35, .45); z-index: 60; display: flex; justify-content: flex-end; }
@@ -1214,3 +1201,108 @@ a.oxi-kpi-chip:hover { border-color: var(--accent); }
 .oxi-gantt .mark.late { background: var(--danger); } .oxi-gantt .mark.launch { background: var(--success); }
 @media (max-width: 900px) { .oxi-board { grid-template-columns: repeat(4, 240px); } }
 .oxi-tabs { overflow-x: auto; flex-wrap: nowrap; } .oxi-tabs [role=tab] { flex: none; white-space: nowrap; }
+
+/* ============================================================
+   R&D project page: Overview redesign (header chips, stage stepper, summary cards, attention panel, next step)
+   Uses only the app's colour tokens, so light and dark themes both work.
+   ============================================================ */
+.oxi-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin: 0 0 var(--s4); }
+.oxi-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 14px 4px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 14px; max-width: 100%; }
+.oxi-chip.plain { padding: 4px 10px; gap: 6px; }
+.oxi-chip .ci { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--primary-soft); color: var(--accent); }
+.oxi-chip small { color: var(--text-2); font-size: 12px; }
+.oxi-chip.warn { background: var(--warn-bg); border-color: var(--warn); color: var(--text); }
+.oxi-chip.warn .ci { background: transparent; color: var(--warn); }
+.oxi-chips > .oxi-btn, .oxi-chips > button.oxi-btn-secondary { margin: 0; }
+.oxi-avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--primary-soft); color: var(--accent); border: 1px solid var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.oxi-btn-sm { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.oxi-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--warn-bg); color: var(--warn); }
+.oxi-tag.bad { background: var(--danger-bg); color: var(--danger); }
+
+/* stage stepper */
+.oxi-prog { margin: 0 0 var(--s4); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: var(--shadow-sm); }
+.oxi-prog-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; margin: 0 0 var(--s3); font-size: 17px; }
+.oxi-prog-head .pct { color: var(--text-2); font-weight: 500; margin-left: 6px; }
+.oxi-steps-scroll { overflow-x: auto; padding: 8px 0 6px; max-width: 100%; }
+.oxi-steps { display: flex; margin: 0; padding: 0; list-style: none; min-width: 840px; width: 100%; }
+.oxi-steps li { position: relative; flex: 1 1 0; min-width: 0; padding: 0 2px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.oxi-steps li:not(:last-child)::after { content: ""; position: absolute; top: 18px; left: calc(50% + 24px); right: calc(-50% + 24px); height: 4px; border-radius: 2px; background: var(--border); }
+.oxi-steps li.done:not(:last-child)::after { background: var(--success); }
+.oxi-steps .dot { position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; background: var(--surface); color: var(--text-2); border: 2px solid var(--border-strong); }
+.oxi-steps li.done .dot { background: var(--success); border-color: var(--success); color: var(--surface); }
+.oxi-steps li.cur .dot { border-color: var(--info); color: var(--info); background: var(--info-bg); box-shadow: 0 0 0 4px var(--info-bg); animation: oxi-pulse 2.2s ease-out infinite; }
+.oxi-steps li.cur.late .dot { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); box-shadow: 0 0 0 4px var(--danger-bg); }
+.oxi-steps li.rev .dot { border-color: var(--warn); color: var(--warn); background: var(--warn-bg); box-shadow: none; animation: none; }
+.oxi-steps li.done.rev .dot { background: var(--warn-bg); }
+@keyframes oxi-pulse { 0% { box-shadow: 0 0 0 4px var(--info-bg), 0 0 0 4px transparent; } 70% { box-shadow: 0 0 0 4px var(--info-bg), 0 0 0 12px transparent; } 100% { box-shadow: 0 0 0 4px var(--info-bg), 0 0 0 4px transparent; } }
+.oxi-steps li.cur.late .dot { animation: none; }
+.oxi-steps .nm { margin-top: 8px; font-size: 13px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.oxi-steps .st { margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.oxi-steps li.done .st { color: var(--success); } .oxi-steps li.cur .st { color: var(--info); } .oxi-steps li.cur.late .st { color: var(--danger); } .oxi-steps li.rev .st { color: var(--warn); }
+.oxi-steps .pl { margin-top: 1px; font-size: 11px; white-space: nowrap; color: var(--text-2); }
+
+/* summary cards */
+.oxi-sumgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--s3); margin: 0 0 var(--s4); }
+.oxi-sum { min-width: 0; padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: var(--s2); }
+.oxi-sum > h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.oxi-sumbody { display: flex; align-items: center; gap: var(--s4); }
+.oxi-sumtext { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
+.oxi-sumtext strong { font-size: 18px; } .oxi-sumtext .muted, .oxi-sum-note { color: var(--text-2); }
+.oxi-sum-note { margin: 0; font-size: 13.5px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.oxi-sum-note.bad, .oxi-sumbig.bad { color: var(--danger); }
+.oxi-sumbig { margin: 0; font-size: 24px; font-weight: 700; line-height: 1.2; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.oxi-ring { flex: none; max-width: 100%; height: auto; }
+.oxi-ring .seg { transition: stroke-dasharray .9s cubic-bezier(.2, .8, .2, 1); }
+.oxi-ring .ring-big { font-size: 20px; font-weight: 700; fill: var(--text); } .oxi-ring .ring-small { font-size: 11px; fill: var(--text-2); }
+.oxi-stack { display: flex; gap: 3px; height: 14px; border-radius: 8px; overflow: hidden; background: var(--border); margin-top: var(--s1); }
+.oxi-stack i { display: block; flex-basis: 0; min-width: 6px; }
+.oxi-stack i.ok { background: var(--success); } .oxi-stack i.info { background: var(--info); } .oxi-stack i.bad { background: var(--danger); }
+.oxi-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; font-size: 13px; color: var(--text-2); }
+.oxi-legend li { display: inline-flex; align-items: center; gap: 6px; } .oxi-legend b { color: var(--text); }
+.oxi-legend i { width: 11px; height: 11px; border-radius: 3px; background: var(--border-strong); }
+.oxi-legend i.ok { background: var(--success); } .oxi-legend i.info { background: var(--info); } .oxi-legend i.bad { background: var(--danger); }
+.oxi-meter { height: 12px; border-radius: 8px; background: var(--border); overflow: hidden; }
+.oxi-meter i { display: block; height: 100%; border-radius: 8px; background: var(--info); transition: width .9s cubic-bezier(.2, .8, .2, 1); }
+.oxi-meter.ok i { background: var(--success); } .oxi-meter.warn i { background: var(--warn); } .oxi-meter.bad i { background: var(--danger); }
+.oxi-ends { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--text-2); flex-wrap: wrap; }
+
+/* Next step (focus) and Attention needed, side by side on wide screens */
+.oxi-ovgrid { display: grid; gap: var(--s3); grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1000px) { .oxi-ovgrid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); } }
+.oxi-ovgrid > .oxi-card2 { margin: 0; }
+.oxi-card2.next { border-left: 5px solid var(--info); background: linear-gradient(180deg, var(--info-bg), var(--surface) 90px); }
+.oxi-card2.next.late { border-left-color: var(--danger); background: linear-gradient(180deg, var(--danger-bg), var(--surface) 90px); }
+.oxi-card2.next.ok { border-left-color: var(--success); background: linear-gradient(180deg, var(--success-bg), var(--surface) 90px); }
+.oxi-card2.next.warn { border-left-color: var(--warn); background: linear-gradient(180deg, var(--warn-bg), var(--surface) 90px); }
+.oxi-card2.next.bad { border-left-color: var(--danger); background: linear-gradient(180deg, var(--danger-bg), var(--surface) 90px); }
+.oxi-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); margin-bottom: 2px; }
+.oxi-card2.next > h2 { margin: 0 0 var(--s3); font-size: 22px; }
+.oxi-state { display: flex; gap: var(--s3); align-items: center; } .oxi-state h2 { margin: 0 0 2px; font-size: 20px; } .oxi-state p { margin: 0; color: var(--text-2); }
+.oxi-state-ic { flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--text-2); border: 1px solid var(--border); }
+.oxi-state-ic.ok { background: var(--success-bg); color: var(--success); border-color: var(--success); }
+.oxi-card2.next.warn .oxi-state-ic { color: var(--warn); border-color: var(--warn); } .oxi-card2.next.bad .oxi-state-ic { color: var(--danger); border-color: var(--danger); }
+.oxi-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s3); margin: 0 0 var(--s3); }
+.oxi-fact small { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); margin-bottom: 4px; }
+.oxi-ownerrow, .oxi-duerow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; font-weight: 600; min-height: 34px; }
+.oxi-noowner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px dashed var(--warn); border-radius: 10px; background: var(--warn-bg); font-size: 14px; }
+.oxi-noowner .ci { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--warn); }
+.oxi-checkhead { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin: var(--s3) 0 6px; font-size: 14px; }
+.oxi-checkhead span { color: var(--text-2); }
+.oxi-card2.next .oxi-checklist { margin-top: var(--s2); }
+
+.oxi-att > h2 { display: flex; align-items: center; gap: 8px; }
+.oxi-count { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--danger-bg); color: var(--danger); font-size: 13px; font-weight: 700; }
+.oxi-attlist { list-style: none; margin: 0 0 var(--s3); padding: 0; display: grid; gap: var(--s2); }
+.oxi-att-item { display: flex; align-items: center; gap: var(--s3); padding: 10px 12px; border: 1px solid var(--border); border-left: 5px solid var(--warn); border-radius: 12px; background: var(--surface); }
+.oxi-att-item.bad { border-left-color: var(--danger); }
+.oxi-att-ic { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--warn-bg); color: var(--warn); }
+.oxi-att-item.bad .oxi-att-ic { background: var(--danger-bg); color: var(--danger); }
+.oxi-att-text { flex: 1; min-width: 0; font-size: 14px; } .oxi-att-text strong { overflow-wrap: anywhere; } .oxi-att-text .detail { display: block; color: var(--text-2); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.oxi-att-item > button { flex: none; }
+.oxi-clear { display: flex; gap: var(--s3); align-items: center; padding: var(--s2) 0; } .oxi-clear p { margin: 0; color: var(--text-2); }
+@media (max-width: 520px) { .oxi-att-item { flex-wrap: wrap; } .oxi-att-item > button { margin-left: 46px; } .oxi-sumbody { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) {
+  .oxi-steps li.cur .dot { animation: none; }
+  .oxi-ring .seg, .oxi-meter i { transition: none; }
+  .oxi-steps-scroll { scroll-behavior: auto; }
+}
