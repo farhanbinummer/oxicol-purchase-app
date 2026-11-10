@@ -752,7 +752,7 @@
       if (d.project.is_draft) { location.replace('project-new.html?id=' + pid); return; }
       D = d; D.me_id = (() => { try { return JSON.parse(localStorage.getItem('oxicol_user')).id; } catch (e) { return null; } })();
       if (!meta) { meta = await api('/api/rd/meta'); if (!meta.success) { note(meta.error, false); return; } }
-      if (D.can.edit && !people.length) { const p = await api('/api/rd/people'); if (p.success) people = p.people; }
+      if (D.can.edit && !people.length) { const p = await api('/api/rd/people?project=' + pid); if (p.success) people = p.people; }
       renderHeader(); renderOverview(); renderList(); renderBoard(); renderTimeline(); renderActivity();
       $('banner').hidden = true;
     }
