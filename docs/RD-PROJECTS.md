@@ -43,6 +43,16 @@ Ticking a checklist item records **what was found**, not only that it was done.
 * **Items ticked before this existed** show "No result recorded (ticked before results were kept)". They are not blocked and completed stages are untouched (migration `012_rd_checklist_results` only adds two columns).
 * **Reports.** `project-report.html?id=N` is a printable report of every stage (item, result, who, when, plus the QC, customer and handover sign-offs); add `&stage=N` for one stage. Completed stages have a "Report" link in Milestones. The report uses the project's own visibility and confidentiality rules; it adds no new API.
 
+## Tasks, "My Day" and task results
+
+* **A task is completed with a result.** "Complete task" asks "What was the result?" (at least 10 and at most 2000 characters). The status boxes, the Board and the API's status route no longer accept Done on their own. The result is saved with who completed the task and when.
+* **Who may complete a task:** the person responsible, or R&D with edit rights. A view-only person (for example the Manager) cannot.
+* **Finished tasks are locked.** They change only by being **reopened**, which needs edit rights and a reason. The earlier result stays in `rd_task_history`.
+* **Results are visible to anyone who can open the project** (a task result is not lab content, unlike checklist results). The audit log says a task was completed or reopened, never what the result said.
+* **New tasks need a responsible person and a due date**, so every task lands on someone's day. Tasks created before this keep working, including unclaimed team tasks.
+* **My Day** (`my-day.html`, `GET /api/rd/my-day`): the person's open tasks in Overdue, Today, Tomorrow and This week and later; the stages they own with checklist items left; tasks they assigned to other people ("Waiting on others"); and what was finished in the last 7 days with its result. It uses the same project visibility rules as the project list. Tasks completed before results existed show "No result recorded".
+* Migration `013_rd_task_results` adds `result` and `completed_by` to `rd_tasks` and creates `rd_task_history`. Nothing is dropped.
+
 ## Permission matrix (defaults)
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.

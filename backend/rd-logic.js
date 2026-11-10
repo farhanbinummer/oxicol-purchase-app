@@ -52,6 +52,8 @@ const LAB_STAGE_NO = 3;
 const NO_RESULT_LABELS = ['Obtain QC sign-off', 'Record handover acknowledgement'];
 const needsResult = (label) => !NO_RESULT_LABELS.includes(label);
 const MAX_RESULT_LENGTH = 2000;
+// A task is completed by writing down what was done. Short enough to be quick, long enough that "ok" does not pass.
+const MIN_TASK_RESULT_LENGTH = 10;
 // A burst of clicks (or a script) must not be able to complete several stages of one project at once. After a stage is
 // completed, the next completion on the same project has to wait this many seconds. Real stages take days; this only stops bursts.
 const STAGE_COOLDOWN_SECONDS = Number.isFinite(Number(process.env.RD_STAGE_COOLDOWN_SECONDS)) && process.env.RD_STAGE_COOLDOWN_SECONDS !== undefined
@@ -200,7 +202,7 @@ const LISTS = { PROJECT_TYPES, PRIORITIES, DEPARTMENTS, PRODUCT_CATEGORIES, BASE
 module.exports = {
   PROJECT_TYPES, PRODUCT_CATEGORIES, BASE_SYSTEMS, PRIORITIES, DEPARTMENTS, STATUSES, FEASIBILITY, COST_BASES,
   ACTIVE_STATUSES, CLOSED_STATUSES, HOLD_STATUS, scopeOfStatus, DEFAULT_PERFORMANCE_ROWS, STAGES, LAB_STAGE_NO, STAGE_COOLDOWN_SECONDS,
-  APPROVAL_KINDS, APPROVAL_DECISIONS, APPROVAL_LABELS, stageDays, needsResult, NO_RESULT_LABELS, MAX_RESULT_LENGTH,
+  APPROVAL_KINDS, APPROVAL_DECISIONS, APPROVAL_LABELS, stageDays, needsResult, NO_RESULT_LABELS, MAX_RESULT_LENGTH, MIN_TASK_RESULT_LENGTH,
   isValidDate, addDays, daysBetween, maxDate, todayIST, dmy,
   formatProjectNumber, periodOf, numberFor, parseProjectNumber,
   currentStageNo, autoPlan, findConflicts, delayDays, replanPreview,

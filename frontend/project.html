@@ -43,6 +43,10 @@
     let D = null, meta = null, people = [], dirtyAssess = false, lastFocus = null;
 
     const TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']];
+    // a task is finished only with "Complete task", which asks for the result; the status boxes never set Done directly
+    const TASK_OPEN_STATUS = TASK_STATUS.filter(x => x[0] !== 'done');
+    const canFinish = (tk) => D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id);
+    let closeTaskPanel = null;
     const APPROVAL_ROWS = ['rd_head', 'management', 'qc_signoff', 'customer', 'handover_ack'];
     const DECISION_TEXT = { approved: 'Approved', rejected: 'Rejected', returned: 'Returned for more information', submitted: 'Submitted' };
 
@@ -743,15 +747,21 @@
           const c2 = el('td', null, tk.assignee_name ? tk.assignee_name : (tk.team ? 'Unclaimed (' + tk.team + ' team)' : 'Unassigned'));
           const c3 = el('td', null, tk.due_date ? dmy(tk.due_date) : '-'); if (late) { c3.className = 'oxi-late'; c3.appendChild(el('div', 'oxi-flag', 'Overdue')); }
           const c4 = el('td'); c4.appendChild(prioBadge(tk.priority));
-          const c5 = el('td'); const sel = select(TASK_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Status of task: ' + tk.title);
-          sel.disabled = !(D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id));
-          sel.onchange = async () => {
-            const was = tk.status; sel.disabled = true;
-            const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', { version: tk.version, status: sel.value });
-            if (!r.success) { sel.value = was; sel.disabled = false; fail(r); return; }
-            note('Task updated.', true); load(true);
-          };
-          c5.appendChild(sel); tr.append(c0, c1, c2, c3, c4, c5); tb.appendChild(tr);
+          const c5 = el('td');
+          if (tk.status === 'done') { c5.appendChild(el('span', 'badge badge-good', 'Done')); const sm = el('small', null, tk.completed_by_name ? 'by ' + tk.completed_by_name : ''); sm.style.display = 'block'; c5.appendChild(sm); }
+          else {
+            const sel = select(TASK_OPEN_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Status of task: ' + tk.title);
+            sel.disabled = !canFinish(tk);
+            sel.onchange = async () => {
+              const was = tk.status; sel.disabled = true;
+              const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', { version: tk.version, status: sel.value });
+              if (!r.success) { sel.value = was; sel.disabled = false; fail(r); return; }
+              note('Task updated.', true); load(true);
+            };
+            c5.appendChild(sel);
+            if (canFinish(tk)) { const cb = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Complete'); cb.type = 'button'; cb.setAttribute('aria-label', 'Complete task: ' + tk.title); cb.onclick = () => completeTaskDialog(tk); c5.append(document.createTextNode(' '), cb); }
+          }
+          tr.append(c0, c1, c2, c3, c4, c5); tb.appendChild(tr);
         });
         t.appendChild(tb); c.appendChild(t);
       }
@@ -759,12 +769,49 @@
       if (D.can.create_task) box.appendChild(taskForm());
     }
 
+    // ------------------------------------------------------------------ completing and reopening a task
+    function completeTaskDialog(tk) {
+      let ta;
+      dialog('Complete task: ' + tk.title, (body) => {
+        ta = el('textarea'); ta.rows = 5; ta.maxLength = 2000;
+        body.appendChild(field('What was the result? What was done or found?', ta, 'ctRes', 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.'));
+        return () => ({ result: ta.value });
+      }, 'Complete task', async (a, errBox) => {
+        if (a.result.trim().length < 10) { errBox.textContent = 'Write what was done or found (at least 10 characters).'; errBox.hidden = false; ta.focus(); return false; }
+        const r = await api('/api/rd/tasks/' + tk.id + '/complete', 'POST', { result: a.result, version: tk.version });
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }          // the typed text stays in the box
+        if (closeTaskPanel) closeTaskPanel();
+        note('Task completed.', true); load(true); return true;
+      });
+    }
+    function reopenTaskDialog(tk) {
+      let ta;
+      dialog('Reopen task: ' + tk.title, (body) => {
+        ta = el('textarea'); ta.rows = 3; ta.maxLength = 500;
+        body.appendChild(field('Why is it being reopened?', ta, 'rtWhy', 'The earlier result stays in the task\'s history.'));
+        return () => ({ reason: ta.value });
+      }, 'Reopen task', async (a, errBox) => {
+        if (!a.reason.trim()) { errBox.textContent = 'Give a reason.'; errBox.hidden = false; ta.focus(); return false; }
+        const r = await api('/api/rd/tasks/' + tk.id + '/reopen', 'POST', { reason: a.reason, version: tk.version });
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }
+        if (closeTaskPanel) closeTaskPanel();
+        note('Task reopened.', true); load(true); return true;
+      });
+    }
+    function resultBlock(tk) {
+      const b = el('div', 'oxi-result');
+      b.append(el('strong', null, 'Result'), el('p', null, tk.result || 'No result recorded (completed before results were kept).'));
+      b.appendChild(el('div', 'oxi-ci-meta', 'Completed by ' + (tk.completed_by_name || '-') + (tk.completed_at ? ' on ' + dmy(String(tk.completed_at).slice(0, 10)) : '')));
+      return b;
+    }
+
     // ------------------------------------------------------------------ task side panel
     function taskPanel(tk, opener) {
       const old = document.getElementById('taskPanel'); if (old) old.remove();
       const bg = el('div', 'oxi-sidebg'); bg.id = 'taskPanel';
       const pn = el('aside', 'oxi-sidepanel'); pn.setAttribute('role', 'dialog'); pn.setAttribute('aria-modal', 'true'); pn.setAttribute('aria-labelledby', 'tpT'); pn.tabIndex = -1;
-      const close = () => { bg.remove(); document.removeEventListener('keydown', esc); if (opener && opener.isConnected) opener.focus(); };
+      const close = () => { bg.remove(); document.removeEventListener('keydown', esc); if (closeTaskPanel === close) closeTaskPanel = null; if (opener && opener.isConnected) opener.focus(); };
+      closeTaskPanel = close;
       const esc = (e) => { if (e.key === 'Escape') close(); };
       document.addEventListener('keydown', esc);
       bg.addEventListener('mousedown', (e) => { if (e.target === bg) close(); });
@@ -772,16 +819,24 @@
       const x = el('button', 'oxi-btn-secondary', 'Close'); x.type = 'button'; x.onclick = close; head.append(h, x);
       const canAll = D.can.edit, canStatus = canAll || (tk.assignee_id && D.me_id === tk.assignee_id);
       const desc = el('p', null, tk.description || 'No description.');
-      const status = select(TASK_STATUS, tk.status); status.disabled = !canStatus;
+      if (tk.status === 'done') {                       // finished: locked, with its result and who completed it
+        const facts = el('p', 'oxi-section-note', 'Responsible: ' + (tk.assignee_name || '-') + ' - due ' + (tk.due_date ? dmy(tk.due_date) : '-') + ' - assigned by ' + (tk.assigned_by_name || '-'));
+        pn.append(head, desc, facts, resultBlock(tk));
+        if (D.can.edit) { const rb = el('button', 'oxi-btn-secondary', 'Reopen task'); rb.type = 'button'; rb.onclick = () => reopenTaskDialog(tk); pn.appendChild(rb); }
+        bg.appendChild(pn); document.body.appendChild(bg); x.focus(); return;
+      }
+      const status = select(TASK_OPEN_STATUS, tk.status); status.disabled = !canStatus;
       const prio = select(meta.lists.priorities, tk.priority); prio.disabled = !canAll;
       const due = dateInput(tk.due_date); due.disabled = !canAll;
-      const who = select(personOptions(), tk.assignee_id || '', 'Unclaimed'); who.disabled = !canAll;
+      const who = select(personOptions(), tk.assignee_id || '', tk.assignee_id ? null : 'Unclaimed'); who.disabled = !canAll;
       const form = el('form'); form.noValidate = true;
       form.append(field('Status', status, 'tpS'), field('Priority', prio, 'tpP'), field('Due date', due, 'tpD'), field('Accountable person', who, 'tpW'));
       const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const save = el('button', null, 'Save changes'); save.type = 'submit'; save.disabled = !canStatus;
-      form.append(err, save);
+      const fin = el('button', 'oxi-btn-secondary', 'Complete task'); fin.type = 'button'; fin.disabled = !canFinish(tk); fin.onclick = () => completeTaskDialog(tk);
+      const brow = el('div', 'row'); brow.append(save, fin);
+      form.append(err, brow);
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault(); if (save.disabled) return;
         const body = { version: tk.version, status: status.value };
@@ -800,20 +855,19 @@
       const h = el('h2', null, 'Add a task'); h.id = 'ntT'; c.appendChild(h);
       const form = el('form'); form.noValidate = true; const g = el('div', 'oxi-grid2');
       const title = el('input'); title.type = 'text'; title.maxLength = 250; title.required = true;
-      const who = select(personOptions(), '', 'Unclaimed: anyone in the team may take it');
-      const team = select(meta.lists.departments, 'R&D Internal');
+      const who = select(personOptions(), '', 'Choose a person');
       const stage = select(D.stages.map(s => [s.no, s.no + '. ' + s.name]), '', 'Not linked to a stage');
       const due = dateInput(''); const prio = select(meta.lists.priorities, 'Medium');
-      const teamField = field('Team that should pick it up', team, 'tTeam');
-      who.addEventListener('change', () => { teamField.hidden = !!who.value; });
-      g.append(field('Task', title, 'tTitle'), field('Accountable person', who, 'tWho', 'One person is accountable for a task. Others can help through comments.'), teamField, field('Stage', stage, 'tStage'), field('Due date', due, 'tDue'), field('Priority', prio, 'tPrio'));
+      g.append(field('Task', title, 'tTitle'), field('Responsible person *', who, 'tWho', 'One person is responsible. The task appears on their day.'), field('Stage', stage, 'tStage'), field('Due date *', due, 'tDue', 'It appears on the responsible person\'s day on this date.'), field('Priority', prio, 'tPrio'));
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert'); const b = el('button', null, 'Add task'); b.type = 'submit';
       form.append(g, err, b);
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault(); if (b.disabled) return;
         if (!title.value.trim()) { err.textContent = 'A task needs a title.'; err.hidden = false; title.focus(); return; }
+        if (!who.value) { err.textContent = 'Choose who is responsible.'; err.hidden = false; who.focus(); return; }
+        if (!due.value) { err.textContent = 'Give the task a due date.'; err.hidden = false; due.focus(); return; }
         b.disabled = true; err.hidden = true;
-        const r = await api('/api/rd/projects/' + pid + '/tasks', 'POST', { title: title.value, assignee_id: who.value || null, team: who.value ? null : team.value, stage_no: stage.value || null, due_date: due.value || null, priority: prio.value });
+        const r = await api('/api/rd/projects/' + pid + '/tasks', 'POST', { title: title.value, assignee_id: who.value, stage_no: stage.value || null, due_date: due.value, priority: prio.value });
         b.disabled = false; if (!r.success) { fail(r, err); return; }
         note('Task added.', true); load(true);
       });
@@ -823,13 +877,14 @@
     // ------------------------------------------------------------------ Board tab (tasks by status)
     function renderBoard() {
       const box = $('boardview'); box.innerHTML = '';
-      const intro = el('p', 'oxi-section-note', 'Drag a card to another column to change its status, or use the "Move to" box on the card. Completing a task never completes a stage.');
+      const intro = el('p', 'oxi-section-note', 'Drag a card to another column to change its status, or use the "Move to" box on the card. Moving a card to Done asks for the result first. Completing a task never completes a stage.');
       box.appendChild(intro);
       if (!D.tasks.length) { box.appendChild(el('p', null, 'No tasks yet. Add tasks from the List tab.')); return; }
       const cols = el('div', 'oxi-board');
-      const canMove = (tk) => D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id);
+      const canMove = (tk) => tk.status !== 'done' && canFinish(tk);
       async function move(tk, to, card) {
         if (to === tk.status) return;
+        if (to === 'done') { completeTaskDialog(tk); renderBoard(); return; }        // finishing a task asks for the result first
         const was = tk.status; card && card.setAttribute('aria-busy', 'true');
         const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', { version: tk.version, status: to });
         if (!r.success) { fail(r); card && card.removeAttribute('aria-busy'); return; }
@@ -852,6 +907,11 @@
           const who = el('div', 'meta', tk.assignee_name || (tk.team ? 'Unclaimed (' + tk.team + ')' : 'Unassigned'));
           card.append(t, meta2, who);
           if (tk.stage_no) card.appendChild(el('div', 'meta', 'Stage ' + tk.stage_no));
+          if (tk.status === 'done') {
+            card.appendChild(el('div', 'meta', 'Completed by ' + (tk.completed_by_name || '-')));
+            if (tk.result) { const rs = el('div', 'oxi-result'); rs.style.margin = '6px 0 0'; rs.appendChild(el('p', null, tk.result.length > 120 ? tk.result.slice(0, 117) + '...' : tk.result)); card.appendChild(rs); }
+            if (D.can.edit) { const rb = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Reopen'); rb.type = 'button'; rb.setAttribute('aria-label', 'Reopen task: ' + tk.title); rb.onclick = () => reopenTaskDialog(tk); card.appendChild(rb); }
+          }
           if (canMove(tk)) { const sel = select(TASK_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Move to: ' + tk.title); sel.onchange = () => move(tk, sel.value, card); card.appendChild(sel); }
           col.appendChild(card);
         });

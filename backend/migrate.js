@@ -412,6 +412,27 @@ const STEPS = [
       await db.query('ALTER TABLE rd_checklist_items ADD COLUMN IF NOT EXISTS result TEXT');
       await db.query('ALTER TABLE rd_checklist_items ADD COLUMN IF NOT EXISTS result_at TIMESTAMPTZ');
     }
+  },
+  {
+    // A task is completed with a result (what was done / found), by a named person, and can only be reopened with a reason.
+    // Tasks completed before this existed keep their status and simply have no result.
+    name: '013_rd_task_results',
+    async run(db) {
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS result TEXT');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS completed_by INTEGER REFERENCES users(id)');
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_task_history (
+          id        BIGSERIAL PRIMARY KEY,
+          task_id   INTEGER NOT NULL REFERENCES rd_tasks(id) ON DELETE CASCADE,
+          action    VARCHAR(12) NOT NULL CHECK (action IN ('completed','reopened')),
+          result    TEXT,
+          reason    TEXT,
+          actor_id  INTEGER REFERENCES users(id),
+          at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_task_history_task ON rd_task_history(task_id)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_tasks_created_by ON rd_tasks(created_by)');
+    }
   }
 ];
 
