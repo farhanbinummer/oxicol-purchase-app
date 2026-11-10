@@ -62,6 +62,9 @@ async function completeStage(token, id, no, date) {
 
 test.before(async () => {
   await runMigrations();
+  // Production defaults let only managers raise requests. These tests exercise visibility and stage rules with branch and R&D
+  // requesters, so grant them rd.create for the duration of the run (removed in test.after) before the server starts.
+  for (const role of ['rd', 'branch']) await pool.query("INSERT INTO role_permissions (role, permission_key) VALUES ($1,'rd.create') ON CONFLICT DO NOTHING", [role]);
   const c = await pool.query('SELECT last_serial FROM rd_number_counters WHERE period = $1', [period]);
   counterBefore = c.rowCount ? c.rows[0].last_serial : null;
   server = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
@@ -79,6 +82,7 @@ test.before(async () => {
 
 test.after(async () => {
   try {
+    await pool.query("DELETE FROM role_permissions WHERE permission_key = 'rd.create' AND role <> 'manager'");
     await pool.query('DELETE FROM rd_projects WHERE id = ANY($1)', [made.projects.length ? made.projects : [0]]); // everything else cascades
     await pool.query("DELETE FROM rd_projects WHERE created_by = ANY($1)", [made.users.length ? made.users : [0]]);
     if (counterBefore === null) await pool.query('DELETE FROM rd_number_counters WHERE period = $1', [period]);
@@ -89,6 +93,12 @@ test.after(async () => {
 });
 
 // ---------------------------------------------------------------------------------------------------
+test('only the Manager role is granted rd.create by default (R&D and Branch are not)', () => {
+  const { DEFAULTS } = require('../permissions');
+  const holders = Object.entries(DEFAULTS).filter(([, keys]) => keys.includes('rd.create')).map(([role]) => role);
+  assert.deepEqual(holders, ['manager']);
+});
+
 test('migrations add the R&D tables and roles without touching existing data; the sample project does not exist', async () => {
   const names = (await pool.query('SELECT name FROM app_migrations')).rows.map(r => r.name);
   assert.ok(names.includes('009_rd_projects') && names.includes('010_rd_permissions'));

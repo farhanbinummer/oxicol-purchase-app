@@ -396,6 +396,13 @@ const STEPS = [
         }
       }
     }
+  },
+  {
+    // Only managers (and administrators) may raise R&D requests. Withdraw rd.create from the R&D and Branch roles on existing databases.
+    name: '011_rd_create_manager_only',
+    async run(db) {
+      await db.query("DELETE FROM role_permissions WHERE permission_key = 'rd.create' AND role <> 'manager'");
+    }
   }
 ];
 
