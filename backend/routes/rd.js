@@ -178,9 +178,21 @@ function requirePermissionAny(keys) {
 const needPerm = (key) => (req, res, next) => (can(req.access, key) ? next() : fail(res, 403, `Your role ("${req.user.role}") is not allowed to do this`));
 
 // People who can be named as lead, member, stage owner or task assignee. Only people who edit projects get the list.
+// People who can be chosen as project lead, team member, stage owner or task assignee: R&D-related roles only.
+// Anyone already assigned on the project (lead, member, stage owner, task assignee) stays in the list so a saved choice never vanishes.
+const RD_TEAM_ROLES = ['rd', 'qc', 'manager', 'admin'];
 router.get('/people', needPerm(KEYS.RD_EDIT), async (req, res) => {
   try {
-    const r = await pool.query(`SELECT u.id, u.name, array_agg(DISTINCT ur.role) AS roles FROM users u JOIN user_roles ur ON ur.user_id = u.id WHERE u.active GROUP BY u.id, u.name ORDER BY u.name`);
+    const pid = idOf(req.query.project);
+    const r = await pool.query(
+      `SELECT u.id, u.name, array_agg(DISTINCT ur.role) AS roles FROM users u JOIN user_roles ur ON ur.user_id = u.id
+        WHERE u.active AND (ur.user_id IN (SELECT user_id FROM user_roles WHERE role = ANY($1))
+          OR ($2::int IS NOT NULL AND u.id IN (
+               SELECT lead_user_id FROM rd_projects WHERE id = $2 UNION
+               SELECT user_id FROM rd_project_members WHERE project_id = $2 UNION
+               SELECT owner_user_id FROM rd_stages WHERE project_id = $2 UNION
+               SELECT assignee_id FROM rd_tasks WHERE project_id = $2)))
+        GROUP BY u.id, u.name ORDER BY u.name`, [RD_TEAM_ROLES, pid]);
     res.json({ success: true, people: r.rows });
   } catch (err) { console.error(err); fail(res, 500, 'Could not load people'); }
 });
