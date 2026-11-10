@@ -99,6 +99,36 @@ test('only the Manager role is granted rd.create by default (R&D and Branch are 
   assert.deepEqual(holders, ['manager']);
 });
 
+test('only managers (and admins) can raise R&D requests: R&D and branch get 403 on create and submit, and no "New R&D Request" entry', async () => {
+  // The run grants rd.create to R&D and Branch so other tests can use them as requesters; take it away here to check the real defaults.
+  await pool.query("DELETE FROM role_permissions WHERE permission_key = 'rd.create' AND role <> 'manager'");
+  try {
+    for (const who of ['lead', 'kannur']) {
+      assert.equal((await api(tok[who], 'POST', '/api/rd/projects', valid())).status, 403, who + ' cannot create a request');
+      assert.equal((await api(tok[who], 'POST', '/api/rd/projects', valid({ submit: false }))).status, 403, who + ' cannot even save a draft');
+    }
+    const draft = await api(tok.manager, 'POST', '/api/rd/projects', valid({ submit: false }));
+    assert.equal(draft.success, true, 'a manager can save a draft'); made.projects.push(draft.id);
+    assert.equal((await api(tok.lead, 'POST', '/api/rd/projects/' + draft.id + '/submit', {})).status, 403, 'R&D cannot submit a request either');
+    const sub = await api(tok.manager, 'POST', '/api/rd/projects/' + draft.id + '/submit', {});
+    assert.equal(sub.success, true, 'the manager can submit');
+    assert.equal((await api(tok.admin, 'POST', '/api/rd/projects', valid())).success, true, 'an administrator can still raise a request');
+    const madeByAdmin = (await pool.query("SELECT id FROM rd_projects WHERE created_by = (SELECT id FROM users WHERE username = $1)", [TAG + '_admin'])).rows.map(r => r.id);
+    made.projects.push(...madeByAdmin);
+    assert.equal((await api(tok.lead, 'GET', '/api/rd/meta')).can.create, false, 'the page learns R&D may not start requests');
+    assert.equal((await api(tok.manager, 'GET', '/api/rd/meta')).can.create, true);
+    const dash = await api(tok.lead, 'GET', '/api/workspace/rd/dashboard');
+    assert.ok(!dash.actions.some(a => a.href === 'project-new.html'), 'R&D home has no "New R&D Request" button');
+    const me = await api(tok.lead, 'GET', '/api/workspace/me');
+    assert.ok(!me.nav.some(g => g.items.some(i => i.href === 'project-new.html')), 'R&D menu has no "New R&D Request" entry');
+    assert.equal((me.create_links || []).some(c => c.href === 'project-new.html'), false, 'no "New" shortcut for R&D either');
+    // R&D can still work on a request a manager raised
+    assert.equal((await api(tok.lead, 'GET', '/api/rd/projects/' + draft.id)).status, 200, 'R&D can still open and work on a submitted request');
+  } finally {
+    for (const role of ['rd', 'branch']) await pool.query("INSERT INTO role_permissions (role, permission_key) VALUES ($1,'rd.create') ON CONFLICT DO NOTHING", [role]);
+  }
+});
+
 test('migrations add the R&D tables and roles without touching existing data; the sample project does not exist', async () => {
   const names = (await pool.query('SELECT name FROM app_migrations')).rows.map(r => r.name);
   assert.ok(names.includes('009_rd_projects') && names.includes('010_rd_permissions'));
