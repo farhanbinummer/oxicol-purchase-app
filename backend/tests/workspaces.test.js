@@ -178,7 +178,7 @@ test('navigation: every entry points at a real page the role may use, and nothin
     for (const g of r.nav) for (const it of g.items) {
       assert.ok(fs.existsSync(path.join(FRONTEND, it.href.split('?')[0])), `${who}: ${it.href} is a real page`);
     }
-    if (who === 'kannur') assert.deepEqual(r.nav.flatMap(g => g.items.map(i => i.label)), ['Dashboard', 'R&D Projects', 'My Branch Requests'], 'a branch can also raise and follow R&D requests');
+    if (who === 'kannur') assert.deepEqual(r.nav.flatMap(g => g.items.map(i => i.label)), ['Dashboard', 'R&D Dashboard', 'R&D Projects', 'My Branch Requests'], 'a branch can follow its own R&D projects (it cannot raise requests: only the Manager can)');
     if (who === 'store') { assert.ok(!allText(r.nav).includes('Payments') && !allText(r.nav).includes('Purchase Orders')); }
     if (who === 'qc') { assert.ok(!allText(r.nav).includes('Users') && r.nav.flatMap(g => g.items).some(i => i.label === 'Inspection Queue')); }
     assert.ok(perms.size > 0 || who === 'admin');

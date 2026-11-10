@@ -239,7 +239,7 @@ const WORKSPACES = {
   rd: {
     title: 'R&D Workspace', roles: ['rd'],
     description: 'Your current stages, tasks that are due, the projects you lead and requests waiting to be assessed.',
-    tabs: [{ label: 'Dashboard', icon: 'dashboard', href: 'rd-dashboard.html' }, { label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }, { label: 'New request', icon: 'plus', href: 'project-new.html' }],
+    tabs: [{ label: 'Dashboard', icon: 'dashboard', href: 'rd-dashboard.html' }, { label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }],
     nav: [
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Projects', items: [

@@ -38,9 +38,9 @@ An administrator holds every key. A "-" means the key is not granted. Granted ke
 
 | Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | field.rd_technical | Approval keys |
 |---|---|---|---|---|---|---|---|
-| R&D | yes | yes | yes | yes | yes | yes | - |
+| R&D | yes | yes | - | yes | yes | yes | - |
 | Manager | yes | yes | yes | - | - | - | - |
-| Branch / requester | yes (own) | - | yes | - | - | - | - |
+| Branch / requester | yes (own) | - | - | - | - | - | - |
 | Production | yes (own) | - | - | - | - | - | - |
 | Purchase | yes (own) | - | - | - | - | - | - |
 | QC | yes (own) | - | - | - | - | - | - |
@@ -73,7 +73,7 @@ The reported completion of all eight stages on the same day is **not imported**.
 ## Business decisions still needed (nothing was guessed)
 
 1. **Who may record each approval.** R&D Head, Management, QC sign-off and Production acknowledgement are granted to nobody. Until an administrator ticks the key for a role (Administration > Permissions) those approvals cannot be recorded and the stages that need them cannot be completed.
-2. **Who may start R&D requests.** Default is R&D, Manager and Branch. Purchase, QC, Stores, Production and Accounts can view only projects they are involved in.
+2. **Who may start R&D requests.** Default is Manager only (and administrators); R&D and Branch cannot raise requests. Purchase, QC, Stores, Production and Accounts can view only projects they are involved in.
 3. **Who sees confidential technical content.** Only R&D by default. QC and Production see none of it until given `field.rd_technical`.
 4. **Stage cool-down.** 10 seconds between completions on one project. Change with `RD_STAGE_COOLDOWN_SECONDS`.
 5. **Hand-offs.** Sample or material requirements to Purchase, test requests to QC, and plant-trial hand-over to Production are not built. They will create requests in those departments' own queues; **no experimental formula will be published into a production recipe without an authorised release**.
