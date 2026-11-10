@@ -239,10 +239,11 @@ const WORKSPACES = {
   rd: {
     title: 'R&D Workspace', roles: ['rd'],
     description: 'Your current stages, tasks that are due, the projects you lead and requests waiting to be assessed.',
-    tabs: [{ label: 'Dashboard', icon: 'dashboard', href: 'rd-dashboard.html' }, { label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }],
+    tabs: [{ label: 'My Day', icon: 'history', href: 'my-day.html' }, { label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }],
     nav: [
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Projects', items: [
+        { label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW },
         { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW },
         { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html'] },
         { label: 'New R&D Request', href: 'project-new.html', icon: 'plus', perm: KEYS.RD_CREATE } ] },
@@ -272,7 +273,7 @@ const WORKSPACES = {
 // wider permission, all of them).
 for (const [id, w] of Object.entries(WORKSPACES)) {
   if (id === 'rd') continue;
-  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
+  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW }, { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
 }
 
 /** Workspaces a person is assigned: those that list any of the roles they hold. Switching never adds permissions. */
@@ -772,6 +773,7 @@ BUILDERS.rd = async (ctx) => {
     reason: 'Assessed as needing more information from the requester', responsible: 'R&D and requester', progress: 'Needs more information', next: { label: 'Open project', href: 'project.html?id=' + r.id }, tone: 'warn' })));
 
   if (ctx.can(KEYS.RD_CREATE)) actions.push({ label: 'New R&D Request', href: 'project-new.html' });
+  actions.unshift({ label: 'My Day', href: 'my-day.html' });
   actions.push({ label: 'Open Projects', href: 'projects.html' });
   return { cards: cards.slice(0, 4), actions, queue, exceptions };
 };

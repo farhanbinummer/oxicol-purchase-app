@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Day</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .md-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 0 0 var(--s4); }
+    .md-tile { --c: var(--info); display: block; text-align: left; font: inherit; color: var(--text); cursor: pointer; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-top: 5px solid var(--c); border-radius: var(--r-card); box-shadow: var(--shadow-sm); transition: transform .15s, box-shadow .15s; min-height: 44px; }
+    .md-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); } .md-tile:active { transform: scale(.98); }
+    .md-tile b { display: block; font-size: 28px; line-height: 1.1; color: var(--c); font-variant-numeric: tabular-nums; } .md-tile span { font-size: 13px; color: var(--text-2); }
+    .md-tile.bad { --c: var(--danger); } .md-tile.ok { --c: var(--success); } .md-tile.warn { --c: var(--warn); }
+    .md-sec { margin: 0 0 var(--s4); scroll-margin-top: 70px; }
+    .md-sec > h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--s2); font-size: 18px; }
+    .md-count { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--primary-soft); color: var(--accent); font-size: 13px; font-weight: 700; }
+    .md-sec.bad .md-count { background: var(--danger-bg); color: var(--danger); }
+    .md-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .md-task { --c: var(--info); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--c); border-radius: 12px; }
+    .md-sec.bad .md-task { --c: var(--danger); } .md-task.blocked { --c: var(--warn); } .md-task.done { --c: var(--success); }
+    .md-main { flex: 1 1 260px; min-width: 0; }
+    .md-main strong { display: block; overflow-wrap: anywhere; }
+    .md-main .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 13px; color: var(--text-2); margin-top: 2px; }
+    .md-main .late { color: var(--danger); font-weight: 600; }
+    .md-act { display: flex; gap: 8px; flex-wrap: wrap; }
+    .md-empty { margin: 0; padding: 14px; text-align: center; color: var(--text-2); border: 1px dashed var(--border-strong); border-radius: 12px; }
+    .md-hero { padding: var(--s4); margin: 0 0 var(--s4); border: 1px solid var(--border); border-radius: var(--r-card); background: linear-gradient(135deg, var(--info-bg), var(--surface)); }
+    .md-hero h2 { margin: 0 0 4px; font-size: 22px; } .md-hero p { margin: 0; color: var(--text-2); }
+    .md-allclear { text-align: center; padding: var(--s5) var(--s3); }
+    .md-allclear strong { display: block; font-size: 18px; margin-bottom: 4px; }
+    @media (prefers-reduced-motion: reduce) { .md-tile { transition: none; } }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="rd-dashboard.html">R&amp;D Dashboard</a> | <a href="projects.html">All projects</a></p>
+  <h1>My Day</h1>
+  <p class="oxi-page-sub">What to do next: today, tomorrow and what is coming. Finishing a task asks for the result, so there is always a record.</p>
+  <p id="message" role="status"></p>
+  <div id="day" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const days = (iso, today) => Math.round((Date.parse(iso.slice(0, 10)) - Date.parse(today)) / 86400000);
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const STATUS = { todo: 'To do', in_progress: 'In progress', blocked: 'Blocked' };
+    let DATA = null;
+
+    function note(text, ok) { const m = $('message'); m.textContent = text; m.className = ok ? 'success' : 'error'; if (!ok) m.scrollIntoView({ block: 'nearest' }); }
+    function when(t, today) {
+      if (!t.due_date) return { label: 'No due date', cls: '' };
+      const d = days(t.due_date, today);
+      if (d < 0) return { label: plural(-d, 'day') + ' overdue (' + dmy(t.due_date) + ')', cls: 'late' };
+      if (d === 0) return { label: 'Due today', cls: '' };
+      if (d === 1) return { label: 'Due tomorrow', cls: '' };
+      return { label: 'Due ' + dmy(t.due_date), cls: '' };
+    }
+
+    /** Complete dialog: the result is required, so a task is never closed with nothing on record. */
+    function completeDialog(t) {
+      const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'cdT');
+      const form = el('form'); form.method = 'dialog'; const h = el('h3', null, 'Complete task: ' + t.title); h.id = 'cdT';
+      const lab = el('label', null, 'What was the result? What was done or found?'); lab.htmlFor = 'cdRes';
+      const ta = el('textarea'); ta.id = 'cdRes'; ta.rows = 5; ta.maxLength = 2000;
+      const hint = el('div', 'oxi-section-note', 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.');
+      const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+      const row = el('div', 'row'); const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); };
+      const ok = el('button', null, 'Complete task'); ok.type = 'submit'; row.append(cancel, ok);
+      form.append(h, lab, ta, hint, err, row); dlg.appendChild(form); document.body.appendChild(dlg);
+      dlg.addEventListener('close', () => dlg.remove());
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); if (ok.disabled) return;
+        if (ta.value.trim().length < 10) { err.textContent = 'Write what was done or found (at least 10 characters).'; err.hidden = false; ta.focus(); return; }
+        ok.disabled = true; err.hidden = true;
+        const r = await api('/api/rd/tasks/' + t.id + '/complete', 'POST', { result: ta.value, version: t.version });
+        ok.disabled = false;
+        if (!r.success) { err.textContent = r.error || 'Could not complete the task.'; err.hidden = false; return; }      // the typed text stays
+        dlg.close(); note('Task completed: ' + t.title, true); load();
+      });
+      dlg.showModal(); ta.focus();
+    }
+
+    function taskRow(t, today, opts) {
+      const li = el('li'); const row = el('div', 'md-task' + (t.status === 'blocked' ? ' blocked' : '') + (opts && opts.done ? ' done' : ''));
+      const main = el('div', 'md-main'); const a = el('a', null, t.title); a.href = 'project.html?id=' + t.project_id + '#list'; const st = el('strong'); st.appendChild(a); main.appendChild(st);
+      const sub = el('div', 'sub'); const w = when(t, today);
+      const pr = el('a', null, t.project_number + ' ' + t.project_title); pr.href = 'project.html?id=' + t.project_id; sub.appendChild(pr);
+      if (opts && opts.done) sub.appendChild(el('span', null, 'Completed ' + (t.completed_at ? dmy(String(t.completed_at).slice(0, 10)) : '') + (opts.who && t.completed_by_name ? ' by ' + t.completed_by_name : '')));
+      else { sub.appendChild(el('span', w.cls, w.label)); if (t.status !== 'todo') sub.appendChild(el('span', null, STATUS[t.status])); }
+      if (opts && opts.assignee) sub.appendChild(el('span', null, 'Responsible: ' + (t.assignee_name || '-')));
+      else if (t.assigned_by_name) sub.appendChild(el('span', null, 'Assigned by ' + t.assigned_by_name));
+      sub.appendChild(prioBadge(t.priority));
+      main.appendChild(sub);
+      if (opts && opts.done) { const r = el('div', 'oxi-result'); r.style.margin = '6px 0 0'; r.appendChild(el('p', null, t.result || 'No result recorded (completed before results were kept).')); main.appendChild(r); }
+      row.appendChild(main);
+      if (opts && opts.actions) {
+        const act = el('div', 'md-act');
+        if (t.status === 'todo') { const b = el('button', 'oxi-btn-secondary', 'Start'); b.type = 'button'; b.setAttribute('aria-label', 'Start: ' + t.title);
+          b.onclick = async () => { b.disabled = true; const r = await api('/api/rd/tasks/' + t.id, 'PATCH', { version: t.version, status: 'in_progress' }); if (!r.success) { b.disabled = false; note(r.error || 'Could not start the task.', false); return; } load(); }; act.appendChild(b); }
+        const c = el('button', null, 'Complete'); c.type = 'button'; c.setAttribute('aria-label', 'Complete: ' + t.title); c.onclick = () => completeDialog(t); act.appendChild(c);
+        row.appendChild(act);
+      }
+      li.appendChild(row); return li;
+    }
+    function section(id, title, items, cls, build, emptyText) {
+      const sec = el('section', 'md-sec ' + (cls || '')); sec.id = id; sec.setAttribute('aria-labelledby', id + 'T');
+      const h = el('h2'); h.id = id + 'T'; h.append(document.createTextNode(title), el('span', 'md-count', String(items.length))); sec.appendChild(h);
+      if (!items.length) { if (emptyText) sec.appendChild(el('p', 'md-empty', emptyText)); else return null; return sec; }
+      const ul = el('ul', 'md-list'); items.forEach(i => ul.appendChild(build(i))); sec.appendChild(ul); return sec;
+    }
+
+    function render() {
+      const d = DATA, today = d.today, box = $('day'); box.innerHTML = ''; box.setAttribute('aria-busy', 'false');
+      const first = (() => { try { return (JSON.parse(localStorage.getItem('oxicol_user')).name || '').split(' ')[0]; } catch (e) { return ''; } })();
+      const hr = new Date(Date.now() + 5.5 * 3600e3).getUTCHours();
+      const bucket = { overdue: [], today: [], tomorrow: [], week: [], later: [] };
+      d.mine.forEach(t => { if (!t.due_date) bucket.later.push(t); else { const x = days(t.due_date, today); (x < 0 ? bucket.overdue : x === 0 ? bucket.today : x === 1 ? bucket.tomorrow : x <= 7 ? bucket.week : bucket.later).push(t); } });
+      const blocked = d.mine.filter(t => t.status === 'blocked').length;
+
+      const hero = el('div', 'md-hero'); hero.appendChild(el('h2', null, (hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening') + (first ? ', ' + first : '')));
+      const bits = [];
+      if (bucket.overdue.length) bits.push(plural(bucket.overdue.length, 'task') + ' overdue');
+      bits.push(bucket.today.length ? plural(bucket.today.length, 'task') + ' due today' : 'nothing due today');
+      if (bucket.tomorrow.length) bits.push(plural(bucket.tomorrow.length, 'task') + ' tomorrow');
+      hero.appendChild(el('p', null, (d.mine.length ? 'You have ' + bits.join(', ') + '.' : 'You have no open tasks.') + ' Today is ' + new Date(today + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) + '.'));
+      box.appendChild(hero);
+
+      const sum = el('div', 'md-sum');
+      const tile = (n, label, cls, target) => { const b = el('button', 'md-tile ' + (cls || '')); b.type = 'button'; b.append(el('b', null, String(n)), el('span', null, label)); b.setAttribute('aria-label', label + ': ' + n); b.onclick = () => { const e = $(target); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; sum.appendChild(b); };
+      tile(bucket.overdue.length, 'Overdue', bucket.overdue.length ? 'bad' : 'ok', 'sOver'); tile(bucket.today.length, 'Today', '', 'sToday'); tile(bucket.tomorrow.length, 'Tomorrow', '', 'sTomorrow');
+      tile(bucket.week.length + bucket.later.length, 'Later', '', 'sWeek'); tile(d.assigned.length, 'Waiting on others', d.assigned.length ? 'warn' : '', 'sWait');
+      box.appendChild(sum);
+      if (blocked) box.appendChild(el('p', 'oxi-section-note', plural(blocked, 'of your tasks') + ' blocked: tell the person who assigned it what you are waiting for.'));
+
+      const build = (t) => taskRow(t, today, { actions: true });
+      if (!d.mine.length && !d.stages.length) { const c = el('div', 'oxi-card2 md-allclear'); c.append(el('strong', null, 'All clear'), el('p', 'oxi-section-note', 'Nothing is waiting for you. New work appears here as soon as it is assigned.')); box.appendChild(c); }
+      [section('sOver', 'Overdue', bucket.overdue, 'bad', build), section('sToday', 'Today', bucket.today, '', build, d.mine.length ? 'Nothing is due today.' : null),
+       section('sTomorrow', 'Tomorrow', bucket.tomorrow, '', build), section('sWeek', 'This week and later', bucket.week.concat(bucket.later), '', build)].forEach(s => s && box.appendChild(s));
+
+      const stages = section('sStages', 'Stages you own', d.stages, '', (x) => {
+        const li = el('li'); const row = el('div', 'md-task'); const main = el('div', 'md-main'); const a = el('a', null, 'Stage ' + x.stage_no + ': ' + x.stage_name); a.href = 'project.html?id=' + x.project_id; const st = el('strong'); st.appendChild(a); main.appendChild(st);
+        const sub = el('div', 'sub'); sub.appendChild(el('span', null, x.project_number + ' ' + x.project_title));
+        const late = x.planned_date && days(x.planned_date, today) < 0; sub.appendChild(el('span', late ? 'late' : null, x.planned_date ? (late ? plural(-days(x.planned_date, today), 'day') + ' overdue (' + dmy(x.planned_date) + ')' : 'Planned ' + dmy(x.planned_date)) : 'Not planned yet'));
+        sub.appendChild(el('span', null, x.items_left ? plural(x.items_left, 'checklist item') + ' left' : 'Checklist done: ready to complete')); main.appendChild(sub); row.appendChild(main);
+        const open = el('a', 'oxi-btn oxi-btn-secondary', 'Open stage'); open.href = 'project.html?id=' + x.project_id; row.appendChild(open); li.appendChild(row); return li;
+      }); if (stages) box.appendChild(stages);
+
+      const wait = section('sWait', 'Waiting on others', d.assigned, '', (t) => taskRow(t, today, { assignee: true }));
+      if (wait) { wait.appendChild(el('p', 'oxi-section-note', 'Tasks you assigned to other people. Their result appears here when they complete them.')); box.appendChild(wait); }
+
+      const fin = d.done_by_me.concat(d.assigned_done).sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+      const seen = new Set(); const finished = fin.filter(t => seen.has(t.id) ? false : (seen.add(t.id), true));
+      const recent = section('sDone', 'Finished in the last 7 days', finished, '', (t) => taskRow(t, today, { done: true, who: true }));
+      if (recent) box.appendChild(recent);
+    }
+
+    async function load() {
+      const d = await api('/api/rd/my-day');
+      if (!d.success) { $('day').setAttribute('aria-busy', 'false'); $('day').innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load your day.')); const b = el('button', null, 'Try again'); b.type = 'button'; b.onclick = load; e.appendChild(b); $('day').appendChild(e); return; }
+      DATA = d; render();
+    }
+    load().catch(() => { $('message').textContent = 'Could not reach the server.'; $('message').className = 'error'; });
+  </script>
+</body>
+</html>

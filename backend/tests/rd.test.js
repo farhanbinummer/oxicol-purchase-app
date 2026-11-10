@@ -469,7 +469,7 @@ test('concurrent edits are version-checked and unrelated work is preserved', asy
   const race = await Promise.all([api(tok.lead, 'PATCH', `/api/rd/projects/${p.id}`, { version: v2, substrate: 'bare metal' }), api(tok.rd2, 'PATCH', `/api/rd/projects/${p.id}`, { version: v2, end_user_market: 'detailing shops' })]);
   assert.equal(race.filter(r => r.success).length, 1, JSON.stringify(race.map(r => r.status)));
   // a stage edit and a task edit do not touch the project version or each other
-  const t = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Order samples', due_date: '2026-12-01' });
+  const t = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Order samples', assignee_id: uid.lead, due_date: '2026-12-01' });
   assert.equal(t.status, 201);
   assert.equal((await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/stages/1`, { version: after.stages[0].version, remarks: 'in progress' })).success, true);
   assert.equal((await get(tok.lead, p.id)).tasks.length, 1);
@@ -480,15 +480,17 @@ test('tasks: one accountable person, independent of stage completion, version-ch
   const p = await newProject(tok.kannur);
   const mk = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Test adhesion', assignee_id: uid.rd2, due_date: R.todayIST(), priority: 'High', stage_no: 4 });
   assert.equal(mk.status, 201);
-  const team = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Quote for resin', team: 'Purchase' });
-  assert.equal(team.status, 201);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Quote for resin', team: 'Purchase' })).status, 400, 'a new task needs an owner and a due date');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'No date', assignee_id: uid.rd2 })).status, 400, 'a due date is required too');
+  // a task created before owners were required can still be an unclaimed team task
+  await pool.query("INSERT INTO rd_tasks (project_id, title, team, created_by) VALUES ($1, 'Quote for resin', 'Purchase', $2)", [p.id, uid.lead]);
   let d = await get(tok.lead, p.id);
   const task = d.tasks.find(t => t.title === 'Test adhesion'), unclaimed = d.tasks.find(t => t.title === 'Quote for resin');
   assert.equal(task.assignee_id, uid.rd2); assert.equal(unclaimed.assignee_id, null); assert.equal(unclaimed.team, 'Purchase', 'an unclaimed team task is explicit');
   assert.equal((await api(tok.kannur, 'PATCH', '/api/rd/tasks/' + task.id, { version: task.version, status: 'done' })).status, 403, 'someone else cannot');
   const mine = await api(tok.rd2, 'PATCH', '/api/rd/tasks/' + task.id, { version: task.version, status: 'in_progress' });
   assert.equal(mine.success, true, 'the assignee may update their own status');
-  assert.equal((await api(tok.rd2, 'PATCH', '/api/rd/tasks/' + task.id, { version: task.version, status: 'done' })).status, 409, 'a stale version is refused');
+  assert.equal((await api(tok.rd2, 'POST', '/api/rd/tasks/' + task.id + '/complete', { version: task.version, result: 'Adhesion tested at 5 N.' })).status, 409, 'a stale version is refused');
   // a department member who is only an assignee may update status, nothing else
   await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: d.project.version, members: [uid.purchase] });
   const claim = await api(tok.lead, 'PATCH', '/api/rd/tasks/' + unclaimed.id, { version: unclaimed.version, assignee_id: uid.purchase });
@@ -497,12 +499,82 @@ test('tasks: one accountable person, independent of stage completion, version-ch
   assert.equal((await api(tok.purchase, 'PATCH', '/api/rd/tasks/' + unclaimed.id, { version: unclaimed.version + 1, status: 'in_progress' })).success, true);
   d = await get(tok.lead, p.id);
   assert.equal(d.tasks.find(t => t.id === unclaimed.id).team, null, 'claiming removes the unclaimed marker');
-  await api(tok.rd2, 'PATCH', '/api/rd/tasks/' + task.id, { version: task.version + 1, status: 'done' });
-  assert.equal((await api(tok.rd2, 'PATCH', '/api/rd/tasks/' + task.id, { version: task.version + 2, title: 'renamed by R&D' })).success, true, 'R&D staff with edit rights can edit it');
+  assert.equal((await api(tok.rd2, 'PATCH', '/api/rd/tasks/' + task.id, { version: task.version + 1, title: 'renamed by R&D' })).success, true, 'R&D staff with edit rights can edit it');
+  assert.equal((await api(tok.rd2, 'POST', '/api/rd/tasks/' + task.id + '/complete', { version: task.version + 2, result: 'Adhesion passed at 5 N on three panels.' })).success, true);
   d = await get(tok.lead, p.id);
-  assert.equal(d.tasks.find(t => t.id === task.id).status, 'done'); assert.ok(d.tasks.find(t => t.id === task.id).completed_at);
+  const fin = d.tasks.find(t => t.id === task.id);
+  assert.equal(fin.status, 'done'); assert.ok(fin.completed_at); assert.equal(fin.result, 'Adhesion passed at 5 N on three panels.'); assert.ok(fin.completed_by_name);
   assert.equal(d.stages[3].state, 'pending', 'finishing the stage-4 task does not complete stage 4 or bypass QC sign-off');
   assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'x', due_date: '31-12-2026' })).status, 400);
+});
+
+test('task results: a task is completed only with a result, by the right person, locked afterwards, and reopened only with a reason', async () => {
+  const p = await newProject(tok.kannur);
+  const mkTask = async (title, who, due) => (await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title, assignee_id: uid[who], due_date: due || R.todayIST() })).id;
+  const id = await mkTask('Send samples to customer', 'rd2');
+  const one = async () => (await get(tok.lead, p.id)).tasks.find(t => t.id === id);
+  const complete = (who, body) => api(tok[who], 'POST', `/api/rd/tasks/${id}/complete`, body);
+  // the status route can no longer close a task
+  assert.equal((await api(tok.rd2, 'PATCH', '/api/rd/tasks/' + id, { version: (await one()).version, status: 'done' })).status, 400, 'a task cannot be marked done without a result');
+  assert.equal((await one()).status, 'todo');
+  // a result is required, and long enough to say something
+  assert.equal((await complete('rd2', { version: (await one()).version })).status, 400, 'no result');
+  assert.equal((await complete('rd2', { result: 'ok' })).status, 400, 'too short to count');
+  assert.equal((await complete('rd2', { result: 'x'.repeat(R.MAX_RESULT_LENGTH + 1) })).status, 400, 'too long');
+  // only the person responsible, or R&D with edit rights
+  assert.equal((await complete('manager', { result: 'I finished this one today.' })).status, 403, 'a view-only manager cannot complete it');
+  assert.equal((await complete('kannur', { result: 'I finished this one today.' })).status, 403, 'the requester cannot either');
+  assert.equal((await one()).status, 'todo', 'refused attempts change nothing');
+  const ok = await complete('rd2', { version: (await one()).version, result: 'Samples dispatched by courier, tracking ABC123.' });
+  assert.equal(ok.success, true);
+  let t = await one();
+  assert.equal(t.status, 'done'); assert.equal(t.result, 'Samples dispatched by courier, tracking ABC123.'); assert.ok(t.completed_at && t.completed_by_name);
+  // anyone who can open the project sees the result (it is not lab content)
+  assert.equal((await get(tok.manager, p.id)).tasks.find(x => x.id === id).result, t.result, 'project viewers see the result');
+  // locked once complete
+  assert.equal((await api(tok.lead, 'PATCH', '/api/rd/tasks/' + id, { version: t.version, title: 'sneaky rename' })).status, 409, 'a completed task cannot be edited');
+  assert.equal((await complete('rd2', { result: 'Completing it a second time.' })).status, 409, 'nor completed twice');
+  // reopening: edit rights and a reason, and the old result stays in the history
+  assert.equal((await api(tok.rd2, 'POST', `/api/rd/tasks/${id}/reopen`, { reason: 'Wrong address' })).status, 200, 'R&D with edit rights can reopen');
+  assert.equal(((await one()).status), 'in_progress'); assert.equal((await one()).result, null);
+  assert.equal((await complete('rd2', { result: 'Re-sent to the right address.' })).success, true);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${id}/reopen`, {})).status, 400, 'a reason is required');
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${id}/reopen`, { reason: 'because' })).status, 403, 'a view-only manager cannot reopen');
+  const hist = (await pool.query('SELECT action, result, reason FROM rd_task_history WHERE task_id = $1 ORDER BY id', [id])).rows;
+  assert.deepEqual(hist.map(h => h.action), ['completed', 'reopened', 'completed']);
+  assert.equal(hist[1].result, 'Samples dispatched by courier, tracking ABC123.', 'the first result is kept when the task is reopened');
+  assert.equal(hist[1].reason, 'Wrong address');
+  // the audit trail says what happened, not what was written
+  const log = JSON.stringify((await pool.query("SELECT summary, before_data, after_data FROM audit_log WHERE entity = 'rd_task' AND entity_id = $1", [id])).rows);
+  assert.ok(log.includes('completed') && !log.includes('tracking ABC123'), 'the result text is not copied into the audit log');
+});
+
+test('my day: a person sees their open tasks, the tasks they handed out, the stages they own and what was just finished', async () => {
+  const p = await newProject(tok.kannur);
+  const d0 = await get(tok.lead, p.id);
+  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: d0.project.version, lead_user_id: uid.lead });
+  const mk = (title, who, due) => api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title, assignee_id: uid[who], due_date: due });
+  const today = R.todayIST(), tomorrow = R.addDays(today, 1), yesterday = R.addDays(today, -1);
+  const a = await mk('Mine today', 'rd2', today), b = await mk('Mine overdue', 'rd2', yesterday), c = await mk('For lead tomorrow', 'lead', tomorrow), e = await mk('Finish me', 'rd2', tomorrow);
+  await api(tok.rd2, 'POST', `/api/rd/tasks/${e.id}/complete`, { result: 'Finished and written up properly.' });
+  const day = await api(tok.rd2, 'GET', '/api/rd/my-day');
+  assert.equal(day.success, true); assert.equal(day.today, today);
+  const mineIds = day.mine.map(x => x.id);
+  assert.ok(mineIds.includes(a.id) && mineIds.includes(b.id) && !mineIds.includes(c.id) && !mineIds.includes(e.id), 'my open tasks only: not other people\'s, not finished ones');
+  assert.ok(day.done_by_me.some(x => x.id === e.id && x.result), 'what I finished this week, with its result');
+  assert.equal(day.mine.find(x => x.id === b.id).due_date, yesterday); assert.ok(day.mine.every(x => x.project_number && x.assigned_by_name), 'each task names its project and who assigned it');
+  // the person who handed tasks out sees what is waiting on others, and the results as they arrive
+  const lead = await api(tok.lead, 'GET', '/api/rd/my-day');
+  assert.ok(lead.assigned.some(x => x.id === a.id && x.assignee_name) && lead.assigned.some(x => x.id === b.id), 'tasks I assigned to others');
+  assert.ok(!lead.assigned.some(x => x.id === c.id), 'a task I gave myself is not "waiting on others"');
+  assert.ok(lead.assigned_done.some(x => x.id === e.id && x.result), 'a finished task and its result appear for the person who assigned it');
+  assert.ok(lead.mine.some(x => x.id === c.id));
+  assert.ok(lead.stages.some(s => s.project_id === p.id && s.stage_no === 1 && s.items_left === 3 && s.stage_name), 'the stage I lead is on my list with its checklist left');
+  assert.ok(!day.stages.some(s => s.project_id === p.id), 'someone who does not own the stage does not see it');
+  // visibility: nothing from a project the person may not open
+  const other = await api(tok.purchase, 'GET', '/api/rd/my-day');
+  assert.equal(other.success, true); assert.ok(!other.mine.some(x => x.project_id === p.id) && !other.assigned.some(x => x.project_id === p.id));
+  assert.equal((await api(null, 'GET', '/api/rd/my-day')).status, 401);
 });
 
 test('dashboards: the R&D workspace and the management band count the same projects the directory lists', async () => {
