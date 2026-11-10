@@ -310,7 +310,7 @@ async function detail(req, p, members, acc) {
   const [reqs, stageRows, items, tasks, updates, approvals, mem, fav, people] = await Promise.all([
     pool.query('SELECT * FROM rd_requirements WHERE project_id = $1 ORDER BY position', [p.id]),
     pool.query('SELECT s.*, ou.name AS owner_name, cu.name AS completed_by_name FROM rd_stages s LEFT JOIN users ou ON ou.id = s.owner_user_id LEFT JOIN users cu ON cu.id = s.completed_by WHERE s.project_id = $1 ORDER BY s.stage_no', [p.id]),
-    pool.query('SELECT c.* FROM rd_checklist_items c JOIN rd_stages s ON s.id = c.stage_id WHERE s.project_id = $1 ORDER BY c.stage_id, c.position', [p.id]),
+    pool.query('SELECT c.*, u.name AS done_by_name FROM rd_checklist_items c JOIN rd_stages s ON s.id = c.stage_id LEFT JOIN users u ON u.id = c.done_by WHERE s.project_id = $1 ORDER BY c.stage_id, c.position', [p.id]),
     pool.query('SELECT t.*, au.name AS assignee_name FROM rd_tasks t LEFT JOIN users au ON au.id = t.assignee_id WHERE t.project_id = $1 ORDER BY (t.status = \'done\'), t.due_date NULLS LAST, t.id', [p.id]),
     pool.query(`SELECT id, task_id, kind, author_name, body, at FROM rd_updates WHERE project_id = $1 AND ($2 OR kind <> 'lab_note') ORDER BY at DESC, id DESC LIMIT 100`, [p.id, acc.technical]),
     pool.query('SELECT a.*, u.name AS decided_by_name FROM rd_approvals a LEFT JOIN users u ON u.id = a.decided_by WHERE a.project_id = $1 ORDER BY a.at, a.id', [p.id]),
@@ -320,7 +320,9 @@ async function detail(req, p, members, acc) {
   ]);
   const lead = people.rows[0] || null;
   const latest = (kind) => approvals.rows.filter(a => a.kind === kind).pop() || null;
-  const by = new Map(); items.rows.forEach(c => { if (!by.has(c.stage_id)) by.set(c.stage_id, []); by.get(c.stage_id).push({ id: c.id, label: c.label, done: c.done }); });
+  const by = new Map(); items.rows.forEach(c => { if (!by.has(c.stage_id)) by.set(c.stage_id, []); by.get(c.stage_id).push({ id: c.id, label: c.label, done: c.done, needs_result: R.needsResult(c.label), done_by_name: c.done_by_name || null, done_at: c.done_at,
+    // the result is lab content: shown only with the confidential technical permission, like lab notes
+    result: acc.technical ? (c.result || null) : null, result_hidden: !acc.technical && !!c.result, result_at: c.result_at || null }); });
 
   const lite = stageRows.rows.map(s => ({ no: s.stage_no, days: R.stageDays(R.STAGES[s.stage_no - 1], p.est_trial_days), planned: ymd(s.planned_date), actual: s.completed_at ? ymd(s.actual_date) : null }));
   const currentNo = R.currentStageNo(lite);
@@ -562,12 +564,30 @@ router.post('/projects/:id/stages/:no/checklist/:item', needPerm(KEYS.RD_EDIT), 
     if (!o) { await client.query('ROLLBACK'); return; }
     if (!o.acc.edit) { await client.query('ROLLBACK'); return fail(res, 403, 'You may not edit this project'); }
     if (o.stage.completed_at) { await client.query('ROLLBACK'); return conflict(res, 'This stage is completed. Reopen it to change its checklist.'); }
-    const done = !!(req.body && req.body.done);
-    const r = await client.query(
-      `UPDATE rd_checklist_items SET done = $1, done_by = $2, done_at = $3 WHERE id = $4 AND stage_id = $5 RETURNING id`,
-      [done, done ? req.user.id : null, done ? new Date() : null, idOf(req.params.item), o.stage.id]);
-    if (!r.rowCount) { await client.query('ROLLBACK'); return fail(res, 404, 'Checklist item not found'); }
+    const body = req.body || {};
+    const done = !!body.done;
+    const it = await client.query('SELECT * FROM rd_checklist_items WHERE id = $1 AND stage_id = $2 FOR UPDATE', [idOf(req.params.item), o.stage.id]);
+    const item = it.rows[0];
+    if (!item) { await client.query('ROLLBACK'); return fail(res, 404, 'Checklist item not found'); }
+    // A result (what was found) is lab content: only people who may see it may write it, and an item that needs one cannot be ticked without it.
+    const writes = 'result' in body;
+    const text = writes ? String(body.result == null ? '' : body.result).trim() : null;
+    if (writes && text.length > R.MAX_RESULT_LENGTH) { await client.query('ROLLBACK'); return fail(res, 400, `The result is too long (at most ${R.MAX_RESULT_LENGTH} characters)`); }
+    if (writes && text && !o.acc.technical) { await client.query('ROLLBACK'); return fail(res, 403, 'Recording a result needs R&D technical access'); }
+    const effective = writes ? text : (item.result || '');
+    if (done && R.needsResult(item.label) && !effective) {
+      await client.query('ROLLBACK');
+      return fail(res, 400, o.acc.technical ? 'Record what was found before ticking this item' : 'This item needs a result, and recording one needs R&D technical access');
+    }
+    const sets = ['done = $1', 'done_by = $2', 'done_at = $3'];
+    const vals = [done, done ? req.user.id : null, done ? new Date() : null];
+    if (writes) { sets.push(`result = $${vals.length + 1}`); vals.push(text || null); sets.push(`result_at = $${vals.length + 1}`); vals.push(text ? new Date() : null); }
+    vals.push(item.id);
+    await client.query(`UPDATE rd_checklist_items SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
+    // The audit line names the item and the action only. The result text is never copied into the audit log.
+    await audit(client, req, { action: 'rd.checklist', entity: 'rd_project', id: o.p.id,
+      summary: `${o.p.project_number}: stage ${o.stage.stage_no} item "${item.label}" ${done ? (writes && item.done ? 'result updated' : 'ticked') : 'unticked'}${writes && text ? ' with a result' : ''}` });
     await client.query('COMMIT');
     res.json({ success: true, done });
   } catch (err) {

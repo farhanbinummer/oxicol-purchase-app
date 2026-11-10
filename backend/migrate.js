@@ -403,6 +403,15 @@ const STEPS = [
     async run(db) {
       await db.query("DELETE FROM role_permissions WHERE permission_key = 'rd.create' AND role <> 'manager'");
     }
+  },
+  {
+    // What was found, written next to each ticked checklist item. Existing items keep working with no result (they were ticked
+    // before results existed); nothing is dropped or rewritten.
+    name: '012_rd_checklist_results',
+    async run(db) {
+      await db.query('ALTER TABLE rd_checklist_items ADD COLUMN IF NOT EXISTS result TEXT');
+      await db.query('ALTER TABLE rd_checklist_items ADD COLUMN IF NOT EXISTS result_at TIMESTAMPTZ');
+    }
   }
 ];
 

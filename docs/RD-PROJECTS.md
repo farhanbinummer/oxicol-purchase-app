@@ -32,6 +32,17 @@ Part of the existing Oxicol application: same sign-in, same database, same permi
 * **Tasks:** one accountable assignee; a task nobody has claimed is shown as "Unclaimed (team)". A task being done never completes a stage or records an approval.
 * **Approvals** are append-only records made under the signed-in person's own name. Submitting a request is recorded as "submitted" and is not a management authorisation. Customer approval records the customer's representative, the evidence, and the internal person who recorded it.
 
+## Checklist results and stage reports
+
+Ticking a checklist item records **what was found**, not only that it was done.
+
+* **A result is needed to tick an item.** Every item asks for it except "Obtain QC sign-off" and "Record handover acknowledgement", whose record is the approval. Up to 2000 characters. The result is saved with who ticked the item and when.
+* **Unticking keeps the result** so no work is lost; ticking again does not need retyping. A result can be edited while the stage is open.
+* **A completed stage is locked.** Changing a result means reopening the stage (a reason is required and is kept in the history).
+* **Results are confidential, like lab notes.** Only people with `field.rd_technical` (R&D by default) receive the text. Everyone else sees "A result has been recorded. It is confidential to R&D." and who recorded it. The audit log says an item was ticked or a result was saved, never what the result said.
+* **Items ticked before this existed** show "No result recorded (ticked before results were kept)". They are not blocked and completed stages are untouched (migration `012_rd_checklist_results` only adds two columns).
+* **Reports.** `project-report.html?id=N` is a printable report of every stage (item, result, who, when, plus the QC, customer and handover sign-offs); add `&stage=N` for one stage. Completed stages have a "Report" link in Milestones. The report uses the project's own visibility and confidentiality rules; it adds no new API.
+
 ## Permission matrix (defaults)
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.
