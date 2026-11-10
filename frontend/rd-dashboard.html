@@ -9,103 +9,318 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    /* Chart palette: one set for light, one for dark, so charts stay readable in both */
+    :root { --k1:#2563eb; --k2:#7c3aed; --k3:#0d9488; --k4:#0891b2; --k5:#d97706; --k6:#ea580c; --k7:#64748b; --k8:#16a34a; --k9:#dc2626; --ok:#16a34a; --bad:#dc2626; --amb:#d97706; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --k1:#6ea0ff; --k2:#b794f6; --k3:#4fd1c5; --k4:#4fc3e8; --k5:#f6ad55; --k6:#fb923c; --k7:#9db0c4; --k8:#5fd08a; --k9:#f08a8a; --ok:#5fd08a; --bad:#f08a8a; --amb:#f6ad55; } }
+    :root[data-theme="dark"] { --k1:#6ea0ff; --k2:#b794f6; --k3:#4fd1c5; --k4:#4fc3e8; --k5:#f6ad55; --k6:#fb923c; --k7:#9db0c4; --k8:#5fd08a; --k9:#f08a8a; --ok:#5fd08a; --bad:#f08a8a; --amb:#f6ad55; }
+
+    .rdd { display: grid; gap: 16px; }
+    .rdd-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    .rdd-top h1 { margin: 0; }
+    .rdd-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .rdd-actions a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 10px; font-weight: 600; text-decoration: none; transition: transform .15s, box-shadow .15s; }
+    .rdd-actions a.p { background: var(--accent); color: #fff; } .rdd-actions a.s { border: 1px solid var(--border-strong); color: var(--text); background: var(--surface); }
+    .rdd-actions a:active { transform: scale(.97); }
+
+    /* KPI tiles */
+    .rdd-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 12px; }
+    .tile { --c: var(--k1); position: relative; overflow: hidden; text-align: left; font: inherit; color: var(--text); cursor: pointer; border: 1px solid var(--border); border-radius: 16px; padding: 14px 14px 12px; background: var(--surface); box-shadow: var(--shadow-sm); min-height: 96px; transition: transform .18s ease, box-shadow .18s ease, border-color .18s; text-decoration: none; display: block; }
+    .tile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--c); }
+    .tile::after { content: ""; position: absolute; right: -22px; top: -22px; width: 84px; height: 84px; border-radius: 50%; background: var(--c); opacity: .12; }
+    .tile:hover { transform: translateY(-3px); box-shadow: 0 8px 22px rgba(15,30,55,.14); border-color: var(--c); }
+    .tile:active { transform: scale(.98); }
+    .tile.on { border-color: var(--c); box-shadow: 0 0 0 2px var(--c); }
+    .tile .ic { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); }
+    .tile .ic svg { width: 18px; height: 18px; }
+    .tile .n { font-size: 30px; font-weight: 700; line-height: 1.1; margin-top: 8px; font-variant-numeric: tabular-nums; color: var(--c); }
+    .tile .l { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+
+    /* cards and grids */
+    .rdd-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .cc { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-sm); }
+    .cc h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+    .cc h2 small { font-weight: 500; color: var(--text-2); font-size: 12.5px; }
+    .appear { opacity: 0; transform: translateY(10px); animation: up .5s ease forwards; }
+    @keyframes up { to { opacity: 1; transform: none; } }
+
+    /* donut */
+    .donut-wrap { display: grid; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); gap: 16px; align-items: center; }
+    .donut { position: relative; width: 100%; aspect-ratio: 1; }
+    .donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .donut circle { fill: none; stroke-width: 6.2; stroke-linecap: butt; cursor: pointer; transition: stroke-width .18s, opacity .18s, stroke-dasharray .9s cubic-bezier(.2,.8,.2,1); }
+    .donut circle.bg { stroke: var(--border); cursor: default; opacity: .6; }
+    .donut:hover circle.seg { opacity: .55; } .donut circle.seg:hover, .donut circle.seg.on { opacity: 1; stroke-width: 7.6; }
+    .donut .mid { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+    .donut .mid b { font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; } .donut .mid span { font-size: 12px; color: var(--text-2); max-width: 90px; }
+    .legend { display: grid; gap: 6px; }
+    .legend button { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; white-space: nowrap; align-items: center; min-height: 38px; padding: 0 10px; background: transparent; border: 1px solid transparent; border-radius: 10px; font: inherit; color: var(--text); cursor: pointer; text-align: left; transition: background .15s, transform .1s; }
+    .legend button:hover { background: var(--surface-2, var(--primary-soft)); } .legend button:active { transform: scale(.98); }
+    .legend button.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+    .legend i { width: 12px; height: 12px; border-radius: 4px; background: var(--c); } .legend b { font-variant-numeric: tabular-nums; min-width: 18px; text-align: right; }
+
+    /* pipeline bars */
+    .bars { display: grid; gap: 6px; }
+    .bars button { display: grid; grid-template-columns: 82px 1fr 24px; gap: 8px; align-items: center; min-height: 36px; padding: 0 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; font: inherit; color: var(--text); cursor: pointer; text-align: left; transition: background .15s, transform .1s; }
+    .bars button:hover { background: var(--surface-2, var(--primary-soft)); } .bars button:active { transform: scale(.98); }
+    .bars button.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+    .bars .lb { font-size: 13px; color: var(--text-2); } .bars b { text-align: right; font-variant-numeric: tabular-nums; }
+    .bars .tr { height: 14px; border-radius: 8px; background: var(--border); overflow: hidden; }
+    .bars .tr i { display: block; height: 100%; width: 0; border-radius: 8px; background: var(--c); transition: width .9s cubic-bezier(.2,.8,.2,1); }
+
+    /* priority stacked bar */
+    .stack { display: flex; height: 22px; border-radius: 12px; overflow: hidden; background: var(--border); gap: 2px; }
+    .stack button { border: 0; padding: 0; cursor: pointer; background: var(--c); width: 0; transition: width .9s cubic-bezier(.2,.8,.2,1), filter .15s; }
+    .stack button:hover, .stack button.on { filter: brightness(1.12) saturate(1.15); outline: 2px solid var(--c); outline-offset: 1px; }
+    .pri { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .chip { --c: var(--k1); display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font: inherit; font-size: 13px; color: var(--text); cursor: pointer; transition: background .15s, transform .1s; }
+    .chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); } .chip:active { transform: scale(.96); } .chip.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
+
+    /* lists */
+    .lst { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .lst a { --c: var(--k1); display: block; min-height: 52px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border); border-left: 5px solid var(--c); background: var(--surface); color: var(--text); text-decoration: none; transition: transform .15s, box-shadow .15s; }
+    .lst a:hover { transform: translateX(3px); box-shadow: var(--shadow-sm); } .lst a:active { transform: scale(.985); }
+    .lst a b { display: block; font-size: 14px; } .lst a span { font-size: 12.5px; color: var(--text-2); }
+    .lst .bad { --c: var(--bad); } .lst .amb { --c: var(--amb); } .lst .ok { --c: var(--ok); }
+    .empty { color: var(--text-2); margin: 0; padding: 8px 0; }
+    .count { display: inline-grid; place-items: center; min-width: 62px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); float: right; margin-left: 8px; }
+
+    /* project cards */
+    .filterbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; min-height: 36px; }
+    .filterbar .tag { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 6px 0 12px; border-radius: 999px; background: var(--primary-soft); color: var(--accent); font-weight: 600; font-size: 13px; }
+    .filterbar .tag button { width: 28px; height: 28px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; cursor: pointer; font-size: 16px; line-height: 1; }
+    .pcards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    .pc { --c: var(--k1); display: block; text-decoration: none; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-top: 5px solid var(--c); border-radius: 16px; padding: 12px 14px; transition: transform .18s, box-shadow .18s; animation: up .45s ease both; }
+    .pc:hover { transform: translateY(-3px); box-shadow: 0 8px 22px rgba(15,30,55,.14); } .pc:active { transform: scale(.985); }
+    .pc .no { font-size: 12px; color: var(--text-2); font-weight: 600; } .pc h3 { margin: 2px 0 8px; font-size: 16px; overflow-wrap: anywhere; }
+    .pc .row { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 13px; color: var(--text-2); margin-top: 8px; }
+    .dots { display: flex; gap: 4px; margin: 10px 0 4px; } .dots i { flex: 1; height: 8px; border-radius: 5px; background: var(--border); }
+    .dots i.d { background: var(--ok); } .dots i.c { background: var(--k1); } .dots i.l { background: var(--bad); }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); }
+
+    .skel { height: 96px; border-radius: 16px; background: linear-gradient(90deg, var(--border) 25%, var(--surface) 50%, var(--border) 75%); background-size: 200% 100%; animation: sh 1.2s infinite; }
+    @keyframes sh { to { background-position: -200% 0; } }
+    @media (max-width: 520px) { .donut-wrap { grid-template-columns: 1fr; } .legend button { white-space: normal; } .donut { max-width: 190px; margin: 0 auto; } }
+    @media (prefers-reduced-motion: reduce) { .appear, .pc { animation: none; opacity: 1; transform: none; } .donut circle, .bars .tr i, .stack button, .tile, .pc { transition: none; } .skel { animation: none; } }
+  </style>
 </head>
 <body>
-  <p><a href="index.html">&larr; Home</a> | <a href="projects.html">All projects</a> | <a href="project-new.html">+ New R&amp;D request</a></p>
-  <h1>R&amp;D Dashboard</h1>
-  <p class="oxi-page-sub">Where every active project stands, what is late, and what is next. Counts use the same rules as the project list.</p>
-  <p id="message" role="status"></p>
-  <div id="dash" aria-busy="true"></div>
+  <p><a href="index.html">&larr; Home</a></p>
+  <div class="rdd">
+    <div class="rdd-top">
+      <div><h1>R&amp;D Dashboard</h1><p class="oxi-page-sub" style="margin:0">Tap any tile, slice or bar to filter the projects below.</p></div>
+      <div class="rdd-actions"><a class="p" href="project-new.html">+ New request</a><a class="s" href="projects.html">All projects</a></div>
+    </div>
+    <p id="message" role="status"></p>
+    <div id="dash" aria-busy="true"><div class="rdd-tiles"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></div>
+  </div>
 
   <script src="common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-    const STAGES = ['Literature / Raw-Material Sourcing', 'First Lab Batch', 'Lab Trials & Optimisation', 'Internal Testing / QC Approval', 'Sample to Requester / Customer', 'Customer Approval', 'Plant Trial / Scale-up', 'Handover to Production'];
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const svg = (tag, attrs) => { const e = document.createElementNS(SVGNS, tag); Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; };
+    const STAGE_SHORT = ['Sourcing', 'First batch', 'Lab trials', 'QC testing', 'Sample', 'Customer', 'Plant trial', 'Handover'];
+    const STAGE_COL = ['--k1', '--k2', '--k3', '--k4', '--k5', '--k6', '--k8', '--k7'];
+    const STATUS_COL = { 'Received': '--k1', 'Under Review': '--k2', 'Approved': '--k3', 'In Lab Trials': '--k4', 'Sample Sent': '--k5', 'Plant Trial': '--k6', 'On Hold': '--k7', 'Completed': '--k8', 'Rejected': '--k9' };
+    const PRIO_COL = { High: '--bad', Medium: '--amb', Low: '--ok' };
+    const ICON = {
+      folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+      flask: 'M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2.2h12.4a1.5 1.5 0 0 0 1.3-2.2L14 9V3',
+      alert: 'M12 9v4m0 4h.01M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+      pause: 'M8 5v14M16 5v14',
+      rocket: 'M5 15c-1 1-1.5 4-1.5 4s3-.5 4-1.5M14 4c4 0 6 2 6 6-2 4-5 6-8 7l-5-5c1-3 3-6 7-8z',
+      check: 'M5 13l4 4L19 7'
+    };
+    const icon = (name) => { const s = svg('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }); s.appendChild(svg('path', { d: ICON[name] })); return s; };
+    const v = (name) => 'var(' + name + ')';
+    const daysTo = (iso, today) => Math.round((Date.parse(iso.slice(0, 10)) - Date.parse(today)) / 86400000);
+    function countUp(node, to) { const t0 = performance.now(), dur = 700; if (matchMedia('(prefers-reduced-motion: reduce)').matches || to === 0) { node.textContent = to; return; } (function f(now) { const k = Math.min(1, (now - t0) / dur); node.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(f); })(t0); }
+    const stagger = (node, i) => { node.classList.add('appear'); node.style.animationDelay = (i * 70) + 'ms'; return node; };
 
-    function tile(label, value, cls, href) {
-      const a = el(href ? 'a' : 'div', 'oxi-kpi-chip' + (cls ? ' ' + cls : '')); if (href) a.href = href;
-      a.append(el('span'), el('span')); a.lastChild.append(el('b', null, String(value)), document.createTextNode(label));
-      return a;
+    let ALL = [], TASKS = [], TODAY = '', FILTER = null;   // FILTER = { kind, value, label }
+
+    function match(p) {
+      if (!FILTER) return true;
+      if (FILTER.kind === 'status') return p.status === FILTER.value;
+      if (FILTER.kind === 'stage') return p.current_stage_no === FILTER.value;
+      if (FILTER.kind === 'priority') return p.priority === FILTER.value;
+      if (FILTER.kind === 'overdue') return p.overdue_stages > 0;
+      if (FILTER.kind === 'lab') return p.current_stage_no === 3 && ['Received', 'Under Review', 'Approved', 'In Lab Trials', 'Sample Sent', 'Plant Trial'].includes(p.status);
+      if (FILTER.kind === 'soon') return p.target_launch_date && !p.target_tbc && daysTo(p.target_launch_date, TODAY) >= 0 && daysTo(p.target_launch_date, TODAY) <= 30;
+      if (FILTER.kind === 'hold') return p.status === 'On Hold';
+      if (FILTER.kind === 'active') return ['Received', 'Under Review', 'Approved', 'In Lab Trials', 'Sample Sent', 'Plant Trial'].includes(p.status);
+      return true;
     }
-    function card(title, id) { const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', id); const h = el('h2', null, title); h.id = id; c.appendChild(h); return c; }
-    function daysTo(iso, today) { return Math.round((Date.parse(iso.slice(0, 10)) - Date.parse(today)) / 86400000); }
+    function setFilter(kind, value, label) {
+      FILTER = (FILTER && FILTER.kind === kind && FILTER.value === value) ? null : { kind, value, label };
+      syncSelection(); renderCards(true);
+      if (FILTER) $('cardsAnchor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    function syncSelection() {
+      document.querySelectorAll('[data-fk]').forEach(b => b.classList.toggle('on', !!FILTER && b.dataset.fk === FILTER.kind && b.dataset.fv === String(FILTER.value)));
+    }
+    const hook = (node, kind, value, label) => { node.dataset.fk = kind; node.dataset.fv = String(value); node.addEventListener('click', () => setFilter(kind, value, label)); return node; };
+
+    function tile(label, value, color, ic, kind, fval) {
+      const b = el('button', 'tile'); b.type = 'button'; b.style.setProperty('--c', v(color));
+      const i = el('div', 'ic'); i.appendChild(icon(ic)); const n = el('div', 'n', '0'); countUp(n, value);
+      b.append(i, n, el('div', 'l', label)); b.setAttribute('aria-label', label + ': ' + value + '. Tap to filter.');
+      return hook(b, kind, fval, label);
+    }
+
+    function donutCard(P) {
+      const c = el('section', 'cc'); const h = el('h2'); h.append(document.createTextNode('Projects by status'), el('small', null, 'tap a slice'));
+      c.appendChild(h);
+      const counts = {}; P.forEach(p => counts[p.status] = (counts[p.status] || 0) + 1);
+      const entries = Object.keys(STATUS_COL).filter(s => counts[s]).map(s => [s, counts[s]]);
+      const total = P.length, wrap = el('div', 'donut-wrap'), d = el('div', 'donut');
+      const s = svg('svg', { viewBox: '0 0 36 36', role: 'img', 'aria-label': 'Projects by status: ' + (entries.map(e => e[0] + ' ' + e[1]).join(', ') || 'none') });
+      s.appendChild(svg('circle', { class: 'bg', cx: 18, cy: 18, r: 15.9155 }));
+      const mid = el('div', 'mid'); const big = el('b', null, '0'); const sm = el('span', null, 'projects'); mid.append(big, sm); countUp(big, total);
+      let offset = 0; const segs = [];
+      entries.forEach(([st, n]) => {
+        const len = n / total * 100, col = STATUS_COL[st];
+        const ci = svg('circle', { class: 'seg', cx: 18, cy: 18, r: 15.9155, stroke: v(col), 'stroke-dasharray': '0 100', 'stroke-dashoffset': -offset, tabindex: 0, role: 'button', 'aria-label': st + ': ' + n });
+        segs.push([ci, len]); offset += len;
+        ci.dataset.fk = 'status'; ci.dataset.fv = st;
+        ci.addEventListener('click', () => setFilter('status', st, st));
+        ci.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilter('status', st, st); } });
+        ci.addEventListener('mouseenter', () => { big.textContent = n; sm.textContent = st; });
+        ci.addEventListener('mouseleave', () => { big.textContent = total; sm.textContent = 'projects'; });
+        s.appendChild(ci);
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => segs.forEach(([ci, len]) => ci.setAttribute('stroke-dasharray', Math.max(0, len - 0.6) + ' ' + (100 - Math.max(0, len - 0.6))))));
+      d.append(s, mid);
+      const lg = el('div', 'legend');
+      entries.forEach(([st, n]) => { const b = el('button'); b.type = 'button'; b.style.setProperty('--c', v(STATUS_COL[st])); b.append(el('i'), el('span', null, st), el('b', null, String(n))); lg.appendChild(hook(b, 'status', st, st)); });
+      if (!entries.length) lg.appendChild(el('p', 'empty', 'No projects yet.'));
+      wrap.append(d, lg); c.appendChild(wrap); return c;
+    }
+
+    function pipelineCard(P) {
+      const c = el('section', 'cc'); const h = el('h2'); h.append(document.createTextNode('Pipeline by stage'), el('small', null, 'where active work sits')); c.appendChild(h);
+      const act = P.filter(p => ['Received', 'Under Review', 'Approved', 'In Lab Trials', 'Sample Sent', 'Plant Trial', 'On Hold'].includes(p.status));
+      const counts = STAGE_SHORT.map((_, i) => act.filter(p => p.current_stage_no === i + 1).length), max = Math.max(1, ...counts);
+      const bars = el('div', 'bars'), fills = [];
+      counts.forEach((n, i) => {
+        const b = el('button'); b.type = 'button'; b.style.setProperty('--c', v(STAGE_COL[i]));
+        const tr = el('span', 'tr'), f = el('i'); tr.appendChild(f); fills.push([f, n / max * 100]);
+        b.append(el('span', 'lb', (i + 1) + '. ' + STAGE_SHORT[i]), tr, el('b', null, String(n)));
+        b.setAttribute('aria-label', 'Stage ' + (i + 1) + ' ' + STAGE_SHORT[i] + ': ' + n + ' projects');
+        bars.appendChild(hook(b, 'stage', i + 1, 'Stage ' + (i + 1) + ': ' + STAGE_SHORT[i]));
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => fills.forEach(([f, w]) => { f.style.width = w + '%'; })));
+      c.appendChild(bars); return c;
+    }
+
+    function priorityCard(P) {
+      const c = el('section', 'cc'); const h = el('h2'); h.append(document.createTextNode('Priority mix'), el('small', null, 'active projects')); c.appendChild(h);
+      const act = P.filter(p => !['Completed', 'Rejected'].includes(p.status));
+      const st = el('div', 'stack'), chips = el('div', 'pri'), fills = [];
+      ['High', 'Medium', 'Low'].forEach(k => {
+        const n = act.filter(p => p.priority === k).length; if (!n) return;
+        const b = el('button'); b.type = 'button'; b.style.setProperty('--c', v(PRIO_COL[k])); b.setAttribute('aria-label', k + ' priority: ' + n); fills.push([b, n / act.length * 100]);
+        st.appendChild(hook(b, 'priority', k, k + ' priority'));
+        const ch = el('button', 'chip'); ch.type = 'button'; ch.style.setProperty('--c', v(PRIO_COL[k])); ch.append(el('i'), document.createTextNode(k + ' '), el('b', null, String(n)));
+        chips.appendChild(hook(ch, 'priority', k, k + ' priority'));
+      });
+      if (!act.length) { c.appendChild(el('p', 'empty', 'No active projects.')); return c; }
+      requestAnimationFrame(() => requestAnimationFrame(() => fills.forEach(([b, w]) => { b.style.width = w + '%'; })));
+      c.append(st, chips);
+      const note = el('p', 'empty', 'Completed and rejected projects are not counted here.'); note.style.fontSize = '12.5px'; c.appendChild(note);
+      return c;
+    }
+
+    function attentionCard(P) {
+      const c = el('section', 'cc'); const rows = [];
+      P.filter(p => !['Completed', 'Rejected'].includes(p.status)).forEach(p => {
+        if (p.overdue_stages) rows.push([p, p.overdue_stages + ' stage' + (p.overdue_stages === 1 ? '' : 's') + ' overdue', 'bad', 3]);
+        if (p.overdue_tasks) rows.push([p, p.overdue_tasks + ' task' + (p.overdue_tasks === 1 ? '' : 's') + ' overdue', 'bad', 2]);
+        if (p.status === 'Received') rows.push([p, 'Waiting for review', 'amb', 1]);
+      });
+      rows.sort((a, b) => b[3] - a[3]);
+      const h = el('h2'); h.append(document.createTextNode('Needs attention')); if (rows.length) { const k = el('span', 'count', rows.length + ' item' + (rows.length === 1 ? '' : 's')); k.style.setProperty('--c', v('--bad')); h.appendChild(k); } c.appendChild(h);
+      if (!rows.length) { c.appendChild(el('p', 'empty', 'Nothing needs attention. Nice work.')); return c; }
+      const ul = el('ul', 'lst');
+      rows.slice(0, 6).forEach(([p, why, cls]) => { const li = el('li'); const a = el('a', cls); a.href = 'project.html?id=' + p.id; a.append(el('b', null, p.project_number + ' ' + p.title), el('span', null, why)); li.appendChild(a); ul.appendChild(li); });
+      c.appendChild(ul); return c;
+    }
+
+    function tasksCard() {
+      const c = el('section', 'cc'); const h = el('h2', null, 'My tasks'); c.appendChild(h);
+      if (!TASKS.length) { c.appendChild(el('p', 'empty', 'No open tasks assigned to you.')); return c; }
+      const ul = el('ul', 'lst');
+      TASKS.slice(0, 6).forEach(t => { const late = t.due_date && t.due_date < TODAY; const li = el('li'); const a = el('a', late ? 'bad' : (t.due_date && daysTo(t.due_date, TODAY) <= 3 ? 'amb' : 'ok')); a.href = 'project.html?id=' + t.project_id + '#list'; a.append(el('b', null, t.title), el('span', null, t.project_number + ' · ' + (t.due_date ? (late ? 'overdue since ' : 'due ') + dmy(t.due_date) : 'no due date'))); li.appendChild(a); ul.appendChild(li); });
+      c.appendChild(ul); return c;
+    }
+
+    function launchCard(P) {
+      const c = el('section', 'cc'); const h = el('h2'); h.append(document.createTextNode('Upcoming launches'), el('small', null, 'next dates')); c.appendChild(h);
+      const dated = P.filter(p => p.target_launch_date && !p.target_tbc && !['Completed', 'Rejected'].includes(p.status)).sort((a, b) => a.target_launch_date.localeCompare(b.target_launch_date)).slice(0, 5);
+      if (!dated.length) { c.appendChild(el('p', 'empty', 'No confirmed launch dates.')); return c; }
+      const ul = el('ul', 'lst');
+      dated.forEach(p => {
+        const d = daysTo(p.target_launch_date, TODAY), cls = d < 0 ? 'bad' : d <= 14 ? 'amb' : 'ok';
+        const li = el('li'); const a = el('a', cls); a.href = 'project.html?id=' + p.id;
+        const pill = el('span', 'count', d < 0 ? Math.abs(d) + ' d late' : d === 0 ? 'today' : d + ' days'); pill.style.setProperty('--c', v(d < 0 ? '--bad' : d <= 14 ? '--amb' : '--ok'));
+        a.append(pill, el('b', null, p.project_number + ' ' + p.title), el('span', null, dmy(p.target_launch_date))); li.appendChild(a); ul.appendChild(li);
+      });
+      c.appendChild(ul); return c;
+    }
+
+    function renderCards(animate) {
+      const bar = $('filterbar'); bar.innerHTML = '';
+      const list = ALL.filter(p => FILTER ? match(p) : ['Received', 'Under Review', 'Approved', 'In Lab Trials', 'Sample Sent', 'Plant Trial', 'On Hold'].includes(p.status));
+      if (FILTER) { const t = el('span', 'tag'); t.append(document.createTextNode('Filter: ' + FILTER.label)); const x = el('button', null, '×'); x.type = 'button'; x.setAttribute('aria-label', 'Clear filter'); x.onclick = () => { FILTER = null; syncSelection(); renderCards(true); }; t.appendChild(x); bar.appendChild(t); }
+      bar.appendChild(el('span', 'oxi-section-note', list.length + (list.length === 1 ? ' project' : ' projects') + (FILTER ? '' : ' in progress')));
+      const box = $('pcards'); box.innerHTML = '';
+      if (!list.length) { box.appendChild(el('p', 'empty', 'No projects match this filter.')); return; }
+      list.slice(0, 24).forEach((p, i) => {
+        const a = el('a', 'pc'); a.href = 'project.html?id=' + p.id; a.style.setProperty('--c', v(STATUS_COL[p.status] || '--k1')); if (animate !== false) a.style.animationDelay = Math.min(i, 8) * 40 + 'ms';
+        a.append(el('div', 'no', p.project_number), el('h3', null, p.title));
+        const dots = el('div', 'dots'); for (let k = 1; k <= 8; k++) dots.appendChild(el('i', k <= p.stages_done ? 'd' : (k === p.current_stage_no ? (p.overdue_stages ? 'l' : 'c') : ''))); a.appendChild(dots);
+        const r1 = el('div', 'row'); const sp = el('span', null, p.current_stage ? p.current_stage_no + '. ' + STAGE_SHORT[p.current_stage_no - 1] : 'All stages done'); const pill = el('span', 'pill', p.status); r1.append(sp, pill); a.appendChild(r1);
+        const r2 = el('div', 'row'); r2.append(el('span', null, p.lead_name ? 'Lead: ' + p.lead_name : 'No lead yet'));
+        if (p.target_launch_date && !p.target_tbc) { const d = daysTo(p.target_launch_date, TODAY); r2.appendChild(el('span', d < 0 ? 'oxi-late' : null, d < 0 ? Math.abs(d) + ' days past target' : d + ' days to target')); } else r2.appendChild(el('span', null, 'Target TBC'));
+        a.appendChild(r2); box.appendChild(a);
+      });
+      if (list.length > 24) { const m = el('a', 'pc'); m.href = 'projects.html'; m.append(el('h3', null, 'See all ' + list.length + ' projects →')); box.appendChild(m); }
+    }
 
     async function load() {
-      const [pr, tk] = await Promise.all([api('/api/rd/projects?scope=active&sort=target'), api('/api/rd/my-tasks')]);
+      const [pr, tk] = await Promise.all([api('/api/rd/projects?scope=all&sort=target'), api('/api/rd/my-tasks')]);
       const box = $('dash'); box.setAttribute('aria-busy', 'false'); box.innerHTML = '';
       if (!pr.success) { box.appendChild(el('p', 'error', pr.error || 'Could not load the dashboard.')); return; }
-      const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
-      const P = pr.projects, tasks = tk.success ? tk.tasks : [];
-      const late = P.filter(p => p.overdue_stages), lab = P.filter(p => p.current_stage_no === 3);
-      const soon = P.filter(p => p.target_launch_date && !p.target_tbc && daysTo(p.target_launch_date, today) >= 0 && daysTo(p.target_launch_date, today) <= 30);
-      const myLate = tasks.filter(t => t.due_date && t.due_date < today);
+      TODAY = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      ALL = pr.projects.filter(p => !p.is_draft); TASKS = tk.success ? tk.tasks : [];
+      const ACT = ['Received', 'Under Review', 'Approved', 'In Lab Trials', 'Sample Sent', 'Plant Trial'];
+      const act = ALL.filter(p => ACT.includes(p.status));
+      const late = ALL.filter(p => ACT.includes(p.status) && p.overdue_stages).length;
+      const lab = act.filter(p => p.current_stage_no === 3).length, hold = ALL.filter(p => p.status === 'On Hold').length;
+      const soon = ALL.filter(p => ACT.includes(p.status) && p.target_launch_date && !p.target_tbc && daysTo(p.target_launch_date, TODAY) >= 0 && daysTo(p.target_launch_date, TODAY) <= 30).length;
+      const done = ALL.filter(p => p.status === 'Completed').length;
 
-      const tiles = el('div', 'oxi-kpi-chips'); tiles.setAttribute('role', 'list');
-      tiles.append(
-        tile('Active projects', pr.counts.active, '', 'projects.html?scope=active'),
-        tile('In lab trials', lab.length, ''),
-        tile('With overdue stages', late.length, late.length ? 'bad' : 'good', 'projects.html?overdue=1'),
-        tile('On hold', pr.counts.hold, pr.counts.hold ? 'warn' : '', 'projects.html?scope=hold'),
-        tile('Launching in 30 days', soon.length, soon.length ? 'warn' : ''),
-        tile('My overdue tasks', myLate.length, myLate.length ? 'bad' : 'good'));
+      const tiles = el('div', 'rdd-tiles');
+      [tile('Active projects', act.length, '--k1', 'folder', 'active', 'all'), tile('In lab trials', lab, '--k4', 'flask', 'lab', 'x'),
+       tile('Overdue stages', late, late ? '--k9' : '--k8', 'alert', 'overdue', 'x'), tile('On hold', hold, '--k7', 'pause', 'hold', 'x'),
+       tile('Launching in 30 days', soon, '--k5', 'rocket', 'soon', 'x'), tile('Completed', done, '--k8', 'check', 'status', 'Completed')]
+        .forEach((t, i) => tiles.appendChild(stagger(t, i)));
       box.appendChild(tiles);
 
-      const grid = el('div', 'oxi-grid2');
+      const g1 = el('div', 'rdd-grid'); g1.style.marginTop = '16px';
+      [donutCard(ALL), pipelineCard(ALL), priorityCard(ALL)].forEach((c, i) => g1.appendChild(stagger(c, i + 3)));
+      box.appendChild(g1);
+      const g2 = el('div', 'rdd-grid'); g2.style.marginTop = '16px';
+      [attentionCard(ALL), tasksCard(), launchCard(ALL)].forEach((c, i) => g2.appendChild(stagger(c, i + 5)));
+      box.appendChild(g2);
 
-      // needs attention
-      const att = card('Needs attention', 'dAtt');
-      const rows = [];
-      P.forEach(p => {
-        if (p.overdue_stages) rows.push([p, p.overdue_stages + ' stage' + (p.overdue_stages === 1 ? '' : 's') + ' overdue', 2]);
-        if (p.overdue_tasks) rows.push([p, p.overdue_tasks + ' task' + (p.overdue_tasks === 1 ? '' : 's') + ' overdue', 1]);
-      });
-      P.filter(p => p.status === 'Received').forEach(p => rows.push([p, 'Waiting for review', 0]));
-      rows.sort((a, b) => b[2] - a[2]);
-      if (!rows.length) att.appendChild(el('p', null, 'Nothing needs attention right now.'));
-      else { const ul = el('ul', 'oxi-feed'); rows.slice(0, 8).forEach(([p, why, sev]) => { const li = el('li'); const a = el('a', null, p.project_number + ' ' + p.title); a.href = 'project.html?id=' + p.id; li.append(a, el('p', sev ? 'oxi-late' : null, why)); ul.appendChild(li); }); att.appendChild(ul); }
-
-      // my tasks
-      const my = card('My tasks', 'dMy');
-      if (!tasks.length) my.appendChild(el('p', null, 'No open tasks assigned to you.'));
-      else { const ul = el('ul', 'oxi-feed'); tasks.slice(0, 8).forEach(t => { const li = el('li'); const a = el('a', null, t.title); a.href = 'project.html?id=' + t.project_id + '#list'; li.append(a, el('p', t.due_date && t.due_date < today ? 'oxi-late' : null, t.project_number + ' - ' + (t.due_date ? 'due ' + dmy(t.due_date) : 'no due date'))); ul.appendChild(li); }); my.appendChild(ul); }
-      grid.append(att, my);
-
-      // pipeline by stage
-      const pipe = card('Pipeline by stage', 'dPipe');
-      const counts = STAGES.map((n, i) => P.filter(p => p.current_stage_no === i + 1).length), max = Math.max(1, ...counts);
-      const ul = el('ul', 'oxi-pipeline');
-      counts.forEach((n, i) => {
-        const li = el('li'); const bar = el('span', 'bar'); const fill = el('i'); fill.style.width = (n / max * 100) + '%'; bar.appendChild(fill);
-        li.append(el('span', 'lbl', (i + 1) + '. ' + STAGES[i]), bar, el('b', null, String(n))); ul.appendChild(li);
-      });
-      pipe.appendChild(ul);
-
-      // upcoming launches
-      const up = card('Upcoming launch dates', 'dUp');
-      const dated = P.filter(p => p.target_launch_date && !p.target_tbc).sort((a, b) => a.target_launch_date.localeCompare(b.target_launch_date)).slice(0, 6);
-      if (!dated.length) up.appendChild(el('p', null, 'No projects have a confirmed launch date.'));
-      else { const l = el('ul', 'oxi-feed'); dated.forEach(p => { const d = daysTo(p.target_launch_date, today); const li = el('li'); const a = el('a', null, p.project_number + ' ' + p.title); a.href = 'project.html?id=' + p.id; li.append(a, el('p', d < 0 ? 'oxi-late' : null, dmy(p.target_launch_date) + (d < 0 ? ' (' + (-d) + ' days past)' : ' (in ' + d + ' days)'))); l.appendChild(li); }); up.appendChild(l); }
-      grid.append(pipe, up);
-      box.appendChild(grid);
-
-      // table
-      const tc = card('Active projects', 'dTab');
-      if (!P.length) tc.appendChild(el('p', null, 'No active projects.'));
-      else {
-        const t = el('table'); t.innerHTML = '<thead><tr><th scope="col">Project</th><th scope="col">Stage</th><th scope="col">Progress</th><th scope="col">Lead</th><th scope="col">Target</th><th scope="col">Status</th></tr></thead>';
-        const tb = el('tbody');
-        P.slice(0, 15).forEach(p => {
-          const tr = el('tr'); const c0 = el('td'); const a = el('a', null, p.project_number + ' ' + p.title); a.href = 'project.html?id=' + p.id; c0.appendChild(a);
-          const prog = el('td'); const b = el('span', 'oxi-bar'); for (let i = 1; i <= 8; i++) b.appendChild(el('i', i <= p.stages_done ? 'done' : (i === p.current_stage_no ? (p.overdue_stages ? 'late' : 'cur') : ''))); prog.append(b, document.createTextNode(' ' + p.stages_done + '/8'));
-          const st = el('td'); st.appendChild(rdBadge(p.status));
-          tr.append(c0, el('td', null, p.current_stage || 'All done'), prog, el('td', null, p.lead_name || '-'), el('td', null, p.target_tbc ? 'TBC' : (p.target_launch_date ? dmy(p.target_launch_date) : '-')), st);
-          tb.appendChild(tr);
-        });
-        t.appendChild(tb); tc.appendChild(t);
-        if (P.length > 15) { const m = el('p'); const a = el('a', null, 'See all ' + P.length + ' projects'); a.href = 'projects.html'; m.appendChild(a); tc.appendChild(m); }
-      }
-      box.appendChild(tc);
+      const sec = el('section'); sec.style.marginTop = '16px'; sec.id = 'cardsAnchor';
+      const h = el('h2', null, 'Projects'); h.style.margin = '0 0 10px'; h.style.fontSize = '18px';
+      const fb = el('div', 'filterbar'); fb.id = 'filterbar'; const pc = el('div', 'pcards'); pc.id = 'pcards';
+      sec.append(h, fb, pc); box.appendChild(sec);
+      renderCards(true);
     }
     load().catch(() => { $('message').textContent = 'Could not reach the server.'; $('message').className = 'error'; });
   </script>
