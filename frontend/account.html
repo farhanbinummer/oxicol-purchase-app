@@ -29,8 +29,8 @@
   <h3>Change password</h3>
   <form id="pwForm">
     <p><label>Current password<br><input id="current" type="password" required></label></p>
-    <p><label>New password<br><input id="next" type="password" required minlength="4"></label></p>
-    <p><label>Confirm new password<br><input id="confirm" type="password" required minlength="4"></label></p>
+    <p><label>New password<br><input id="next" type="password" required minlength="8" autocomplete="new-password"></label><br><small>At least 8 characters. Not a common password, and not your username or name.</small></p>
+    <p><label>Confirm new password<br><input id="confirm" type="password" required minlength="8" autocomplete="new-password"></label></p>
     <p><button type="submit" id="saveBtn">Change password</button></p>
   </form>
 
@@ -62,6 +62,8 @@
       if (d.success) show('Default workspace saved. You will land there when you sign in.', true); else show(d.error, false);
     });
 
+    if (new URLSearchParams(location.search).get('force')) show('Your password was set by an administrator. Choose your own password to continue.', false);
+
     document.getElementById('pwForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const next = document.getElementById('next').value;
@@ -73,7 +75,7 @@
         new_password: next
       });
       btn.disabled = false;
-      if (d.success) { show('Password changed', true); document.getElementById('pwForm').reset(); }
+      if (d.success) { show('Password changed', true); document.getElementById('pwForm').reset(); if (new URLSearchParams(location.search).get('force')) setTimeout(() => { location.href = 'index.html'; }, 900); }
       else show(d.error, false);
     });
   </script>

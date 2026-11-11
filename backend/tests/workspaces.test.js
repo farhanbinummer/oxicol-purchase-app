@@ -435,10 +435,43 @@ test('administration: roles are managed with guards, scope validation and an aud
   assert.deepEqual(entry.rows[0].after_data.roles, ['purchase', 'qc']);
   const { otherActiveAdmin } = require('../routes/auth');
   assert.equal(await otherActiveAdmin({ query: async () => ({ rowCount: 0 }) }, 1), false, 'with no other active administrator the guard refuses');
+  await mkUser('spareadmin', ['admin']);          // a brand-new database has no other administrator, so the test brings its own
   assert.equal(await otherActiveAdmin(pool, me.admin.id), true, 'and allows a change while another active administrator remains');
   const created = await api(tok.admin, 'POST', '/api/auth/users', { username: `${TAG.toLowerCase()}_new`, name: 'Created in test', password: 'abcd1234', roles: ['store', 'qc'] });
   assert.equal(created.success, true);
   made.users.push(created.user_id);
   assert.equal(created.role, 'store');
   assert.equal((await pool.query('SELECT COUNT(*)::int n FROM user_roles WHERE user_id = $1', [created.user_id])).rows[0].n, 2);
+});
+
+test('passwords: a strong one is required, an administrator-set one is temporary, and nothing else works until the person chooses their own', async () => {
+  const username = `${TAG.toLowerCase()}_pw`;
+  const create = (password, uname) => api(tok.admin, 'POST', '/api/auth/users', { username: uname || username, name: 'Password test', password, role: 'store' });
+  for (const weak of ['1234', 'abc', 'password', 'Password', '12345678', '11111111', 'oxicol123', username]) {
+    const r = await create(weak); assert.equal(r.status, 400, `"${weak}" is refused`); assert.match(r.error, /at least 8 characters/);
+  }
+  const made1 = await create('Temp-Pass-91'); assert.equal(made1.success, true); made.users.push(made1.user_id);
+  // signing in works, and says the password is temporary
+  const login = (pw) => fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: pw }) }).then(r => r.json());
+  let l = await login('Temp-Pass-91'); assert.equal(l.success, true); assert.equal(l.user.must_change_password, true);
+  // until then only three calls work
+  const blocked = await api(l.token, 'GET', '/api/workspace/me');
+  assert.equal(blocked.status, 403); assert.equal(blocked.code, 'PASSWORD_CHANGE_REQUIRED', 'a temporary password blocks the rest of the app');
+  assert.equal((await api(l.token, 'GET', '/api/rd/projects')).code, 'PASSWORD_CHANGE_REQUIRED');
+  assert.equal((await api(l.token, 'GET', '/api/auth/me')).success, true, 'the person can still see who they are');
+  // choosing a new password: weak, unchanged and wrong-current are all refused
+  const change = (cur, next) => api(l.token, 'POST', '/api/auth/change-password', { current_password: cur, new_password: next });
+  assert.equal((await change('Temp-Pass-91', 'short')).status, 400, 'too short');
+  assert.equal((await change('Temp-Pass-91', 'Temp-Pass-91')).status, 400, 'must differ from the temporary one');
+  assert.equal((await change('wrong-current', 'Brand-New-Pass-7')).status, 400, 'the current password must be right');
+  assert.equal((await change('Temp-Pass-91', 'Brand-New-Pass-7')).success, true);
+  assert.equal((await api(l.token, 'GET', '/api/workspace/me')).success, true, 'after choosing their own password the app works');
+  l = await login('Brand-New-Pass-7'); assert.equal(l.success, true); assert.equal(l.user.must_change_password, false);
+  // an administrator's reset is temporary again, applies the same rule, and signs the person out everywhere
+  assert.equal((await api(tok.admin, 'PUT', `/api/auth/users/${made1.user_id}/password`, { new_password: '1234' })).status, 400, 'a reset must also be strong');
+  assert.equal((await api(tok.admin, 'PUT', `/api/auth/users/${made1.user_id}/password`, { new_password: 'Reset-Pass-5521' })).success, true);
+  assert.equal((await api(l.token, 'GET', '/api/auth/me')).status, 401, 'the reset signs them out');
+  assert.equal((await login('Reset-Pass-5521')).user.must_change_password, true);
+  // people who already existed are not forced to change anything
+  assert.equal((await pool.query("SELECT COUNT(*)::int n FROM users WHERE must_change_password AND username NOT LIKE $1", [TAG.toLowerCase() + '%'])).rows[0].n, 0, 'only accounts set up by an administrator in this run are marked');
 });

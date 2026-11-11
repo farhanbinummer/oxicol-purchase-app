@@ -1,0 +1,79 @@
+# Runs the whole test suite on every pull request and every push to main, against a brand-new PostgreSQL database.
+# A pull request cannot be trusted until this is green. (Set it as a required check in the repository's branch rules.)
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: oxicol
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_NAME: oxicol
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Build the base tables (the setup scripts, without their DROP/CREATE DATABASE lines)
+        run: |
+          sed '/^DROP DATABASE/d;/^CREATE DATABASE/d;/^\\c /d' database/db-setup.sql | psql -h localhost -U postgres -d oxicol -v ON_ERROR_STOP=1 -q
+          for f in schema-v2 schema-v3 schema-v4; do psql -h localhost -U postgres -d oxicol -v ON_ERROR_STOP=1 -q -f database/$f.sql; done
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Start the app once (creates the product tables and applies every migration)
+        working-directory: backend
+        run: |
+          PORT=3100 node server.js > ../server-boot.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 40); do
+            if curl -fs http://localhost:3100/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fs http://localhost:3100/api/health
+          kill $pid || true
+          grep -q "014_rd_stage_work_review" ../server-boot.log
+
+      - name: Unit tests
+        working-directory: backend
+        run: npm test
+
+      - name: R&D tests
+        working-directory: backend
+        run: npm run test:rd
+
+      - name: Workspace and permission tests
+        working-directory: backend
+        run: npm run test:workspaces
+
+      - name: Purchasing integration tests
+        working-directory: backend
+        run: npm run test:integration
+
+      - name: Show the app log if anything failed
+        if: failure()
+        run: cat server-boot.log || true

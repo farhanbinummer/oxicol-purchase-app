@@ -672,6 +672,34 @@ test('result forms: the owner chooses what comes back, the assignee fills exactl
   assert.ok(!log.includes(SAMPLE), 'the answers are not in the audit log');
 });
 
+test('notices: people are told about new tasks, work to review and work sent back, and each notice goes away once the step is taken', async () => {
+  const p = await newProject(tok.kannur);
+  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.lead });
+  const tomorrow = R.addDays(R.todayIST(), 2), TITLE = 'Notice task ' + TAG;
+  const notes = async (who) => (await api(tok[who], 'GET', '/api/workspace/notifications')).notifications || [];
+  const has = async (who, type) => (await notes(who)).some(n => n.type === type && n.text.includes(TITLE));
+  const mk = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: TITLE, assignee_id: uid.trainee, due_date: tomorrow, stage_no: 1 });
+  assert.equal(mk.status, 201);
+  assert.equal(await has('trainee', 'New task'), true, 'the person given a task is told, even before it is due');
+  assert.equal(await has('lead', 'New task'), false, 'the person who assigned it is not told about their own task');
+  assert.equal(await has('purchase', 'New task'), false, 'and nobody else is');
+  // handing it in tells the owner, and clears the trainee\'s notice
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${mk.id}/complete`, { result: 'Done and written up in full detail.' })).task_status, 'in_review');
+  assert.equal(await has('lead', 'Work to review'), true, 'the owner is told there is work to check');
+  assert.equal(await has('trainee', 'Work to review'), false, 'the person who did the work is not asked to review it');
+  assert.equal(await has('trainee', 'New task'), false, 'a task that has been handed in is no longer "new"');
+  // sending it back tells the trainee, with the reason
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${mk.id}/send-back`, { note: 'Add the batch number.' })).success, true);
+  assert.equal(await has('lead', 'Work to review'), false, 'the review notice is gone once it is sent back');
+  const back = (await notes('trainee')).find(n => n.type === 'Sent back' && n.text.includes(TITLE));
+  assert.ok(back && /Add the batch number/.test(back.text), 'the trainee is told what to change');
+  // resubmit and accept: every notice disappears
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${mk.id}/complete`, { result: 'Added the batch number B-22.' })).success, true);
+  assert.equal(await has('trainee', 'Sent back'), false);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${mk.id}/accept`, {})).success, true);
+  assert.equal(await has('lead', 'Work to review'), false, 'nothing is left waiting once the work is accepted');
+});
+
 test('my day: a person sees their open tasks, the tasks they handed out, the stages they own and what was just finished', async () => {
   const p = await newProject(tok.kannur);
   const d0 = await get(tok.lead, p.id);

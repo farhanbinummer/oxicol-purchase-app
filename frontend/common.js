@@ -81,6 +81,10 @@ function svgIcon(name, size) {
       init.headers = Object.assign({}, init.headers, { Authorization: 'Bearer ' + token });
     }
     const res = await realFetch(input, init);
+    if (res.status === 403 && url.startsWith('/api/') && page !== 'account.html') {
+      const j = await res.clone().json().catch(() => null);
+      if (j && j.code === 'PASSWORD_CHANGE_REQUIRED') { location.href = 'account.html?force=1'; return res; }
+    }
     if (res.status === 401 && url.startsWith('/api/')) {
       localStorage.removeItem('oxicol_token');
       localStorage.removeItem('oxicol_user');

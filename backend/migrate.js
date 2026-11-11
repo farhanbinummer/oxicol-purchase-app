@@ -467,6 +467,25 @@ const STEPS = [
       await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS result_schema JSONB');
       await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS result_data JSONB');
     }
+  },
+  {
+    // 1) A password an administrator sets (new account or reset) is temporary: the person must choose their own at first sign-in.
+    //    Existing accounts are not affected.
+    // 2) A brand-new database (built from this repository) had no base grants: the original ones were seeded by an older, one-off
+    //    step, so only administrators could do anything. If none of the five ORIGINAL roles (branch, production, store, purchase,
+    //    accounts) holds any ordinary permission (only R&D, catalogue or field keys, which later steps seed) the database is
+    //    fresh, and the defaults are seeded now. A database that already has grants (such as your live one) is never touched,
+    //    so nothing an administrator has edited can change.
+    name: '016_password_change_and_fresh_install_defaults',
+    async run(db) {
+      await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE');
+      const has = await db.query("SELECT 1 FROM role_permissions WHERE role = ANY($1) AND permission_key NOT LIKE 'rd.%' AND permission_key NOT LIKE 'catalog.%' AND permission_key NOT LIKE 'field.%' LIMIT 1", [LEGACY_ROLES]);
+      if (has.rowCount === 0) {
+        for (const [role, keys] of Object.entries(DEFAULTS)) {
+          for (const key of keys) await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
+        }
+      }
+    }
   }
 ];
 

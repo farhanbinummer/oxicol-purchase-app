@@ -55,7 +55,7 @@
         if (d.success) {
           localStorage.setItem('oxicol_token', d.token);
           localStorage.setItem('oxicol_user', JSON.stringify(d.user));
-          location.href = 'index.html';
+          location.href = d.user && d.user.must_change_password ? 'account.html?force=1' : 'index.html';
         } else {
           show(d.error, false);
         }
