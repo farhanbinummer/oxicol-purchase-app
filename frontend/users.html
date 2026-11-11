@@ -25,7 +25,7 @@
   <form id="userForm">
     <p><label>Username<br><input id="username" size="20" required placeholder="e.g. biju.store"></label></p>
     <p><label>Full name<br><input id="name" size="30" required></label></p>
-    <p><label>Password<br><input id="password" type="password" required></label></p>
+    <p><label>Temporary password<br><input id="password" type="password" required minlength="8" autocomplete="new-password"></label><br><small>At least 8 characters. The person must choose their own password the first time they sign in.</small></p>
     <p><label>Role<br>
       <select id="role" required>
         <option value="">-- Select role --</option>
@@ -93,7 +93,7 @@
         const resetBtn = document.createElement('button');
         resetBtn.textContent = 'Reset password';
         resetBtn.onclick = async () => {
-          const pw = prompt('New password for ' + u.name + ' (at least 4 characters):');
+          const pw = prompt('Temporary password for ' + u.name + ' (at least 8 characters; they must choose their own at next sign-in):');
           if (pw === null) return;
           const r = await api('/api/auth/users/' + u.id + '/password', 'PUT', { new_password: pw });
           if (r.success) { show('Password reset for ' + u.name, true); } else show(r.error, false);

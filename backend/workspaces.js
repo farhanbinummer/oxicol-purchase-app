@@ -750,6 +750,33 @@ BUILDERS.rd = async (ctx) => {
     responsible: 'You', due: ymdOf(t.due_date), overdue: t.days_late > 0, waiting_days: t.days_late > 0 ? t.days_late : null, progress: t.status === 'blocked' ? 'Blocked' : 'To do',
     next: { label: 'Open project', href: 'project.html?id=' + t.project_id }, tone: t.status === 'blocked' || t.days_late > 0 ? 'bad' : 'warn' })));
 
+  // What people are waiting for, so nobody has to remember to look: work handed back to you, new tasks for you, and work waiting for your review.
+  // (Each is built from the live record, so it disappears by itself once the step is taken. The number makes each one unique.)
+  const sentBack = await pool.query(
+    `SELECT t.id, t.title, t.review_note, t.project_id, p.project_number FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id
+      WHERE ${vis.clause} AND t.assignee_id = $1 AND t.status = 'in_progress' AND t.review_note IS NOT NULL ORDER BY t.id`, vis.params);
+  sentBack.rows.forEach(t => queue.push(task({
+    type: 'Sent back', number: `${t.project_number} - ${t.title}`, href: 'my-day.html', party: t.title, reason: `Your work was sent back: ${t.review_note}`,
+    responsible: 'You', progress: 'Sent back for changes', next: { label: 'Open My Day', href: 'my-day.html' }, tone: 'bad' })));
+  const fresh = await pool.query(
+    `SELECT t.id, t.title, t.due_date, t.project_id, p.project_number, cr.name AS by_name FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id LEFT JOIN users cr ON cr.id = t.created_by
+      WHERE ${vis.clause} AND t.assignee_id = $1 AND t.status = 'todo' AND t.created_at > NOW() - INTERVAL '3 days' AND (t.due_date IS NULL OR t.due_date > ${IST_TODAY})
+        AND t.created_by IS DISTINCT FROM $1 ORDER BY t.id DESC LIMIT 10`, vis.params);
+  fresh.rows.forEach(t => queue.push(task({
+    type: 'New task', number: `${t.project_number} - ${t.title}`, href: 'my-day.html', party: t.title, reason: `Assigned to you${t.by_name ? ' by ' + t.by_name : ''}${t.due_date ? ', due ' + nice(ymdOf(t.due_date)) : ''}`,
+    responsible: 'You', due: t.due_date ? ymdOf(t.due_date) : null, progress: 'To do', next: { label: 'Open My Day', href: 'my-day.html' }, tone: 'info' })));
+  if (ctx.can(KEYS.RD_EDIT)) {
+    const review = await pool.query(
+      `SELECT t.id, t.title, t.project_id, p.project_number, au.name AS by_name, (${IST_TODAY} - t.completed_at::date) AS waiting
+         FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id LEFT JOIN users au ON au.id = t.completed_by
+        WHERE ${vis.clause} AND t.status = 'in_review' AND t.assignee_id IS NOT NULL AND t.assignee_id <> $1
+          AND (t.created_by = $1 OR (t.stage_no IS NOT NULL AND EXISTS (SELECT 1 FROM rd_stages rs WHERE rs.project_id = t.project_id AND rs.stage_no = t.stage_no AND (rs.owner_user_id = $1 OR (rs.owner_user_id IS NULL AND p.lead_user_id = $1)))))
+        ORDER BY t.completed_at`, vis.params);
+    review.rows.forEach(t => queue.push(task({
+      type: 'Work to review', number: `${t.project_number} - ${t.title}`, href: 'my-day.html', party: t.title, reason: `${t.by_name || 'Someone'} handed in work for you to check`,
+      responsible: 'You', waiting_days: t.waiting, progress: 'Waiting for review', next: { label: 'Review', href: 'my-day.html#sReview' }, tone: 'warn' })));
+  }
+
   // A trainee's home is their own work: no "projects I lead", "requests to assess" or project-wide problems, which are for owners.
   if (ctx.access.roles.includes('rd_trainee') && !ctx.can(KEYS.RD_EDIT)) {
     return { cards: cards.filter(c => c.key === 'tasks'), actions: [{ label: 'My Day', href: 'my-day.html' }, { label: 'Open Projects', href: 'projects.html' }], queue, exceptions };

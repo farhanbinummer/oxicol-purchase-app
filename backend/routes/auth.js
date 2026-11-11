@@ -32,7 +32,21 @@ const PERMISSION_ROLES = ROLE_NAMES.filter(r => r !== 'admin'); // admin is neve
 /** The person as the browser keeps it: identity plus every role held. */
 async function publicUser(user) {
   const access = await loadAccess(pool, user.id);
-  return { id: user.id, username: user.username, name: user.name, role: user.role, branch: user.branch, roles: access.roles };
+  return { id: user.id, username: user.username, name: user.name, role: user.role, branch: user.branch, roles: access.roles, must_change_password: !!user.must_change_password };
+}
+
+const COMMON_PASSWORDS = ['password', 'password1', 'password123', '12345678', '123456789', '1234567890', '87654321', 'qwertyui', 'qwerty123', '11111111', '00000000', '99999999',
+  'oxicol123', 'oxicol@123', 'admin123', 'admin@123', 'welcome1', 'welcome123', 'letmein123'];
+/** Returns a message when the password is too weak, otherwise null. Applied wherever a password is set. */
+function passwordProblem(pw, username, name) {
+  const p = String(pw == null ? '' : pw);
+  const msg = 'Password must be at least 8 characters, not a common password, and not your username or name';
+  if (p.length < 8 || p.length > 200) return msg;
+  const low = p.toLowerCase();
+  if (COMMON_PASSWORDS.includes(low) || /^(.)\1+$/.test(p)) return msg;
+  if (username && low === String(username).toLowerCase()) return msg;
+  if (name && low === String(name).toLowerCase()) return msg;
+  return null;
 }
 
 /** True when another ACTIVE account would still hold the administrator role. */
@@ -125,13 +139,15 @@ router.get('/me', requireAuth, (req, res) => {
 router.post('/change-password', requireAuth, async (req, res) => {
   const current = (req.body && req.body.current_password) || '';
   const next = (req.body && req.body.new_password) || '';
-  if (next.length < 4) return fail(res, 400, 'New password must be at least 4 characters');
+  const weak = passwordProblem(next, req.user.username, req.user.name);
+  if (weak) return fail(res, 400, weak);
   try {
     const r = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
     const ok = await bcrypt.compare(current, r.rows[0].password_hash);
     if (!ok) return fail(res, 400, 'Current password is incorrect');
+    if (current === next) return fail(res, 400, 'Choose a password different from the current one');
     const hash = await bcrypt.hash(next, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.user.id]);
+    await pool.query('UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2', [hash, req.user.id]);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -171,7 +187,8 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
   if (!name) return fail(res, 400, 'Name is required');
   const problem = checkAccessRequest(roles, scopes);
   if (problem) return fail(res, 400, problem);
-  if (!b.password || String(b.password).length < 4) return fail(res, 400, 'Password must be at least 4 characters');
+  const weakPw = passwordProblem(b.password, username, name);
+  if (weakPw) return fail(res, 400, weakPw);
 
   const client = await pool.connect();
   try {
@@ -179,7 +196,7 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res) => {
     const hash = await bcrypt.hash(String(b.password), 10);
     const first = primaryRole(roles);
     const r = await client.query(
-      'INSERT INTO users (username, password_hash, name, role, branch) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+      'INSERT INTO users (username, password_hash, name, role, branch, must_change_password) VALUES ($1,$2,$3,$4,$5,TRUE) RETURNING id',
       [username, hash, name, first, first === 'branch' ? scopes.branch[0] : null]);
     const primary = await applyAccess(client, r.rows[0].id, roles, scopes);
     await audit(client, req, { action: 'user.create', entity: 'user', id: r.rows[0].id, summary: `Account ${username} created with role${roles.length > 1 ? 's' : ''} ${roles.join(', ')}`, after: { username, roles, scopes } });
@@ -345,10 +362,11 @@ router.put('/users/:id/password', requireAuth, requireRole('admin'), async (req,
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid user id');
   const next = (req.body && req.body.new_password) || '';
-  if (next.length < 4) return fail(res, 400, 'New password must be at least 4 characters');
+  const weakReset = passwordProblem(next);
+  if (weakReset) return fail(res, 400, weakReset);
   try {
     const hash = await bcrypt.hash(next, 10);
-    const r = await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id', [hash, id]);
+    const r = await pool.query('UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2 RETURNING id', [hash, id]);
     if (r.rowCount === 0) return fail(res, 404, 'User not found');
     await pool.query('DELETE FROM sessions WHERE user_id = $1', [id]);
     res.json({ success: true, user_id: id });

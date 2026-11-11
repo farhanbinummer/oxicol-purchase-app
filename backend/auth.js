@@ -31,7 +31,7 @@ async function requireAuth(req, res, next) {
   if (!token) return fail(res, 401, 'Not logged in');
   try {
     const r = await pool.query(
-      `SELECT u.id, u.username, u.name, u.role, u.branch, u.active, s.expires_at
+      `SELECT u.id, u.username, u.name, u.role, u.branch, u.active, u.must_change_password, s.expires_at
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token = $1`, [token]);
     if (r.rowCount === 0) return fail(res, 401, 'Session not found - please log in again');
@@ -41,10 +41,14 @@ async function requireAuth(req, res, next) {
       return fail(res, 401, 'Session expired - please log in again');
     }
     if (!row.active) return fail(res, 403, 'This account has been disabled');
+    // A password set by an administrator is temporary: until the person chooses their own, only these three calls work.
+    if (row.must_change_password && !['/api/auth/change-password', '/api/auth/logout', '/api/auth/me'].includes(req.originalUrl.split('?')[0])) {
+      return res.status(403).json({ success: false, code: 'PASSWORD_CHANGE_REQUIRED', error: 'Choose your own password before you continue' });
+    }
     // Roles, scope and granted actions are read on every request, so a change made by an administrator
     // (a role removed, a permission revoked) applies to the very next call, without anyone signing out.
     req.access = await loadAccess(pool, row.id);
-    req.user = { id: row.id, username: row.username, name: row.name, role: row.role, branch: row.branch, roles: req.access.roles };
+    req.user = { id: row.id, username: row.username, name: row.name, role: row.role, branch: row.branch, roles: req.access.roles, must_change_password: !!row.must_change_password };
     next();
   } catch (err) {
     console.error('Auth check failed:', err);
