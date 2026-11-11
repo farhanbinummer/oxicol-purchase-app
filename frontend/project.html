@@ -42,10 +42,15 @@
     const pid = Number(new URLSearchParams(location.search).get('id'));
     let D = null, meta = null, people = [], dirtyAssess = false, lastFocus = null;
 
-    const TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']];
+    const TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['in_review', 'In review'], ['done', 'Done']];
+    const TASK_LABEL = Object.fromEntries(TASK_STATUS.concat([['cancelled', 'Cancelled']]));
     // a task is finished only with "Complete task", which asks for the result; the status boxes never set Done directly
-    const TASK_OPEN_STATUS = TASK_STATUS.filter(x => x[0] !== 'done');
+    const TASK_OPEN_STATUS = TASK_STATUS.filter(x => ['todo', 'in_progress', 'blocked'].includes(x[0]));
+    const TASK_MOVE = TASK_STATUS.filter(x => x[0] !== 'in_review');        // 'In review' is reached only by handing the work in
     const canFinish = (tk) => D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id);
+    // the person who did the work cannot review it; reviewers are R&D people with edit rights
+    const canReview = (tk) => D.can.edit && tk.status === 'in_review' && D.me_id !== tk.assignee_id;
+    const submitsForReview = (tk) => tk.requires_review && tk.assignee_id === D.me_id;
     let closeTaskPanel = null;
     const APPROVAL_ROWS = ['rd_head', 'management', 'qc_signoff', 'customer', 'handover_ack'];
     const DECISION_TEXT = { approved: 'Approved', rejected: 'Rejected', returned: 'Returned for more information', submitted: 'Submitted' };
@@ -235,10 +240,18 @@
         const ta = el('textarea'); ta.id = id; ta.rows = 3; ta.maxLength = 2000; ta.value = ci.result || '';
         const hint = el('div', 'oxi-section-note', 'Saved under your name with the date. Only people with R&D technical access can read it. Up to 2000 characters.'); hint.style.margin = '2px 0 6px';
         const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+        // a result written by someone doing part of this item can be used here, then edited
+        const fromTasks = D.tasks.filter(t => t.checklist_item_id === ci.id && t.status === 'done' && t.result);
+        let useBox = null;
+        if (fromTasks.length) {
+          const sel = select(fromTasks.map(t => [t.id, (t.assignee_name || 'Task') + ': ' + t.title]), '', 'Use the result from a finished task...'); sel.setAttribute('aria-label', 'Use the result from a finished task');
+          sel.onchange = () => { const t = fromTasks.find(x => String(x.id) === sel.value); if (t) { ta.value = (ta.value ? ta.value.trim() + '\n\n' : '') + t.assignee_name + ' (' + t.title + '): ' + t.result; ta.focus(); } sel.value = ''; };
+          useBox = el('div'); useBox.style.margin = '0 0 6px'; useBox.appendChild(sel);
+        }
         const row = el('div', 'row');
         const save = el('button', null, ci.done ? 'Save result' : 'Save and tick'); save.type = 'submit';
         const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { closeForm(true); cb.focus(); };
-        row.append(save, cancel); formBox.append(l, ta, hint, err, row);
+        row.append(save, cancel); formBox.append(l, ta); if (useBox) formBox.appendChild(useBox); formBox.append(hint, err, row);
         ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeForm(true); cb.focus(); } });
         formBox.addEventListener('submit', async (ev) => {
           ev.preventDefault(); if (save.disabled) return;
@@ -271,11 +284,39 @@
       } else if (ci.done && ci.needs_result) {
         li.appendChild(el('div', 'oxi-ci-meta', 'No result recorded (ticked before results were kept).'));
       }
+      const linked = D.tasks.filter(t => t.checklist_item_id === ci.id && t.status !== 'cancelled');
+      if (linked.length) li.appendChild(el('div', 'oxi-ci-links', 'Assigned: ' + linked.map(t => t.title + ' - ' + (t.assignee_name || '-') + ' (' + (TASK_LABEL[t.status] || t.status) + ')').join('; ')));
+      if (D.can.edit && !ci.done) { const ab = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Assign'); ab.type = 'button'; ab.setAttribute('aria-label', 'Assign to someone: ' + ci.label); ab.onclick = () => assignWorkDialog(stageNo, ci.id); li.appendChild(ab); }
       if (D.can.edit && canWrite && ci.done && ci.needs_result) {
         const b = el('button', 'oxi-btn-secondary oxi-btn-sm', ci.result ? 'Edit result' : 'Add result'); b.type = 'button';
         b.setAttribute('aria-label', (ci.result ? 'Edit result: ' : 'Add result: ') + ci.label); b.onclick = () => openForm(); li.appendChild(b);
       }
       return li;
+    }
+
+    /** What the stage owner has handed to other people, how far it has got, and the review buttons. */
+    function assignedWorkBlock(stageNo) {
+      const stage = D.stages[stageNo - 1], w = stage.work || { total: 0, done: 0, in_review: 0, overdue: 0, people: [] };
+      const box = el('section', 'oxi-work'); box.setAttribute('aria-labelledby', 'awH');
+      const h = el('h3'); h.id = 'awH'; h.appendChild(document.createTextNode('Assigned work'));
+      if (w.total) h.appendChild(el('span', 'roll', w.done + ' of ' + w.total + ' done' + (w.in_review ? ', ' + w.in_review + ' waiting for review' : '') + (w.overdue ? ', ' + w.overdue + ' overdue' : '') + (w.people.length ? ' - ' + w.people.join(', ') : '')));
+      box.appendChild(h);
+      const tasks = D.tasks.filter(t => t.stage_no === stageNo && t.status !== 'cancelled');
+      if (!tasks.length) box.appendChild(el('p', 'oxi-section-note', 'Nothing assigned yet.' + (D.can.edit ? ' Hand part of this stage to someone, for example a trainee.' : '')));
+      else {
+        const ul = el('ul');
+        tasks.forEach(t => {
+          const li = el('li', t.status === 'in_review' ? 'review' : t.status === 'done' ? 'done' : isLate(t) ? 'late' : '');
+          const g = el('div', 'grow'); const b = el('button', 'oxi-linkbtn', t.title); b.type = 'button'; b.onclick = () => taskPanel(t, b); g.appendChild(b);
+          g.appendChild(el('small', null, [t.checklist_label ? 'for "' + t.checklist_label + '"' : null, t.assignee_name || 'Unassigned', t.due_date ? 'due ' + dmy(t.due_date) : null, TASK_LABEL[t.status] || t.status].filter(Boolean).join(' - ')));
+          li.appendChild(g);
+          if (canReview(t)) { const rv = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Review'); rv.type = 'button'; rv.setAttribute('aria-label', 'Review: ' + t.title); rv.onclick = () => taskPanel(t, rv); li.appendChild(rv); }
+          ul.appendChild(li);
+        });
+        box.appendChild(ul);
+      }
+      if (D.can.edit) { const a = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Assign part of this stage'); a.type = 'button'; a.onclick = () => assignWorkDialog(stageNo); box.appendChild(a); }
+      return box;
     }
 
     function nextStepCard() {
@@ -319,6 +360,7 @@
       const ul = el('ul', 'oxi-checklist'); ul.setAttribute('aria-label', 'Stage ' + n.stage + ' checklist');
       n.checklist.forEach(ci => ul.appendChild(checklistItem(ci, n.stage)));
       c.appendChild(ul);
+      c.appendChild(assignedWorkBlock(n.stage));
       if (n.missing.length) { const m = el('div', 'oxi-missing'); m.append(document.createTextNode('Before this stage can be completed:')); const mu = el('ul'); n.missing.forEach(t => mu.appendChild(el('li', null, t))); m.appendChild(mu); c.appendChild(m); }
       if (D.can.stage) { const b = el('button', null, 'Mark stage ' + n.stage + ' done'); b.type = 'button'; b.onclick = () => completeStageDialog(stage); c.appendChild(b); }
       else c.appendChild(el('p', 'oxi-section-note', 'Completing a stage needs the stage permission and edit access to this project.'));
@@ -638,8 +680,8 @@
 
     // ------------------------------------------------------------------ summary cards and attention panel
     function daysBetween(a, b) { return Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 86400000); }
-    const isOpen = (t) => t.status !== 'done';
-    const isLate = (t) => isOpen(t) && t.due_date && t.due_date < D.today;
+    const isOpen = (t) => !['done', 'cancelled'].includes(t.status);
+    const isLate = (t) => isOpen(t) && t.status !== 'in_review' && t.due_date && t.due_date < D.today;      // work waiting for review is not late
 
     function sumCard(title, id) { const c = el('article', 'oxi-sum'); c.setAttribute('aria-labelledby', id); const h = el('h3', null, title); h.id = id; c.appendChild(h); return c; }
 
@@ -652,9 +694,9 @@
       body.appendChild(t); c.appendChild(body); return c;
     }
     function tasksCard() {
-      const done = D.tasks.filter(t => !isOpen(t)).length, open = D.tasks.filter(isOpen), late = open.filter(isLate).length, onTrack = open.length - late;
+      const live = D.tasks.filter(t => t.status !== 'cancelled'), done = live.filter(t => t.status === 'done').length, open = live.filter(isOpen), inRev = open.filter(t => t.status === 'in_review').length, late = open.filter(isLate).length, onTrack = open.length - late - inRev;
       const c = sumCard('Tasks', 'sumT');
-      if (!D.tasks.length) {
+      if (!live.length) {
         c.appendChild(el('p', 'oxi-sumbig', 'No tasks yet'));
         c.appendChild(el('p', 'oxi-sum-note', 'Tasks are the smaller jobs inside this project.'));
         if (D.can.create_task) { const b = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Add a task'); b.type = 'button'; b.onclick = () => setTab('list', true); c.appendChild(b); }
@@ -662,9 +704,9 @@
       }
       const big = el('p', 'oxi-sumbig'); big.append(document.createTextNode(plural(open.length, 'open task')));
       const sub = el('p', 'oxi-sum-note' + (late ? ' bad' : ''), late ? plural(late, 'task') + ' overdue' : 'None overdue'); if (late) sub.prepend(icon('alert', 14), document.createTextNode(' '));
-      c.append(big, sub, stackBar([{ value: done, cls: 'ok' }, { value: onTrack, cls: 'info' }, { value: late, cls: 'bad' }], 'Tasks: ' + done + ' done, ' + onTrack + ' open and on track, ' + late + ' overdue'));
+      c.append(big, sub, stackBar([{ value: done, cls: 'ok' }, { value: inRev, cls: 'warn' }, { value: onTrack, cls: 'info' }, { value: late, cls: 'bad' }], 'Tasks: ' + done + ' done, ' + inRev + ' waiting for review, ' + onTrack + ' open and on track, ' + late + ' overdue'));
       const lg = el('ul', 'oxi-legend');
-      [['ok', 'Done', done], ['info', 'On track', onTrack], ['bad', 'Overdue', late]].forEach(([k, l, v]) => { const li = el('li'); li.append(el('i', k), document.createTextNode(l + ' '), el('b', null, String(v))); lg.appendChild(li); });
+      [['ok', 'Done', done], ['warn', 'In review', inRev], ['info', 'On track', onTrack], ['bad', 'Overdue', late]].forEach(([k, l, v]) => { const li = el('li'); li.append(el('i', k), document.createTextNode(l + ' '), el('b', null, String(v))); lg.appendChild(li); });
       c.appendChild(lg); return c;
     }
     function launchCard() {
@@ -694,6 +736,7 @@
       D.stages.filter(s => s.overdue).forEach(s => items.push({ sev: 'bad', icon: 'clock', tag: 'Overdue', title: 'Stage ' + s.no + ': ' + s.name, detail: plural(s.delay, 'day') + ' overdue (planned ' + dmy(s.planned) + ')', act: D.can.edit ? { label: 'Edit dates', run: () => stageEditDialog(s) } : null }));
       D.stages.filter(s => s.review_flag).forEach(s => items.push({ sev: 'warn', icon: 'alert', tag: 'Needs review', title: 'Stage ' + s.no + ': ' + s.name, detail: s.review_flag, act: null }));
       if (!D.lead && D.next_step && !D.next_step.owner) items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: 'No project lead assigned', detail: 'Stages without a named owner have nobody accountable.', act: D.can.edit ? { label: 'Assign owner', run: focusLead } : null });
+      D.tasks.filter(t => t.status === 'in_review').forEach(t => items.push({ sev: 'warn', icon: 'check', tag: 'To review', title: t.title, detail: (t.completed_by_name || t.assignee_name || 'Someone') + ' handed in work' + (t.checklist_label ? ' for "' + t.checklist_label + '"' : ''), act: canReview(t) ? { label: 'Review', task: t } : null }));
       D.tasks.filter(t => t.status === 'blocked').forEach(t => items.push({ sev: 'warn', icon: 'stop', tag: 'Blocked', title: t.title, detail: 'Task is blocked' + (t.assignee_name ? ' - ' + t.assignee_name : ''), act: { label: 'Open task', task: t } }));
       D.tasks.filter(isLate).forEach(t => items.push({ sev: 'bad', icon: 'tasks', tag: 'Overdue', title: t.title, detail: plural(daysBetween(t.due_date, D.today), 'day') + ' overdue' + ' - ' + (t.assignee_name || 'Unclaimed'), act: { label: 'Open task', task: t } }));
       D.tasks.filter(t => isOpen(t) && !t.assignee_id).forEach(t => items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: t.title, detail: 'Nobody has claimed this task' + (t.team ? ' (' + t.team + ' team)' : ''), act: D.can.edit ? { label: 'Assign owner', task: t } : null }));
@@ -749,6 +792,11 @@
           const c4 = el('td'); c4.appendChild(prioBadge(tk.priority));
           const c5 = el('td');
           if (tk.status === 'done') { c5.appendChild(el('span', 'badge badge-good', 'Done')); const sm = el('small', null, tk.completed_by_name ? 'by ' + tk.completed_by_name : ''); sm.style.display = 'block'; c5.appendChild(sm); }
+          else if (tk.status === 'cancelled') c5.appendChild(el('span', 'badge badge-neutral', 'Cancelled'));
+          else if (tk.status === 'in_review') {
+            c5.appendChild(el('span', 'badge badge-warn', 'In review'));
+            if (canReview(tk)) { const rv = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Review'); rv.type = 'button'; rv.setAttribute('aria-label', 'Review: ' + tk.title); rv.onclick = () => taskPanel(tk, rv); c5.append(document.createTextNode(' '), rv); }
+          }
           else {
             const sel = select(TASK_OPEN_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Status of task: ' + tk.title);
             sel.disabled = !canFinish(tk);
@@ -759,7 +807,7 @@
               note('Task updated.', true); load(true);
             };
             c5.appendChild(sel);
-            if (canFinish(tk)) { const cb = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Complete'); cb.type = 'button'; cb.setAttribute('aria-label', 'Complete task: ' + tk.title); cb.onclick = () => completeTaskDialog(tk); c5.append(document.createTextNode(' '), cb); }
+            if (canFinish(tk)) { const cb = el('button', 'oxi-btn-secondary oxi-btn-sm', submitsForReview(tk) ? 'Submit' : 'Complete'); cb.type = 'button'; cb.setAttribute('aria-label', (submitsForReview(tk) ? 'Submit for review: ' : 'Complete task: ') + tk.title); cb.onclick = () => completeTaskDialog(tk); c5.append(document.createTextNode(' '), cb); }
           }
           tr.append(c0, c1, c2, c3, c4, c5); tb.appendChild(tr);
         });
@@ -771,17 +819,86 @@
 
     // ------------------------------------------------------------------ completing and reopening a task
     function completeTaskDialog(tk) {
-      let ta;
-      dialog('Complete task: ' + tk.title, (body) => {
+      let ta; const submit = submitsForReview(tk);
+      dialog((submit ? 'Submit for review: ' : 'Complete task: ') + tk.title, (body) => {
         ta = el('textarea'); ta.rows = 5; ta.maxLength = 2000;
-        body.appendChild(field('What was the result? What was done or found?', ta, 'ctRes', 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.'));
+        if (tk.review_note) { const sb = el('div', 'oxi-flag'); sb.append(icon('alert', 15), document.createTextNode(' Sent back: ' + tk.review_note)); body.appendChild(sb); }
+        body.appendChild(field('What was the result? What was done or found?', ta, 'ctRes', submit
+          ? 'Saved under your name with today\'s date. Someone else checks it before it counts as done. At least 10 characters.'
+          : 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.'));
         return () => ({ result: ta.value });
-      }, 'Complete task', async (a, errBox) => {
+      }, submit ? 'Submit for review' : 'Complete task', async (a, errBox) => {
         if (a.result.trim().length < 10) { errBox.textContent = 'Write what was done or found (at least 10 characters).'; errBox.hidden = false; ta.focus(); return false; }
         const r = await api('/api/rd/tasks/' + tk.id + '/complete', 'POST', { result: a.result, version: tk.version });
         if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }          // the typed text stays in the box
         if (closeTaskPanel) closeTaskPanel();
-        note('Task completed.', true); load(true); return true;
+        note(r.task_status === 'in_review' ? 'Submitted. It is waiting for review.' : 'Task completed.', true); load(true); return true;
+      });
+    }
+    /** Review: accept the work, or send it back with a comment. The person who did it cannot review it. */
+    function acceptTaskDialog(tk) {
+      let ta;
+      dialog('Accept: ' + tk.title, (body) => {
+        body.appendChild(resultBlock(tk));
+        ta = el('textarea'); ta.rows = 2; ta.maxLength = 500;
+        body.appendChild(field('Comment (optional)', ta, 'acNote'));
+        return () => ({ note: ta.value });
+      }, 'Accept work', async (a, errBox) => {
+        const r = await api('/api/rd/tasks/' + tk.id + '/accept', 'POST', { note: a.note });
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }
+        if (closeTaskPanel) closeTaskPanel();
+        note('Accepted. The task is done.', true); load(true); return true;
+      });
+    }
+    function sendBackDialog(tk) {
+      let ta;
+      dialog('Send back: ' + tk.title, (body) => {
+        ta = el('textarea'); ta.rows = 3; ta.maxLength = 500;
+        body.appendChild(field('What needs to change?', ta, 'sbNote', 'They see this and can submit again. Their first result stays in the history.'));
+        return () => ({ note: ta.value });
+      }, 'Send back', async (a, errBox) => {
+        if (!a.note.trim()) { errBox.textContent = 'Say what needs to change.'; errBox.hidden = false; ta.focus(); return false; }
+        const r = await api('/api/rd/tasks/' + tk.id + '/send-back', 'POST', { note: a.note });
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }
+        if (closeTaskPanel) closeTaskPanel();
+        note('Sent back.', true); load(true); return true;
+      });
+    }
+    function cancelTaskDialog(tk) {
+      let ta;
+      dialog('Cancel task: ' + tk.title, (body) => {
+        ta = el('textarea'); ta.rows = 3; ta.maxLength = 500;
+        body.appendChild(field('Why is it no longer needed?', ta, 'cnWhy', 'The reason stays on the record. A cancelled task no longer blocks the stage.'));
+        return () => ({ reason: ta.value });
+      }, 'Cancel task', async (a, errBox) => {
+        if (!a.reason.trim()) { errBox.textContent = 'Give a reason.'; errBox.hidden = false; ta.focus(); return false; }
+        const r = await api('/api/rd/tasks/' + tk.id + '/cancel', 'POST', { reason: a.reason });
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }
+        if (closeTaskPanel) closeTaskPanel();
+        note('Task cancelled.', true); load(true); return true;
+      }, { cancelLabel: 'Keep task' });
+    }
+    /** The stage owner hands part of a stage to another person (for example a trainee), optionally for one checklist item. */
+    function assignWorkDialog(stageNo, itemId) {
+      let f;
+      const stage = D.stages[stageNo - 1];
+      dialog('Assign part of stage ' + stageNo, (body) => {
+        f = {
+          title: el('input'), desc: el('textarea'), who: select(personOptions(), '', 'Choose a person'), due: dateInput(''), prio: select(meta.lists.priorities, 'Medium'),
+          item: select(stage.checklist.map(c => [c.id, c.label]), itemId || '', 'Not tied to one item'), rev: el('input')
+        };
+        f.title.type = 'text'; f.title.maxLength = 250; f.desc.rows = 3; f.desc.maxLength = 4000; f.rev.type = 'checkbox';
+        body.append(field('What should they do?', f.title, 'awT'), field('Instructions', f.desc, 'awD', 'Say how, with what, and what you expect back. They only see what you write here.'),
+          field('Responsible person *', f.who, 'awW', 'They join the project team and see this on their day.'), field('Due date *', f.due, 'awU'), field('Checklist item', f.item, 'awI', 'The result they record can then be used for that item.'), field('Priority', f.prio, 'awP'));
+        const w = el('div'); const l = el('label'); l.append(f.rev, document.createTextNode(' Someone else checks this work before it counts as done')); w.appendChild(l);
+        const h = el('div', 'oxi-section-note', 'Always on for a trainee.'); h.style.margin = '2px 0 0'; w.appendChild(h); body.appendChild(w);
+        return () => ({ title: f.title.value, description: f.desc.value, assignee_id: f.who.value, due_date: f.due.value, priority: f.prio.value, checklist_item_id: f.item.value || null, requires_review: f.rev.checked });
+      }, 'Assign', async (a, errBox) => {
+        const need = !a.title.trim() ? 'Say what they should do.' : !a.assignee_id ? 'Choose who is responsible.' : !a.due_date ? 'Give a due date.' : '';
+        if (need) { errBox.textContent = need; errBox.hidden = false; return false; }
+        const r = await api('/api/rd/projects/' + pid + '/tasks', 'POST', { ...a, stage_no: stageNo });
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }
+        note('Assigned.', true); load(true); return true;
       });
     }
     function reopenTaskDialog(tk) {
@@ -801,7 +918,8 @@
     function resultBlock(tk) {
       const b = el('div', 'oxi-result');
       b.append(el('strong', null, 'Result'), el('p', null, tk.result || 'No result recorded (completed before results were kept).'));
-      b.appendChild(el('div', 'oxi-ci-meta', 'Completed by ' + (tk.completed_by_name || '-') + (tk.completed_at ? ' on ' + dmy(String(tk.completed_at).slice(0, 10)) : '')));
+      b.appendChild(el('div', 'oxi-ci-meta', (tk.status === 'in_review' ? 'Handed in by ' : 'Completed by ') + (tk.completed_by_name || '-') + (tk.completed_at ? ' on ' + dmy(String(tk.completed_at).slice(0, 10)) : '')));
+      if (tk.reviewed_by_name) b.appendChild(el('div', 'oxi-ci-meta', 'Accepted by ' + tk.reviewed_by_name + (tk.reviewed_at ? ' on ' + dmy(String(tk.reviewed_at).slice(0, 10)) : '') + (tk.review_note ? ': ' + tk.review_note : '')));
       return b;
     }
 
@@ -819,11 +937,21 @@
       const x = el('button', 'oxi-btn-secondary', 'Close'); x.type = 'button'; x.onclick = close; head.append(h, x);
       const canAll = D.can.edit, canStatus = canAll || (tk.assignee_id && D.me_id === tk.assignee_id);
       const desc = el('p', null, tk.description || 'No description.');
-      if (tk.status === 'done') {                       // finished: locked, with its result and who completed it
-        const facts = el('p', 'oxi-section-note', 'Responsible: ' + (tk.assignee_name || '-') + ' - due ' + (tk.due_date ? dmy(tk.due_date) : '-') + ' - assigned by ' + (tk.assigned_by_name || '-'));
-        pn.append(head, desc, facts, resultBlock(tk));
-        if (D.can.edit) { const rb = el('button', 'oxi-btn-secondary', 'Reopen task'); rb.type = 'button'; rb.onclick = () => reopenTaskDialog(tk); pn.appendChild(rb); }
-        bg.appendChild(pn); document.body.appendChild(bg); x.focus(); return;
+      if (['done', 'in_review', 'cancelled'].includes(tk.status)) {          // locked: shown with its result and who did and checked it
+        const facts = el('p', 'oxi-section-note', 'Responsible: ' + (tk.assignee_name || '-') + ' - due ' + (tk.due_date ? dmy(tk.due_date) : '-') + ' - assigned by ' + (tk.assigned_by_name || '-') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : ''));
+        pn.append(head, desc, facts);
+        if (tk.status === 'cancelled') { const c = el('div', 'oxi-flag'); c.append(icon('stop', 15), document.createTextNode(' Cancelled: ' + (tk.cancel_reason || '-'))); pn.appendChild(c); }
+        else pn.appendChild(resultBlock(tk));
+        const row = el('div', 'row');
+        if (tk.status === 'in_review') {
+          if (canReview(tk)) {
+            const ac = el('button', null, 'Accept work'); ac.type = 'button'; ac.onclick = () => acceptTaskDialog(tk);
+            const sb = el('button', 'oxi-btn-secondary', 'Send back'); sb.type = 'button'; sb.onclick = () => sendBackDialog(tk); row.append(ac, sb);
+          } else pn.appendChild(el('p', 'oxi-section-note', D.me_id === tk.assignee_id ? 'Waiting for review. You will see it here when it is accepted or sent back.' : 'Waiting for review.'));
+        }
+        if (D.can.edit && ['done', 'cancelled'].includes(tk.status)) { const rb = el('button', 'oxi-btn-secondary', 'Reopen task'); rb.type = 'button'; rb.onclick = () => reopenTaskDialog(tk); row.appendChild(rb); }
+        if (D.can.edit && tk.status === 'in_review') { const cb = el('button', 'oxi-btn-secondary', 'Cancel task'); cb.type = 'button'; cb.onclick = () => cancelTaskDialog(tk); row.appendChild(cb); }
+        pn.appendChild(row); bg.appendChild(pn); document.body.appendChild(bg); x.focus(); return;
       }
       const status = select(TASK_OPEN_STATUS, tk.status); status.disabled = !canStatus;
       const prio = select(meta.lists.priorities, tk.priority); prio.disabled = !canAll;
@@ -831,11 +959,12 @@
       const who = select(personOptions(), tk.assignee_id || '', tk.assignee_id ? null : 'Unclaimed'); who.disabled = !canAll;
       const form = el('form'); form.noValidate = true;
       form.append(field('Status', status, 'tpS'), field('Priority', prio, 'tpP'), field('Due date', due, 'tpD'), field('Accountable person', who, 'tpW'));
-      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
+      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : '') + (tk.requires_review ? ' - checked by someone else before it counts as done' : '') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const save = el('button', null, 'Save changes'); save.type = 'submit'; save.disabled = !canStatus;
-      const fin = el('button', 'oxi-btn-secondary', 'Complete task'); fin.type = 'button'; fin.disabled = !canFinish(tk); fin.onclick = () => completeTaskDialog(tk);
+      const fin = el('button', 'oxi-btn-secondary', submitsForReview(tk) ? 'Submit for review' : 'Complete task'); fin.type = 'button'; fin.disabled = !canFinish(tk); fin.onclick = () => completeTaskDialog(tk);
       const brow = el('div', 'row'); brow.append(save, fin);
+      if (D.can.edit) { const cn = el('button', 'oxi-btn-secondary', 'Cancel task'); cn.type = 'button'; cn.onclick = () => cancelTaskDialog(tk); brow.appendChild(cn); }
       form.append(err, brow);
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault(); if (save.disabled) return;
@@ -847,7 +976,9 @@
         if (!r.success) { fail(r, err); return; }
         close(); note('Task updated.', true); load(true);
       });
-      pn.append(head, desc, info, form); bg.appendChild(pn); document.body.appendChild(bg); status.focus();
+      pn.append(head, desc, info);
+      if (tk.review_note) { const sb = el('div', 'oxi-flag'); sb.append(icon('alert', 15), document.createTextNode(' Sent back: ' + tk.review_note)); pn.appendChild(sb); }
+      pn.append(form); bg.appendChild(pn); document.body.appendChild(bg); status.focus();
     }
 
     function taskForm() {
@@ -881,10 +1012,11 @@
       box.appendChild(intro);
       if (!D.tasks.length) { box.appendChild(el('p', null, 'No tasks yet. Add tasks from the List tab.')); return; }
       const cols = el('div', 'oxi-board');
-      const canMove = (tk) => tk.status !== 'done' && canFinish(tk);
+      const canMove = (tk) => !['done', 'in_review', 'cancelled'].includes(tk.status) && canFinish(tk);
       async function move(tk, to, card) {
         if (to === tk.status) return;
         if (to === 'done') { completeTaskDialog(tk); renderBoard(); return; }        // finishing a task asks for the result first
+        if (to === 'in_review') { note('Use Complete (or Submit) to hand work in for review.', false); renderBoard(); return; }
         const was = tk.status; card && card.setAttribute('aria-busy', 'true');
         const r = await api('/api/rd/tasks/' + tk.id, 'PATCH', { version: tk.version, status: to });
         if (!r.success) { fail(r); card && card.removeAttribute('aria-busy'); return; }
@@ -892,7 +1024,7 @@
       }
       TASK_STATUS.forEach(([key, label]) => {
         const col = el('section', 'oxi-col'); col.dataset.status = key; col.setAttribute('aria-label', label);
-        const list = D.tasks.filter(t => t.status === key);
+        const list = D.tasks.filter(t => t.status === key);              // cancelled tasks are kept in the List, not on the Board
         const h = el('h3'); h.append(document.createTextNode(label + ' '), el('span', 'count', String(list.length))); col.appendChild(h);
         col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('over'); });
         col.addEventListener('dragleave', () => col.classList.remove('over'));
@@ -912,7 +1044,11 @@
             if (tk.result) { const rs = el('div', 'oxi-result'); rs.style.margin = '6px 0 0'; rs.appendChild(el('p', null, tk.result.length > 120 ? tk.result.slice(0, 117) + '...' : tk.result)); card.appendChild(rs); }
             if (D.can.edit) { const rb = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Reopen'); rb.type = 'button'; rb.setAttribute('aria-label', 'Reopen task: ' + tk.title); rb.onclick = () => reopenTaskDialog(tk); card.appendChild(rb); }
           }
-          if (canMove(tk)) { const sel = select(TASK_STATUS, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Move to: ' + tk.title); sel.onchange = () => move(tk, sel.value, card); card.appendChild(sel); }
+          if (tk.status === 'in_review') {
+            card.appendChild(el('div', 'meta', 'Handed in by ' + (tk.completed_by_name || '-')));
+            if (canReview(tk)) { const rv = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Review'); rv.type = 'button'; rv.setAttribute('aria-label', 'Review: ' + tk.title); rv.onclick = () => taskPanel(tk, rv); card.appendChild(rv); }
+          }
+          if (canMove(tk)) { const sel = select(TASK_MOVE, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Move to: ' + tk.title); sel.onchange = () => move(tk, sel.value, card); card.appendChild(sel); }
           col.appendChild(card);
         });
         if (!list.length) col.appendChild(el('p', 'empty', 'Nothing here'));

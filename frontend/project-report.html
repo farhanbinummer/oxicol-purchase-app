@@ -79,6 +79,24 @@
         tr.append(r, el('td', null, ci.done ? (ci.done_by_name || '-') : '-'), el('td', null, ci.done ? when(ci.done_at) : '-')); tb.appendChild(tr);
       });
       t.appendChild(tb); sec.appendChild(t);
+      // work the stage owner handed to other people: who did it, what they found and who checked it
+      const work = D.tasks.filter(x => x.stage_no === s.no);
+      if (work.length) {
+        sec.appendChild(el('h3', null, 'Work assigned within this stage')); sec.lastChild.style.cssText = 'margin:14px 0 4px;font-size:15px';
+        const wt = el('table'); wt.innerHTML = '<thead><tr><th scope="col">Task</th><th scope="col">Responsible</th><th scope="col">Result</th><th scope="col">Checked by</th></tr></thead>';
+        const wb = el('tbody');
+        work.forEach(x => {
+          const tr = el('tr'); const c0 = el('td'); c0.appendChild(el('strong', null, x.title)); if (x.checklist_label) c0.appendChild(el('div', 'rep-muted', 'for "' + x.checklist_label + '"'));
+          const c1 = el('td', null, (x.assignee_name || '-') + (x.due_date ? ' (due ' + dmy(x.due_date) + ')' : ''));
+          const c2 = el('td');
+          if (x.status === 'cancelled') c2.appendChild(el('span', 'rep-muted', 'Cancelled: ' + (x.cancel_reason || '-')));
+          else if (x.result) c2.appendChild(el('div', 'rep-result', x.result));
+          else c2.appendChild(el('span', 'rep-muted', x.status === 'done' ? 'No result recorded (completed before results were kept)' : 'Not finished yet'));
+          const c3 = el('td', null, x.status === 'done' ? (x.reviewed_by_name ? x.reviewed_by_name + (x.review_note ? ': ' + x.review_note : '') : (x.requires_review ? '-' : 'Not required')) : x.status === 'in_review' ? 'Waiting for review' : '-');
+          tr.append(c0, c1, c2, c3); wb.appendChild(tr);
+        });
+        wt.appendChild(wb); sec.appendChild(wt);
+      }
       const kind = KIND_FOR_STAGE[s.no];
       if (kind) {
         const a = D.approvals.filter(x => x.kind === kind).pop();

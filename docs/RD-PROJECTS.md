@@ -53,6 +53,17 @@ Ticking a checklist item records **what was found**, not only that it was done.
 * **My Day** (`my-day.html`, `GET /api/rd/my-day`): the person's open tasks in Overdue, Today, Tomorrow and This week and later; the stages they own with checklist items left; tasks they assigned to other people ("Waiting on others"); and what was finished in the last 7 days with its result. It uses the same project visibility rules as the project list. Tasks completed before results existed show "No result recorded".
 * Migration `013_rd_task_results` adds `result` and `completed_by` to `rd_tasks` and creates `rd_task_history`. Nothing is dropped.
 
+## Splitting a big stage: assigned work, trainees and review
+
+* **The stage owner assigns part of a stage.** "Assign part of this stage" (or "Assign" beside one checklist item) creates a task tied to the stage and, optionally, to one checklist item of that stage. It needs a responsible person and a due date. The person is added to the project team automatically so they can open it.
+* **The stage shows its assigned work:** "3 of 5 done, 1 waiting for review, 1 overdue" and the people involved.
+* **Review.** A task that needs review is *handed in* by the person doing it ("Submit for review"); it becomes **In review** and is locked. Someone else with edit rights (the owner) **accepts** it, or **sends it back** with a comment. The person who did the work can never accept their own work. Review is always on for a trainee; for anyone else the person assigning chooses. The whole conversation (submitted, sent back, accepted) is kept in `rd_task_history`.
+* **Use the result.** When ticking a checklist item the owner can copy the result of a finished task tied to that item and edit it.
+* **A stage cannot be completed while assigned work is open** (To do, In progress, Blocked or In review). Finish it or **cancel it with a reason** (the reason stays on the record). A cancelled task can be reopened.
+* **R&D Trainee role.** Holds only `rd.view`: sees the projects they are on and their own tasks, can complete their own tasks, and gets no edit rights, no stage completion, no confidential lab content and no ability to assign work. It uses the R&D workspace. Create trainees under Administration > Users.
+* **Reports** list the work assigned within each stage, who did it, the result, and who checked it.
+* Migration `014_rd_stage_work_review` adds the task columns, the two new statuses (In review, Cancelled), the trainee role and its grant. Nothing is dropped.
+
 ## Permission matrix (defaults)
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.
