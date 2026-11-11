@@ -135,3 +135,48 @@ test('every checklist item needs a result except the two that are recorded as fo
   assert.equal(labels.filter(R.needsResult).length, 22);
   assert.ok(R.MAX_RESULT_LENGTH >= 1000);
 });
+
+test('result forms: every starter form is valid, definitions are cleaned, and bad ones are refused', () => {
+  for (const t of R.FORM_TEMPLATES) assert.equal(R.validateSchema(t).error, undefined, t.id + ' is a valid form');
+  assert.ok(R.FORM_TEMPLATES.length >= 7);
+  assert.match(R.validateSchema({ kind: 'form', fields: [] }).error, /at least one field/);
+  assert.match(R.validateSchema({ fields: [{ label: 'x', type: 'banana' }] }).error, /unknown type/);
+  assert.match(R.validateSchema({ fields: [{ label: 'Pick', type: 'choice', options: ['only one'] }] }).error, /between 2 and 20/);
+  assert.match(R.validateSchema({ fields: [{ label: 'n', type: 'number', min: 10, max: 5 }] }).error, /above the highest/);
+  assert.match(R.validateSchema({ fields: Array.from({ length: R.MAX_FORM_FIELDS + 1 }, (_, i) => ({ label: 'f' + i, type: 'text' })) }).error, /at most/);
+  assert.match(R.validateSchema({ kind: 'checklist', items: [{ label: '' }] }).error, /needs a description/);
+  assert.equal(R.validateSchema(null).error !== undefined, true);
+  // keys are made unique and unknown properties are dropped
+  const s = R.validateSchema({ fields: [{ label: 'Sample', type: 'text', evil: '<script>' }, { label: 'Sample', type: 'text' }] }).schema;
+  assert.deepEqual(s.fields.map(f => f.key), ['sample', 'sample_2']); assert.equal(s.fields[0].evil, undefined);
+});
+
+test('result forms: answers are checked against the form, ranges are flagged not blocked, and the summary is readable', () => {
+  const schema = R.validateSchema({ name: 'Viscosity', fields: [
+    { label: 'Viscosity', type: 'number', required: true, units: ['KU', 'cP'], min: 90, max: 95 }, { label: 'Colour', type: 'choice', required: true, options: ['Clear', 'Hazy'] },
+    { label: 'Defects', type: 'yesno', required: true }, { label: 'Checked on', type: 'date', required: false }, { label: 'Notes', type: 'longtext' }] }).schema;
+  const ok = { viscosity: '92,5', colour: 'Clear', defects: false };
+  const good = R.validateAnswers(schema, ok);
+  assert.equal(good.error, undefined); assert.equal(good.data.viscosity, 92.5, 'a decimal comma is understood'); assert.equal(good.data.viscosity_unit, 'KU', 'the first unit is the default'); assert.equal(good.data.defects, 'no');
+  assert.match(R.validateAnswers(schema, { ...ok, viscosity: '' }).error, /Viscosity is required/);
+  assert.match(R.validateAnswers(schema, { ...ok, viscosity: 'abc' }).error, /must be a number/);
+  assert.match(R.validateAnswers(schema, { ...ok, viscosity: Infinity }).error, /must be a number/);
+  assert.match(R.validateAnswers(schema, { ...ok, viscosity_unit: 'bar' }).error, /choose one of KU, cP/);
+  assert.match(R.validateAnswers(schema, { ...ok, colour: 'Purple' }).error, /choose one of the options/);
+  assert.match(R.validateAnswers(schema, { ...ok, defects: 'maybe' }).error, /yes or no/);
+  assert.match(R.validateAnswers(schema, { ...ok, checked_on: '31-02-2026' }).error, /valid date/);
+  assert.match(R.validateAnswers(schema, { ...ok, notes: 'x'.repeat(R.MAX_RESULT_LENGTH + 1) }).error, /too long/);
+  assert.equal(R.validateAnswers(schema, { ...ok, injected: 'x' }).data.injected, undefined, 'unknown answers are dropped');
+  assert.deepEqual(R.rangeFlags(schema, { viscosity: 92 }), { viscosity: 'within' });
+  assert.deepEqual(R.rangeFlags(schema, { viscosity: 98 }), { viscosity: 'above' });
+  assert.deepEqual(R.rangeFlags(schema, { viscosity: 80 }), { viscosity: 'below' });
+  const out = R.validateAnswers(schema, { ...ok, viscosity: 98 });
+  assert.equal(out.error, undefined, 'an out-of-range value is information, not an error');
+  assert.match(R.summarise(schema, out.data), /Viscosity: 98 KU \(outside the expected 90 to 95\)/);
+  assert.match(R.summarise(schema, out.data), /Defects: No/);
+  // checklist
+  const cl = R.validateSchema({ kind: 'checklist', items: ['Weigh resin', { label: 'Optional step', required: false }] }).schema;
+  assert.match(R.validateAnswers(cl, { items: {} }).error, /Tick "Weigh resin"/);
+  const c = R.validateAnswers(cl, { items: { weigh_resin: true }, note: 'fine' });
+  assert.equal(c.error, undefined); assert.equal(R.summarise(cl, c.data), '[x] Weigh resin\n[ ] Optional step\nNote: fine');
+});

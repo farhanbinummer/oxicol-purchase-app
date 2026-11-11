@@ -1329,3 +1329,20 @@ a.oxi-kpi-chip:hover { border-color: var(--accent); }
 .oxi-work li.review { border-left-color: var(--warn); } .oxi-work li.done { border-left-color: var(--success); } .oxi-work li.late { border-left-color: var(--danger); }
 .oxi-work li .grow { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; } .oxi-work li small { color: var(--text-2); display: block; }
 .oxi-ci-links { margin: 0 0 4px 26px; font-size: 13px; color: var(--text-2); }
+
+/* result forms */
+dialog.oxi-dlg textarea, dialog.oxi-dlg input[type=text], dialog.oxi-dlg input[type=date], dialog.oxi-dlg select { width: 100%; }
+.oxi-rform { display: grid; gap: var(--s3); margin: 0 0 var(--s2); }
+.oxi-rf > label { display: block; font-weight: 600; margin-bottom: 4px; }
+.oxi-rf-row { display: flex; gap: var(--s2); align-items: center; } .oxi-rf-row > input, .oxi-rf-row > textarea, .oxi-rf-row > select:first-child { flex: 1; min-width: 0; }
+.oxi-rf-row > select:not(:first-child) { width: auto; flex: none; } .oxi-rf-unit { color: var(--text-2); }
+.oxi-rf small { display: block; color: var(--text-2); font-size: 12.5px; margin-top: 3px; }
+.oxi-rtable { margin: 4px 0 0; display: grid; gap: 4px; } .oxi-rtable > div { display: grid; grid-template-columns: minmax(110px, 38%) 1fr; gap: 8px; font-size: 14px; }
+.oxi-rtable dt { color: var(--text-2); } .oxi-rtable dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
+.oxi-flagtag { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.oxi-flagtag.ok { background: var(--success-bg); color: var(--success); } .oxi-flagtag.bad { background: var(--danger-bg); color: var(--danger); }
+.oxi-fbuild { margin: 0 0 var(--s2); padding: var(--s3); border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.oxi-fbuild .frow { display: grid; grid-template-columns: minmax(130px, 1fr) 105px auto 38px; gap: 6px; align-items: center; margin: 0 0 6px; }
+.oxi-fbuild .frow.sub { grid-template-columns: 1fr 1fr 1fr; margin-left: 12px; } .oxi-fbuild .frow label { font-size: 13px; white-space: nowrap; }
+.oxi-fbuild .frow button { margin: 0; min-height: 34px; }
+@media (max-width: 520px) { .oxi-fbuild .frow { grid-template-columns: 1fr 1fr; } .oxi-fbuild .frow.sub { margin-left: 0; } }

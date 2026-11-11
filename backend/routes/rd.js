@@ -34,6 +34,8 @@ function ymd(v) {
 // statuses that still need someone's attention; done and cancelled are finished
 const OPEN_TASK = ['todo', 'in_progress', 'blocked', 'in_review'];
 const DATE_COLS = ['request_date', 'target_launch_date', 'completed_on', 'planned_date', 'actual_date', 'due_date', 'decision_date', 'action_date'];
+/** Adds 'within' / 'above' / 'below' for numbers that have an expected range, so every screen can show the same flag. */
+function withFlags(t) { if (t) t.range_flags = t.result_schema && t.result_data ? R.rangeFlags(t.result_schema, t.result_data) : null; return t; }
 function norm(row) { if (row) DATE_COLS.forEach(c => { if (c in row) row[c] = ymd(row[c]); }); return row; }
 const idOf = (x) => { const n = Number(x); return Number.isInteger(n) && n > 0 ? n : null; };
 const today = () => R.todayIST();
@@ -167,6 +169,7 @@ router.get('/meta', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), (req, 
     default_requirement_rows: R.DEFAULT_PERFORMANCE_ROWS,
     stages: R.STAGES.map(s => ({ no: s.no, name: s.name, days: s.days, needs: s.needs || null, checklist: s.checklist })),
     approval_labels: R.APPROVAL_LABELS,
+    form_templates: R.FORM_TEMPLATES, form_limits: { max_fields: R.MAX_FORM_FIELDS },
     can: {
       create: can(req.access, KEYS.RD_CREATE), view_all: can(req.access, KEYS.RD_VIEW_ALL), edit: can(req.access, KEYS.RD_EDIT),
       technical: can(req.access, KEYS.FIELD_RD_TECHNICAL)
@@ -267,7 +270,7 @@ router.get('/my-day', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), asyn
     const vis = visibleClause(req.access, req.user.id, 'p', 0);                // $1 is the person, $2-$4 their visibility
     const params = [...vis.params, ['Completed', 'Rejected']];                  // $5: closed statuses are left out
     const live = `p.is_draft = FALSE AND NOT (p.status = ANY($5)) AND ${vis.clause}`;
-    const cols = `t.id, t.title, t.status, t.priority, t.due_date, t.stage_no, t.project_id, t.completed_at, t.result, t.version, t.requires_review, t.review_note, t.checklist_item_id, ci.label AS checklist_label,
+    const cols = `t.id, t.title, t.description, t.result_schema, t.result_data, t.status, t.priority, t.due_date, t.stage_no, t.project_id, t.completed_at, t.result, t.version, t.requires_review, t.review_note, t.checklist_item_id, ci.label AS checklist_label,
                   p.project_number, p.title AS project_title, p.status AS project_status,
                   au.name AS assignee_name, cr.name AS assigned_by_name, cb.name AS completed_by_name`;
     const from = `FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id LEFT JOIN users au ON au.id = t.assignee_id
@@ -290,7 +293,7 @@ router.get('/my-day', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), asyn
       pool.query(`SELECT ${cols} ${from} WHERE t.assignee_id = $1 AND t.status = 'in_review' AND ${live} ORDER BY t.completed_at`, params),
       pool.query(`SELECT ${cols} ${from} WHERE t.status = 'in_review' AND t.assignee_id IS NOT NULL AND t.assignee_id <> $1 AND ${reviewer} AND ${live} ORDER BY t.completed_at`, params)
     ]);
-    const rows = (r) => r.rows.map(norm);
+    const rows = (r) => r.rows.map(x => withFlags(norm(x)));
     res.json({
       success: true, today: today(), mine: rows(mine), done_by_me: rows(doneByMe), assigned: rows(assigned), assigned_done: rows(assignedDone), submitted: rows(submitted), to_review: rows(toReview),
       stages: rows(stages).map(x => ({ ...x, stage_name: R.STAGES[x.stage_no - 1].name }))
@@ -402,7 +405,7 @@ async function detail(req, p, members, acc) {
     progress: { done: stages.filter(s => s.state === 'done').length, total: 8 },
     conflicts: R.findConflicts(lite, p.target_launch_date),
     next_step: cur && { stage: cur.no, name: cur.name, owner: cur.owner, due: cur.planned, overdue: cur.overdue, checklist: cur.checklist, missing: cur.missing },
-    tasks: tasks.rows.map(norm), updates: updates.rows, approvals: approvals.rows.map(norm),
+    tasks: tasks.rows.map(x => withFlags(norm(x))), updates: updates.rows, approvals: approvals.rows.map(norm),
     members: mem.rows, lead, favourite: fav.rows[0] ? fav.rows[0].favourite : false,
     can: { ...acc, create_task: acc.edit && !p.is_draft }
   };
@@ -897,6 +900,8 @@ router.post('/projects/:id/tasks', needPerm(KEYS.RD_EDIT), async (req, res) => {
   const t = readTask({ priority: 'Medium', ...(req.body || {}) });
   const problem = checkTask(t) || (!t.title ? 'A task needs a title' : null) || (!t.assignee_id ? 'Choose who is responsible for the task' : null) || (!t.due_date ? 'Give the task a due date' : null);
   if (problem) return fail(res, 400, problem);
+  let schema = null;                       // what should come back: a form, a checklist, or (none) free text
+  if (req.body && req.body.result_schema) { const v = R.validateSchema(req.body.result_schema); if (v.error) return fail(res, 400, v.error); schema = v.schema; }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -912,9 +917,9 @@ router.post('/projects/:id/tasks', needPerm(KEYS.RD_EDIT), async (req, res) => {
     const trainee = (await client.query("SELECT 1 FROM user_roles ur WHERE ur.user_id = $1 AND ur.role = 'rd_trainee' AND NOT EXISTS (SELECT 1 FROM user_roles x WHERE x.user_id = $1 AND x.role IN ('rd','admin'))", [t.assignee_id])).rowCount > 0;
     const review = trainee || t.requires_review === true;
     const r = await client.query(
-      `INSERT INTO rd_tasks (project_id, stage_no, checklist_item_id, title, description, priority, assignee_id, team, due_date, requires_review, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-      [o.p.id, t.stage_no || null, t.checklist_item_id || null, t.title, t.description || '', t.priority, t.assignee_id || null, t.assignee_id ? null : (t.team || null), t.due_date || null, review, req.user.id]);
+      `INSERT INTO rd_tasks (project_id, stage_no, checklist_item_id, title, description, priority, assignee_id, team, due_date, requires_review, created_by, result_schema)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING id`,
+      [o.p.id, t.stage_no || null, t.checklist_item_id || null, t.title, t.description || '', t.priority, t.assignee_id || null, t.assignee_id ? null : (t.team || null), t.due_date || null, review, req.user.id, schema ? JSON.stringify(schema) : null]);
     // the person doing the work must be able to open the project, so they join its team
     await client.query('INSERT INTO rd_project_members (project_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [o.p.id, t.assignee_id]);
     await addUpdate(client, o.p.id, 'system', req, `Task added: ${t.title}`, r.rows[0].id);
@@ -979,9 +984,6 @@ router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_E
   const b = req.body || {};
   const taskId = idOf(req.params.id);
   if (!taskId) return fail(res, 400, 'Invalid task id');
-  const text = String(b.result == null ? '' : b.result).trim();
-  if (text.length < R.MIN_TASK_RESULT_LENGTH) return fail(res, 400, `Write what was done or found (at least ${R.MIN_TASK_RESULT_LENGTH} characters)`);
-  if (text.length > R.MAX_RESULT_LENGTH) return fail(res, 400, `The result is too long (at most ${R.MAX_RESULT_LENGTH} characters)`);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -997,9 +999,20 @@ router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_E
     if (task.status === 'in_review') { await client.query('ROLLBACK'); return conflict(res, 'This task is already waiting for review.'); }
     if (task.status === 'cancelled') { await client.query('ROLLBACK'); return conflict(res, 'This task was cancelled.'); }
     if (b.version !== undefined && Number(b.version) !== task.version) { await client.query('ROLLBACK'); return conflict(res, 'This task was changed by someone else. Reload and try again.', { current_version: task.version }); }
+    // What comes back: the answers to the form the owner chose, or free text when the task has no form.
+    let text, answers = null;
+    if (task.result_schema) {
+      const v = R.validateAnswers(task.result_schema, b.data);
+      if (v.error) { await client.query('ROLLBACK'); return fail(res, 400, v.error); }
+      answers = v.data; text = R.summarise(task.result_schema, answers);
+    } else {
+      text = String(b.result == null ? '' : b.result).trim();
+      if (text.length < R.MIN_TASK_RESULT_LENGTH) { await client.query('ROLLBACK'); return fail(res, 400, `Write what was done or found (at least ${R.MIN_TASK_RESULT_LENGTH} characters)`); }
+      if (text.length > R.MAX_RESULT_LENGTH) { await client.query('ROLLBACK'); return fail(res, 400, `The result is too long (at most ${R.MAX_RESULT_LENGTH} characters)`); }
+    }
     // a task that needs review is handed in by the person doing it; someone else with edit rights (the owner) can close it directly
     const submit = task.requires_review && task.assignee_id === req.user.id;
-    await client.query(`UPDATE rd_tasks SET status = $4, completed_at = NOW(), completed_by = $1, result = $2, review_note = NULL, version = version + 1 WHERE id = $3`, [req.user.id, text, taskId, submit ? 'in_review' : 'done']);
+    await client.query(`UPDATE rd_tasks SET status = $4, completed_at = NOW(), completed_by = $1, result = $2, result_data = $5::jsonb, review_note = NULL, version = version + 1 WHERE id = $3`, [req.user.id, text, taskId, submit ? 'in_review' : 'done', answers ? JSON.stringify(answers) : null]);
     await client.query(`INSERT INTO rd_task_history (task_id, action, result, actor_id) VALUES ($1,$4,$2,$3)`, [taskId, text, req.user.id, submit ? 'submitted' : 'completed']);
     await addUpdate(client, o.p.id, 'system', req, submit ? `Task "${task.title}" submitted for review` : `Task "${task.title}" completed`, taskId);
     await audit(client, req, { action: submit ? 'rd.task_submit' : 'rd.task_complete', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" ${submit ? 'submitted for review' : 'completed'} with a result` });
@@ -1031,7 +1044,7 @@ router.post('/tasks/:id/reopen', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     if (!['done', 'cancelled'].includes(task.status)) { await client.query('ROLLBACK'); return conflict(res, 'This task is not completed or cancelled.'); }
     if (b.version !== undefined && Number(b.version) !== task.version) { await client.query('ROLLBACK'); return conflict(res, 'This task was changed by someone else. Reload and try again.', { current_version: task.version }); }
     await client.query(`INSERT INTO rd_task_history (task_id, action, result, reason, actor_id) VALUES ($1,'reopened',$2,$3,$4)`, [taskId, task.result, reason, req.user.id]);
-    await client.query(`UPDATE rd_tasks SET status = $2, completed_at = NULL, completed_by = NULL, result = NULL, reviewed_by = NULL, reviewed_at = NULL, review_note = NULL, cancel_reason = NULL, version = version + 1 WHERE id = $1`, [taskId, task.status === 'cancelled' ? 'todo' : 'in_progress']);
+    await client.query(`UPDATE rd_tasks SET status = $2, completed_at = NULL, completed_by = NULL, result = NULL, result_data = NULL, reviewed_by = NULL, reviewed_at = NULL, review_note = NULL, cancel_reason = NULL, version = version + 1 WHERE id = $1`, [taskId, task.status === 'cancelled' ? 'todo' : 'in_progress']);
     await addUpdate(client, o.p.id, 'system', req, `Task "${task.title}" reopened: ${reason}`, taskId);
     await audit(client, req, { action: 'rd.task_reopen', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" reopened` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
@@ -1089,7 +1102,7 @@ router.post('/tasks/:id/send-back', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_
     const { task, o, taskId } = c;
     if (task.assignee_id === req.user.id) { await client.query('ROLLBACK'); return fail(res, 403, 'Someone else has to review your work'); }
     await client.query(`INSERT INTO rd_task_history (task_id, action, result, reason, actor_id) VALUES ($1,'sent_back',$2,$3,$4)`, [taskId, task.result, note, req.user.id]);
-    await client.query(`UPDATE rd_tasks SET status = 'in_progress', result = NULL, completed_at = NULL, completed_by = NULL, review_note = $1, version = version + 1 WHERE id = $2`, [note, taskId]);
+    await client.query(`UPDATE rd_tasks SET status = 'in_progress', result = NULL, result_data = NULL, completed_at = NULL, completed_by = NULL, review_note = $1, version = version + 1 WHERE id = $2`, [note, taskId]);
     await addUpdate(client, o.p.id, 'system', req, `Task "${task.title}" sent back: ${note}`, taskId);
     await audit(client, req, { action: 'rd.task_send_back', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" sent back` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);

@@ -90,7 +90,7 @@
           const c1 = el('td', null, (x.assignee_name || '-') + (x.due_date ? ' (due ' + dmy(x.due_date) + ')' : ''));
           const c2 = el('td');
           if (x.status === 'cancelled') c2.appendChild(el('span', 'rep-muted', 'Cancelled: ' + (x.cancel_reason || '-')));
-          else if (x.result) c2.appendChild(el('div', 'rep-result', x.result));
+          else if (x.result) { const v = oxiResultView(x); v.querySelector('strong').remove(); v.style.cssText = 'margin:0;padding:0;border:0;background:none'; c2.appendChild(v); }
           else c2.appendChild(el('span', 'rep-muted', x.status === 'done' ? 'No result recorded (completed before results were kept)' : 'Not finished yet'));
           const c3 = el('td', null, x.status === 'done' ? (x.reviewed_by_name ? x.reviewed_by_name + (x.review_note ? ': ' + x.review_note : '') : (x.requires_review ? '-' : 'Not required')) : x.status === 'in_review' ? 'Waiting for review' : '-');
           tr.append(c0, c1, c2, c3); wb.appendChild(tr);

@@ -620,6 +620,58 @@ test('splitting a stage: a task is tied to a checklist item, a trainee\'s work i
   assert.equal((await detail()).tasks.find(x => x.id === withPeer.id).status, 'todo');
 });
 
+test('result forms: the owner chooses what comes back, the assignee fills exactly that, answers are checked, and out of range is flagged not blocked', async () => {
+  const p = await newProject(tok.kannur);
+  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.lead });
+  const today = R.todayIST(), SAMPLE = 'SAMPLE-' + TAG;
+  const meta = await api(tok.lead, 'GET', '/api/rd/meta');
+  const tpl = meta.form_templates.find(t => t.id === 'viscosity'); assert.ok(meta.form_templates.length >= 7, 'the starter forms are offered');
+  const schema = { ...tpl, fields: tpl.fields.map(f => f.key === 'viscosity' ? { ...f, min: 90, max: 95 } : f) };     // the owner sets the expected range
+  const mk = (body) => api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { due_date: today, stage_no: 2, ...body });
+  assert.equal((await mk({ title: 'bad', assignee_id: uid.trainee, result_schema: { kind: 'form', fields: [] } })).status, 400, 'an empty form is refused');
+  assert.equal((await mk({ title: 'bad', assignee_id: uid.trainee, result_schema: { fields: [{ label: 'x', type: 'banana' }] } })).status, 400, 'an unknown field type is refused');
+  const a = await mk({ title: 'Measure viscosity of batch 7', assignee_id: uid.trainee, result_schema: schema }); assert.equal(a.status, 201);
+  const A = async (who) => (await get(tok[who || 'lead'], p.id)).tasks.find(t => t.id === a.id);
+  assert.equal((await A()).result_schema.name, 'Viscosity check'); assert.equal((await A('trainee')).result_schema.fields.length, 5, 'the assignee sees the same form');
+  // the form travels with the task: it cannot be swapped afterwards
+  await api(tok.lead, 'PATCH', '/api/rd/tasks/' + a.id, { version: (await A()).version, title: 'Measure viscosity of batch 7', result_schema: { kind: 'form', fields: [{ label: 'Anything', type: 'text' }] } });
+  assert.equal((await A()).result_schema.name, 'Viscosity check', 'the form is fixed when the task is assigned');
+  const done = (body) => api(tok.trainee, 'POST', `/api/rd/tasks/${a.id}/complete`, body);
+  const good = { viscosity: 98, viscosity_unit: 'KU', temperature: 25, spindle: '64', sample: SAMPLE };
+  assert.equal((await done({ result: 'Free text is not accepted when a form was asked for.' })).status, 400, 'free text does not replace the form');
+  assert.match((await done({ data: { ...good, sample: '' } })).error, /Sample or batch no\. is required/);
+  assert.match((await done({ data: { ...good, viscosity: 'lots' } })).error, /Viscosity must be a number/);
+  assert.match((await done({ data: { ...good, viscosity_unit: 'bar' } })).error, /choose one of KU, cP, s/);
+  assert.equal((await A()).status, 'todo', 'a refused hand-in changes nothing');
+  // out of range is allowed and flagged
+  const sub = await done({ data: good, version: (await A()).version }); assert.equal(sub.success, true); assert.equal(sub.task_status, 'in_review');
+  let t = await A();
+  assert.equal(t.result_data.viscosity, 98); assert.equal(t.range_flags.viscosity, 'above'); assert.match(t.result, /Viscosity: 98 KU \(outside the expected 90 to 95\)/); assert.match(t.result, new RegExp(SAMPLE));
+  const day = await api(tok.lead, 'GET', '/api/rd/my-day'); const rv = day.to_review.find(x => x.id === a.id);
+  assert.ok(rv && rv.result_schema && rv.range_flags.viscosity === 'above', 'the reviewer is shown the form, the answers and the flag');
+  assert.ok(rv.description !== undefined, 'My Day carries the instructions');
+  // send back clears the answers; a corrected hand-in is within range; accept keeps the structured answers
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${a.id}/send-back`, { note: 'Repeat the reading.' })).success, true);
+  assert.equal((await A()).result_data, null);
+  assert.equal((await done({ data: { ...good, viscosity: 92 } })).success, true);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${a.id}/accept`, {})).success, true);
+  t = await A(); assert.equal(t.status, 'done'); assert.equal(t.range_flags.viscosity, 'within'); assert.equal(t.result_data.sample, SAMPLE);
+  // a checklist: every required step must be ticked
+  const cl = await mk({ title: 'Prepare the batch', assignee_id: uid.rd2, result_schema: { kind: 'checklist', name: 'Batch prep', items: ['Weigh resin', 'Mix for 10 minutes', { label: 'Photograph the batch', required: false }] } });
+  assert.equal(cl.status, 201);
+  const cdone = (data) => api(tok.rd2, 'POST', `/api/rd/tasks/${cl.id}/complete`, { data });
+  assert.match((await cdone({ items: { weigh_resin: true } })).error, /Tick "Mix for 10 minutes"/);
+  assert.equal((await cdone({ items: { weigh_resin: true, mix_for_10_minutes: true }, note: 'Batch looked normal.' })).success, true);
+  const ct = (await get(tok.lead, p.id)).tasks.find(x => x.id === cl.id);
+  assert.equal(ct.status, 'done'); assert.match(ct.result, /\[x\] Weigh resin/); assert.match(ct.result, /\[ \] Photograph the batch/); assert.match(ct.result, /Note: Batch looked normal\./);
+  // a task with no form still takes free text
+  const free = await mk({ title: 'Quick check', assignee_id: uid.rd2 }); assert.equal((await get(tok.lead, p.id)).tasks.find(x => x.id === free.id).result_schema, null);
+  assert.equal((await api(tok.rd2, 'POST', `/api/rd/tasks/${free.id}/complete`, { result: 'Done and it looked fine to me.' })).success, true);
+  // the answers are not copied into the audit log
+  const log = JSON.stringify((await pool.query("SELECT summary, before_data, after_data FROM audit_log WHERE entity = 'rd_task' AND entity_id = $1", [a.id])).rows);
+  assert.ok(!log.includes(SAMPLE), 'the answers are not in the audit log');
+});
+
 test('my day: a person sees their open tasks, the tasks they handed out, the stages they own and what was just finished', async () => {
   const p = await newProject(tok.kannur);
   const d0 = await get(tok.lead, p.id);

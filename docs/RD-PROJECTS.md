@@ -64,6 +64,18 @@ Ticking a checklist item records **what was found**, not only that it was done.
 * **Reports** list the work assigned within each stage, who did it, the result, and who checked it.
 * Migration `014_rd_stage_work_review` adds the task columns, the two new statuses (In review, Cancelled), the trainee role and its grant. Nothing is dropped.
 
+## Result forms: the owner decides what comes back
+
+* **When assigning a task** the owner chooses "What should they bring back?": free text (as before), a **ready-made form** (viscosity, solids, pH, appearance, raw material sample, test result pass or fail, plant trial), **a checklist of steps**, or **a custom form** with their own fields. The owner can change, remove or add fields, mark them required, and give a number an **expected range**.
+* **The person doing the task gets exactly that form** when they complete or submit it: dropdowns, dates, numbers with units, yes or no, and required fields. They cannot hand in an incomplete form. Instructions written by the owner are shown with the task on My Day and in the dialog.
+* **Answers are checked by the server** against the form the task was assigned with (required, numbers, units, choices, dates, lengths). The page is not trusted.
+* **A number outside its expected range is flagged, not blocked.** The reviewer sees "98 KU - Above range" next to the answer.
+* **The form is fixed when the task is assigned.** The task keeps its own copy (`rd_tasks.result_schema`), so editing a starter form later never changes work already assigned, and the form cannot be swapped afterwards.
+* **Answers are stored as structured data** (`result_data`) and as a readable summary in the task's `result` text, so My Day, the Board, "use the result from a finished task", and the audit rules work unchanged. The audit log never contains the answers.
+* **Reviewers and reports** see a labelled table instead of a paragraph. Send back clears the answers (the summary stays in the history).
+* **A trainee's home page** shows only their own work: no "Projects I lead" or "Requests to assess".
+* The starter forms are defined in code (`FORM_TEMPLATES` in `rd-logic.js`). There is no screen yet for administrators to edit the starter library. Migration `015_rd_task_result_forms` adds the two columns.
+
 ## Permission matrix (defaults)
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.
