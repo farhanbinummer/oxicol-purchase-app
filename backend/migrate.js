@@ -458,6 +458,15 @@ const STEPS = [
       await db.query("ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('branch','production','store','purchase','accounts','qc','manager','rd','rd_trainee'))");
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('rd_trainee','rd.view') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // The person assigning a task decides what comes back: a form, a checklist or free text. The task keeps a copy of its form
+    // (result_schema) and the structured answers (result_data); the readable summary still goes in `result`. Existing tasks are free text.
+    name: '015_rd_task_result_forms',
+    async run(db) {
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS result_schema JSONB');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS result_data JSONB');
+    }
   }
 ];
 

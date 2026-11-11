@@ -819,18 +819,29 @@
 
     // ------------------------------------------------------------------ completing and reopening a task
     function completeTaskDialog(tk) {
-      let ta; const submit = submitsForReview(tk);
+      let ta, rf; const submit = submitsForReview(tk);
+      const hint = submit ? 'Saved under your name with today\'s date. Someone else checks it before it counts as done.' : 'Saved under your name with today\'s date. A completed task is locked until it is reopened.';
       dialog((submit ? 'Submit for review: ' : 'Complete task: ') + tk.title, (body) => {
-        ta = el('textarea'); ta.rows = 5; ta.maxLength = 2000;
         if (tk.review_note) { const sb = el('div', 'oxi-flag'); sb.append(icon('alert', 15), document.createTextNode(' Sent back: ' + tk.review_note)); body.appendChild(sb); }
-        body.appendChild(field('What was the result? What was done or found?', ta, 'ctRes', submit
-          ? 'Saved under your name with today\'s date. Someone else checks it before it counts as done. At least 10 characters.'
-          : 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.'));
+        if (tk.description) { const ins = el('div', 'oxi-section-note'); ins.style.whiteSpace = 'pre-wrap'; ins.append(el('strong', null, 'Instructions: '), document.createTextNode(tk.description)); body.appendChild(ins); }
+        if (tk.result_schema) {                         // the owner chose what should come back: show exactly that
+          rf = oxiResultForm(tk.result_schema); body.appendChild(rf.node); body.appendChild(el('div', 'oxi-section-note', hint));
+          return () => rf.collect();
+        }
+        ta = el('textarea'); ta.rows = 5; ta.maxLength = 2000;
+        body.appendChild(field('What was the result? What was done or found?', ta, 'ctRes', hint + ' At least 10 characters.'));
         return () => ({ result: ta.value });
       }, submit ? 'Submit for review' : 'Complete task', async (a, errBox) => {
-        if (a.result.trim().length < 10) { errBox.textContent = 'Write what was done or found (at least 10 characters).'; errBox.hidden = false; ta.focus(); return false; }
-        const r = await api('/api/rd/tasks/' + tk.id + '/complete', 'POST', { result: a.result, version: tk.version });
-        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }          // the typed text stays in the box
+        let payload;
+        if (tk.result_schema) {
+          if (a.error) { errBox.textContent = a.error; errBox.hidden = false; if (a.focus) a.focus.focus(); return false; }
+          payload = { data: a.data, version: tk.version };
+        } else {
+          if (a.result.trim().length < 10) { errBox.textContent = 'Write what was done or found (at least 10 characters).'; errBox.hidden = false; ta.focus(); return false; }
+          payload = { result: a.result, version: tk.version };
+        }
+        const r = await api('/api/rd/tasks/' + tk.id + '/complete', 'POST', payload);
+        if (!r.success) { fail(r, errBox); errBox.hidden = false; return false; }          // what was typed stays in the form
         if (closeTaskPanel) closeTaskPanel();
         note(r.task_status === 'in_review' ? 'Submitted. It is waiting for review.' : 'Task completed.', true); load(true); return true;
       });
@@ -878,21 +889,73 @@
         note('Task cancelled.', true); load(true); return true;
       }, { cancelLabel: 'Keep task' });
     }
-    /** The stage owner hands part of a stage to another person (for example a trainee), optionally for one checklist item. */
+    /** The stage owner hands part of a stage to another person (for example a trainee) and chooses what should come back. */
+    const FIELD_TYPE_LABEL = [['text', 'Short text'], ['longtext', 'Long text'], ['number', 'Number'], ['date', 'Date'], ['choice', 'Choice'], ['yesno', 'Yes / No']];
+    const numOrNull = (v) => { const t = String(v == null ? '' : v).trim().replace(',', '.'); return t === '' ? null : Number(t); };
     function assignWorkDialog(stageNo, itemId) {
-      let f;
-      const stage = D.stages[stageNo - 1];
+      let f, mode = 'text', rows = [], steps = null;
+      const stage = D.stages[stageNo - 1], tpls = meta.form_templates || [];
       dialog('Assign part of stage ' + stageNo, (body) => {
         f = {
           title: el('input'), desc: el('textarea'), who: select(personOptions(), '', 'Choose a person'), due: dateInput(''), prio: select(meta.lists.priorities, 'Medium'),
-          item: select(stage.checklist.map(c => [c.id, c.label]), itemId || '', 'Not tied to one item'), rev: el('input')
+          item: select(stage.checklist.map(c => [c.id, c.label]), itemId || '', 'Not tied to one item'), rev: el('input'),
+          form: select([['text', 'Free text: they write what they found']].concat(tpls.map(t => ['tpl:' + t.id, t.name + ' (' + t.description + ')'])).concat([['checklist', 'A checklist of steps to tick'], ['custom', 'A custom form: I choose the fields']]), 'text')
         };
         f.title.type = 'text'; f.title.maxLength = 250; f.desc.rows = 3; f.desc.maxLength = 4000; f.rev.type = 'checkbox';
+        const builder = el('div');
+        function renderRows() {
+          builder.innerHTML = ''; const box = el('div', 'oxi-fbuild');
+          box.appendChild(el('div', 'oxi-section-note', 'The fields they will fill in. Change, remove or add fields. Give a number an expected range and results outside it are flagged for the reviewer.'));
+          rows.forEach((r, i) => {
+            const row = el('div', 'frow'); const lab = el('input'); lab.type = 'text'; lab.maxLength = 80; lab.value = r.label || ''; lab.setAttribute('aria-label', 'Field ' + (i + 1) + ' label'); lab.oninput = () => { r.label = lab.value; };
+            const ty = select(FIELD_TYPE_LABEL, r.type); ty.setAttribute('aria-label', 'Field ' + (i + 1) + ' type'); ty.onchange = () => { r.type = ty.value; renderRows(); };
+            const rq = el('label'); const rc = el('input'); rc.type = 'checkbox'; rc.checked = !!r.required; rc.onchange = () => { r.required = rc.checked; }; rq.append(rc, document.createTextNode(' Required'));
+            const rm = el('button', 'oxi-btn-secondary oxi-btn-sm', '\u00d7'); rm.type = 'button'; rm.title = 'Remove this field'; rm.setAttribute('aria-label', 'Remove field ' + (r.label || i + 1)); rm.onclick = () => { rows.splice(i, 1); renderRows(); };
+            row.append(lab, ty, rq, rm); box.appendChild(row);
+            if (r.type === 'number') {
+              const sub = el('div', 'frow sub'); const un = el('input'); un.type = 'text'; un.placeholder = 'Unit, or units separated by commas'; un.value = (r.units && r.units.length ? r.units : (r.unit ? [r.unit] : [])).join(', '); un.setAttribute('aria-label', 'Unit');
+              un.oninput = () => { const l = un.value.split(',').map(x => x.trim()).filter(Boolean); r.units = l.length > 1 ? l : undefined; r.unit = l[0] || undefined; };
+              const lo = el('input'); lo.type = 'text'; lo.inputMode = 'decimal'; lo.placeholder = 'Lowest'; lo.value = r.min != null ? r.min : ''; lo.setAttribute('aria-label', 'Expected lowest'); lo.oninput = () => { r.min = numOrNull(lo.value); };
+              const hi = el('input'); hi.type = 'text'; hi.inputMode = 'decimal'; hi.placeholder = 'Highest'; hi.value = r.max != null ? r.max : ''; hi.setAttribute('aria-label', 'Expected highest'); hi.oninput = () => { r.max = numOrNull(hi.value); };
+              sub.append(un, lo, hi); box.appendChild(sub);
+            }
+            if (r.type === 'choice') {
+              const sub = el('div', 'frow sub'); sub.style.gridTemplateColumns = '1fr'; const op = el('input'); op.type = 'text'; op.placeholder = 'Choices separated by commas'; op.value = (r.options || []).join(', '); op.setAttribute('aria-label', 'Choices');
+              op.oninput = () => { r.options = op.value.split(',').map(x => x.trim()).filter(Boolean); }; sub.appendChild(op); box.appendChild(sub);
+            }
+          });
+          const add = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Add a field'); add.type = 'button'; add.onclick = () => { rows.push({ label: '', type: 'text', required: true }); renderRows(); const l = builder.querySelectorAll('.frow:not(.sub) input[type=text]'); if (l.length) l[l.length - 1].focus(); };
+          box.appendChild(add); builder.appendChild(box);
+        }
+        function choose(v) {
+          mode = v; builder.innerHTML = ''; steps = null; rows = [];
+          if (v === 'text') return;
+          if (v === 'checklist') { steps = el('textarea'); steps.rows = 4; steps.maxLength = 2000; const w = field('Steps to tick, one per line', steps, 'awS', 'They tick each step when it is done and can add a note.'); builder.appendChild(w); return; }
+          const t = v.indexOf('tpl:') === 0 ? tpls.find(x => x.id === v.slice(4)) : null;
+          rows = t ? JSON.parse(JSON.stringify(t.fields)) : [{ label: '', type: 'text', required: true }];
+          renderRows();
+        }
+        f.form.onchange = () => choose(f.form.value);
         body.append(field('What should they do?', f.title, 'awT'), field('Instructions', f.desc, 'awD', 'Say how, with what, and what you expect back. They only see what you write here.'),
-          field('Responsible person *', f.who, 'awW', 'They join the project team and see this on their day.'), field('Due date *', f.due, 'awU'), field('Checklist item', f.item, 'awI', 'The result they record can then be used for that item.'), field('Priority', f.prio, 'awP'));
+          field('Responsible person *', f.who, 'awW', 'They join the project team and see this on their day.'), field('Due date *', f.due, 'awU'), field('Checklist item', f.item, 'awI', 'The result they record can then be used for that item.'),
+          field('What should they bring back?', f.form, 'awF', 'They get exactly this form when they hand the work in.'), builder, field('Priority', f.prio, 'awP'));
         const w = el('div'); const l = el('label'); l.append(f.rev, document.createTextNode(' Someone else checks this work before it counts as done')); w.appendChild(l);
         const h = el('div', 'oxi-section-note', 'Always on for a trainee.'); h.style.margin = '2px 0 0'; w.appendChild(h); body.appendChild(w);
-        return () => ({ title: f.title.value, description: f.desc.value, assignee_id: f.who.value, due_date: f.due.value, priority: f.prio.value, checklist_item_id: f.item.value || null, requires_review: f.rev.checked });
+        return () => {
+          let schema = null;
+          if (mode === 'checklist') schema = { kind: 'checklist', name: 'Checklist', items: steps.value.split('\n').map(x => x.trim()).filter(Boolean) };
+          else if (mode !== 'text') {
+            const t = mode.indexOf('tpl:') === 0 ? tpls.find(x => x.id === mode.slice(4)) : null;
+            schema = { kind: 'form', name: t ? t.name : 'Custom form', fields: rows.map(r => {
+              const o = { label: r.label, type: r.type, required: !!r.required };
+              if (r.type === 'number') { if (r.unit) o.unit = r.unit; if (r.units) o.units = r.units; if (r.min != null && !Number.isNaN(r.min)) o.min = r.min; if (r.max != null && !Number.isNaN(r.max)) o.max = r.max; if (r.key) o.key = r.key; }
+              if (r.type === 'choice') o.options = r.options || [];
+              if (r.key && r.type !== 'number') o.key = r.key;
+              return o;
+            }) };
+          }
+          return { title: f.title.value, description: f.desc.value, assignee_id: f.who.value, due_date: f.due.value, priority: f.prio.value, checklist_item_id: f.item.value || null, requires_review: f.rev.checked, result_schema: schema };
+        };
       }, 'Assign', async (a, errBox) => {
         const need = !a.title.trim() ? 'Say what they should do.' : !a.assignee_id ? 'Choose who is responsible.' : !a.due_date ? 'Give a due date.' : '';
         if (need) { errBox.textContent = need; errBox.hidden = false; return false; }
@@ -916,8 +979,7 @@
       });
     }
     function resultBlock(tk) {
-      const b = el('div', 'oxi-result');
-      b.append(el('strong', null, 'Result'), el('p', null, tk.result || 'No result recorded (completed before results were kept).'));
+      const b = oxiResultView(tk);
       b.appendChild(el('div', 'oxi-ci-meta', (tk.status === 'in_review' ? 'Handed in by ' : 'Completed by ') + (tk.completed_by_name || '-') + (tk.completed_at ? ' on ' + dmy(String(tk.completed_at).slice(0, 10)) : '')));
       if (tk.reviewed_by_name) b.appendChild(el('div', 'oxi-ci-meta', 'Accepted by ' + tk.reviewed_by_name + (tk.reviewed_at ? ' on ' + dmy(String(tk.reviewed_at).slice(0, 10)) : '') + (tk.review_note ? ': ' + tk.review_note : '')));
       return b;
@@ -959,7 +1021,7 @@
       const who = select(personOptions(), tk.assignee_id || '', tk.assignee_id ? null : 'Unclaimed'); who.disabled = !canAll;
       const form = el('form'); form.noValidate = true;
       form.append(field('Status', status, 'tpS'), field('Priority', prio, 'tpP'), field('Due date', due, 'tpD'), field('Accountable person', who, 'tpW'));
-      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : '') + (tk.requires_review ? ' - checked by someone else before it counts as done' : '') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
+      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : '') + (tk.result_schema ? ' - to bring back: ' + tk.result_schema.name : '') + (tk.requires_review ? ' - checked by someone else before it counts as done' : '') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const save = el('button', null, 'Save changes'); save.type = 'submit'; save.disabled = !canStatus;
       const fin = el('button', 'oxi-btn-secondary', submitsForReview(tk) ? 'Submit for review' : 'Complete task'); fin.type = 'button'; fin.disabled = !canFinish(tk); fin.onclick = () => completeTaskDialog(tk);

@@ -750,6 +750,11 @@ BUILDERS.rd = async (ctx) => {
     responsible: 'You', due: ymdOf(t.due_date), overdue: t.days_late > 0, waiting_days: t.days_late > 0 ? t.days_late : null, progress: t.status === 'blocked' ? 'Blocked' : 'To do',
     next: { label: 'Open project', href: 'project.html?id=' + t.project_id }, tone: t.status === 'blocked' || t.days_late > 0 ? 'bad' : 'warn' })));
 
+  // A trainee's home is their own work: no "projects I lead", "requests to assess" or project-wide problems, which are for owners.
+  if (ctx.access.roles.includes('rd_trainee') && !ctx.can(KEYS.RD_EDIT)) {
+    return { cards: cards.filter(c => c.key === 'tasks'), actions: [{ label: 'My Day', href: 'my-day.html' }, { label: 'Open Projects', href: 'projects.html' }], queue, exceptions };
+  }
+
   const led = await count(`SELECT COUNT(*)::int n FROM rd_projects p WHERE ${vis.clause} AND p.lead_user_id = $1 AND p.status = ANY($5)`, [...vis.params, active]);
   cards.push(card('led', 'Projects I lead', led, 'projects.html?lead=' + uid, 'neutral', 'Active projects where you are the lead'));
 

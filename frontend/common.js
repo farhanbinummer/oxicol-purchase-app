@@ -647,6 +647,91 @@ function rdBadge(status) {
   const map = { 'Received': 'info', 'Under Review': 'info', 'Approved': 'good', 'In Lab Trials': 'info', 'Sample Sent': 'info', 'Plant Trial': 'info', 'Completed': 'good', 'On Hold': 'pending', 'Rejected': 'bad' };
   const s = document.createElement('span'); s.className = 'badge badge-' + (map[status] || 'neutral'); s.textContent = status || '-'; return s;
 }
+// ------------------------------------------------------------------------------------------------------------------
+// R&D result forms. The person who assigns a task chooses what comes back (a form, a checklist or free text); these two
+// helpers draw the form for the person doing the task and show the answers to everyone who reads them. The server checks
+// the answers again, so nothing here is trusted.
+// ------------------------------------------------------------------------------------------------------------------
+let oxiFormSeq = 0;
+function oxiEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function oxiRangeText(f) { return f.min != null && f.max != null ? f.min + ' to ' + f.max : f.min != null ? 'at least ' + f.min : 'at most ' + f.max; }
+
+/** Draws the form (or checklist) of a task. Returns { node, collect() } where collect() gives { data } or { error, focus }. */
+function oxiResultForm(schema) {
+  const node = oxiEl('div', 'oxi-rform'); const id = 'rf' + (++oxiFormSeq) + '_';
+  const wrap = (f, ctl, extra) => {
+    const w = oxiEl('div', 'oxi-rf'); const l = oxiEl('label', null, f.label + (f.required ? ' *' : '')); ctl.id = id + f.key; l.htmlFor = ctl.id;
+    if (f.required) ctl.setAttribute('aria-required', 'true');
+    w.appendChild(l);
+    const row = oxiEl('div', 'oxi-rf-row'); row.appendChild(ctl); if (extra) row.appendChild(extra); w.appendChild(row);
+    if (f.type === 'number' && (f.min != null || f.max != null)) w.appendChild(oxiEl('small', null, 'Expected: ' + oxiRangeText(f) + (f.unit ? ' ' + f.unit : '')));
+    node.appendChild(w); return w;
+  };
+  if (schema.kind === 'checklist') {
+    const boxes = {};
+    node.appendChild(oxiEl('p', 'oxi-section-note', 'Tick each step when it is done.'));
+    schema.items.forEach(it => {
+      const w = oxiEl('div', 'oxi-rf'); const l = oxiEl('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = id + it.key; boxes[it.key] = cb;
+      l.append(cb, document.createTextNode(' ' + it.label + (it.required ? ' *' : ''))); w.appendChild(l); node.appendChild(w);
+    });
+    const note = document.createElement('textarea'); note.rows = 2; note.maxLength = 2000; wrap({ key: 'note', label: 'Note', type: 'longtext' }, note);
+    return { node, collect() {
+      const items = {}; for (const it of schema.items) { items[it.key] = boxes[it.key].checked; if (it.required && !items[it.key]) return { error: 'Tick "' + it.label + '" when it is done.', focus: boxes[it.key] }; }
+      return { data: { items, note: note.value } };
+    } };
+  }
+  const ctl = {}, unitCtl = {};
+  schema.fields.forEach(f => {
+    let c, extra = null;
+    if (f.type === 'longtext') { c = document.createElement('textarea'); c.rows = 3; c.maxLength = 2000; }
+    else if (f.type === 'choice') { c = document.createElement('select'); const b = document.createElement('option'); b.value = ''; b.textContent = 'Choose...'; c.appendChild(b); f.options.forEach(o => { const op = document.createElement('option'); op.value = o; op.textContent = o; c.appendChild(op); }); }
+    else if (f.type === 'yesno') { c = document.createElement('select'); [['', 'Choose...'], ['yes', 'Yes'], ['no', 'No']].forEach(([v, t]) => { const op = document.createElement('option'); op.value = v; op.textContent = t; c.appendChild(op); }); }
+    else if (f.type === 'date') { c = document.createElement('input'); c.type = 'date'; }
+    else if (f.type === 'number') {
+      c = document.createElement('input'); c.type = 'text'; c.inputMode = 'decimal'; c.autocomplete = 'off';
+      if (f.units) { const u = document.createElement('select'); u.setAttribute('aria-label', f.label + ' unit'); f.units.forEach(x => { const op = document.createElement('option'); op.value = x; op.textContent = x; u.appendChild(op); }); unitCtl[f.key] = u; extra = u; }
+      else if (f.unit) extra = oxiEl('span', 'oxi-rf-unit', f.unit);
+    } else { c = document.createElement('input'); c.type = 'text'; c.maxLength = 500; }
+    ctl[f.key] = c; wrap(f, c, extra);
+  });
+  return { node, collect() {
+    const data = {};
+    for (const f of schema.fields) {
+      const v = ctl[f.key].value.trim();
+      if (!v) { if (f.required) return { error: f.label + ' is required.', focus: ctl[f.key] }; continue; }
+      if (f.type === 'number' && !Number.isFinite(Number(v.replace(',', '.')))) return { error: f.label + ' must be a number.', focus: ctl[f.key] };
+      data[f.key] = v; if (unitCtl[f.key]) data[f.key + '_unit'] = unitCtl[f.key].value;
+    }
+    return { data };
+  } };
+}
+
+/** Shows the answers to a task's form (or its free-text result) with the in-range flags. Works for any task row from the API. */
+function oxiResultView(t) {
+  const box = oxiEl('div', 'oxi-result'); const schema = t.result_schema, data = t.result_data;
+  box.appendChild(oxiEl('strong', null, schema ? schema.name : 'Result'));
+  if (!schema || !data) { box.appendChild(oxiEl('p', null, t.result || 'No result recorded (completed before results were kept).')); return box; }
+  const dl = oxiEl('dl', 'oxi-rtable');
+  const add = (k, v, flag, range) => {
+    const row = oxiEl('div'); row.append(oxiEl('dt', null, k)); const dd = oxiEl('dd'); dd.appendChild(document.createTextNode(v));
+    if (flag) { const b = oxiEl('span', 'oxi-flagtag ' + (flag === 'within' ? 'ok' : 'bad'), flag === 'within' ? 'Within range' : flag === 'above' ? 'Above range' : 'Below range'); b.title = 'Expected ' + range; dd.append(document.createTextNode(' '), b); }
+    row.appendChild(dd); dl.appendChild(row);
+  };
+  if (schema.kind === 'checklist') {
+    schema.items.forEach(it => add((data.items && data.items[it.key]) ? 'Done' : 'Not done', it.label));
+    if (data.note) add('Note', data.note);
+  } else {
+    schema.fields.forEach(f => {
+      if (data[f.key] === undefined) return;
+      let v = f.type === 'yesno' ? (data[f.key] === 'yes' ? 'Yes' : 'No') : f.type === 'date' ? dmy(data[f.key]) : String(data[f.key]);
+      if (f.type === 'number') { const u = data[f.key + '_unit'] || f.unit; if (u) v += ' ' + u; }
+      const flag = t.range_flags && t.range_flags[f.key];
+      add(f.label, v, flag, flag ? oxiRangeText(f) : '');
+    });
+  }
+  box.appendChild(dl); return box;
+}
+
 function prioBadge(p) {
   const s = document.createElement('span'); s.className = 'badge badge-' + ({ High: 'bad', Medium: 'warn', Low: 'neutral' }[p] || 'neutral'); s.textContent = p || '-'; return s;
 }

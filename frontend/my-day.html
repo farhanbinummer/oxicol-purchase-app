@@ -26,6 +26,7 @@
     .md-main strong { display: block; overflow-wrap: anywhere; }
     .md-main .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 13px; color: var(--text-2); margin-top: 2px; }
     .md-main .late { color: var(--danger); font-weight: 600; }
+    .md-instr { margin: 4px 0 2px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow-y: auto; }
     .md-act { display: flex; gap: 8px; flex-wrap: wrap; }
     .md-empty { margin: 0; padding: 14px; text-align: center; color: var(--text-2); border: 1px dashed var(--border-strong); border-radius: 12px; }
     .md-hero { padding: var(--s4); margin: 0 0 var(--s4); border: 1px solid var(--border); border-radius: var(--r-card); background: linear-gradient(135deg, var(--info-bg), var(--surface)); }
@@ -61,37 +62,45 @@
       return { label: 'Due ' + dmy(t.due_date), cls: '' };
     }
 
-    /** Complete dialog: the result is required, so a task is never closed with nothing on record. */
+    /** Complete dialog: the form the owner asked for (or a text box), and the result is required, so a task is never closed with nothing on record. */
     function completeDialog(t) {
       const submit = !!t.requires_review;                      // these tasks are mine, so my completion is a hand-in
       const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'cdT');
       const form = el('form'); form.method = 'dialog'; const h = el('h3', null, (submit ? 'Submit for review: ' : 'Complete task: ') + t.title); h.id = 'cdT';
-      const lab = el('label', null, 'What was the result? What was done or found?'); lab.htmlFor = 'cdRes';
-      const ta = el('textarea'); ta.id = 'cdRes'; ta.rows = 5; ta.maxLength = 2000;
-      const hint = el('div', 'oxi-section-note', submit ? 'Saved under your name with today\'s date. Someone else checks it before it counts as done. At least 10 characters.' : 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.');
-      const back = t.review_note ? el('div', 'oxi-flag', 'Sent back: ' + t.review_note) : null;
+      const hintText = submit ? 'Saved under your name with today\'s date. Someone else checks it before it counts as done.' : 'Saved under your name with today\'s date. A completed task is locked until it is reopened.';
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const row = el('div', 'row'); const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); };
       const ok = el('button', null, submit ? 'Submit for review' : 'Complete task'); ok.type = 'submit'; row.append(cancel, ok);
-      form.append(h); if (back) form.appendChild(back); form.append(lab, ta, hint, err, row); dlg.appendChild(form); document.body.appendChild(dlg);
+      form.append(h);
+      if (t.review_note) form.appendChild(el('div', 'oxi-flag', 'Sent back: ' + t.review_note));
+      if (t.description) { const ins = el('div', 'oxi-section-note'); ins.style.whiteSpace = 'pre-wrap'; ins.append(el('strong', null, 'Instructions: '), document.createTextNode(t.description)); form.appendChild(ins); }
+      let rf = null, ta = null;
+      if (t.result_schema) { rf = oxiResultForm(t.result_schema); form.appendChild(rf.node); form.appendChild(el('div', 'oxi-section-note', hintText)); }
+      else {
+        const lab = el('label', null, 'What was the result? What was done or found?'); lab.htmlFor = 'cdRes'; ta = el('textarea'); ta.id = 'cdRes'; ta.rows = 5; ta.maxLength = 2000;
+        form.append(lab, ta, el('div', 'oxi-section-note', hintText + ' At least 10 characters.'));
+      }
+      form.append(err, row); dlg.appendChild(form); document.body.appendChild(dlg);
       dlg.addEventListener('close', () => dlg.remove());
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault(); if (ok.disabled) return;
-        if (ta.value.trim().length < 10) { err.textContent = 'Write what was done or found (at least 10 characters).'; err.hidden = false; ta.focus(); return; }
+        let payload;
+        if (rf) { const c = rf.collect(); if (c.error) { err.textContent = c.error; err.hidden = false; if (c.focus) c.focus.focus(); return; } payload = { data: c.data, version: t.version }; }
+        else { if (ta.value.trim().length < 10) { err.textContent = 'Write what was done or found (at least 10 characters).'; err.hidden = false; ta.focus(); return; } payload = { result: ta.value, version: t.version }; }
         ok.disabled = true; err.hidden = true;
-        const r = await api('/api/rd/tasks/' + t.id + '/complete', 'POST', { result: ta.value, version: t.version });
+        const r = await api('/api/rd/tasks/' + t.id + '/complete', 'POST', payload);
         ok.disabled = false;
-        if (!r.success) { err.textContent = r.error || 'Could not complete the task.'; err.hidden = false; return; }      // the typed text stays
+        if (!r.success) { err.textContent = r.error || 'Could not complete the task.'; err.hidden = false; return; }      // what was typed stays
         dlg.close(); note(r.task_status === 'in_review' ? 'Submitted for review: ' + t.title : 'Task completed: ' + t.title, true); load();
       });
-      dlg.showModal(); ta.focus();
+      dlg.showModal(); (rf ? rf.node.querySelector('input,select,textarea') : ta).focus();
     }
 
     function reviewDialog(t, mode) {
       const accept = mode === 'accept';
       const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'rvT');
       const form = el('form'); form.method = 'dialog'; const h = el('h3', null, (accept ? 'Accept: ' : 'Send back: ') + t.title); h.id = 'rvT';
-      const res = el('div', 'oxi-result'); res.append(el('strong', null, 'Result'), el('p', null, t.result || '-')); res.appendChild(el('div', 'oxi-ci-meta', 'Handed in by ' + (t.completed_by_name || t.assignee_name || '-')));
+      const res = oxiResultView(t); res.appendChild(el('div', 'oxi-ci-meta', 'Handed in by ' + (t.completed_by_name || t.assignee_name || '-')));
       const lab = el('label', null, accept ? 'Comment (optional)' : 'What needs to change?'); lab.htmlFor = 'rvNote'; const ta = el('textarea'); ta.id = 'rvNote'; ta.rows = 3; ta.maxLength = 500;
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const row = el('div', 'row'); const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); };
@@ -112,18 +121,19 @@
     function taskRow(t, today, opts) {
       const li = el('li'); const row = el('div', 'md-task' + (t.status === 'blocked' ? ' blocked' : '') + (opts && opts.done ? ' done' : ''));
       const main = el('div', 'md-main'); const a = el('a', null, t.title); a.href = 'project.html?id=' + t.project_id + '#list'; const st = el('strong'); st.appendChild(a); main.appendChild(st);
+      if (t.description && !(opts && (opts.done || opts.review || opts.submitted))) { const ins = el('div', 'md-instr'); ins.appendChild(document.createTextNode(t.description)); main.appendChild(ins); }
       const sub = el('div', 'sub'); const w = when(t, today);
       const pr = el('a', null, t.project_number + ' ' + t.project_title); pr.href = 'project.html?id=' + t.project_id; sub.appendChild(pr);
       if (opts && opts.done) sub.appendChild(el('span', null, 'Completed ' + (t.completed_at ? dmy(String(t.completed_at).slice(0, 10)) : '') + (opts.who && t.completed_by_name ? ' by ' + t.completed_by_name : '')));
       else { sub.appendChild(el('span', w.cls, w.label)); if (t.status !== 'todo') sub.appendChild(el('span', null, STATUS[t.status])); }
       if (t.checklist_label) sub.appendChild(el('span', null, 'For: ' + t.checklist_label));
+      if (t.result_schema && !(opts && (opts.done || opts.review || opts.submitted))) sub.appendChild(el('span', null, 'To bring back: ' + t.result_schema.name));
       if (t.review_note && t.status === 'in_progress') sub.appendChild(el('span', 'late', 'Sent back: ' + t.review_note));
       if (opts && opts.assignee) sub.appendChild(el('span', null, 'Responsible: ' + (t.assignee_name || '-')));
       else if (t.assigned_by_name) sub.appendChild(el('span', null, 'Assigned by ' + t.assigned_by_name));
       sub.appendChild(prioBadge(t.priority));
       main.appendChild(sub);
-      if (opts && (opts.review || opts.submitted)) { const r = el('div', 'oxi-result'); r.style.margin = '6px 0 0'; r.appendChild(el('p', null, t.result || '-')); main.appendChild(r); }
-      if (opts && opts.done) { const r = el('div', 'oxi-result'); r.style.margin = '6px 0 0'; r.appendChild(el('p', null, t.result || 'No result recorded (completed before results were kept).')); main.appendChild(r); }
+      if (opts && (opts.review || opts.submitted || opts.done)) { const r = oxiResultView(t); r.style.margin = '6px 0 0'; main.appendChild(r); }
       row.appendChild(main);
       if (opts && opts.actions) {
         const act = el('div', 'md-act');
