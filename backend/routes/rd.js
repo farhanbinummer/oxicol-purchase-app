@@ -20,6 +20,17 @@ const { KEYS } = require('../permissions');
 const { can } = require('../access');
 const R = require('../rd-logic');
 const { visibleClause } = require('../rd-visibility');
+const { notifyUsers, notifyRole } = require('../notify');
+
+// Notices by email and WhatsApp (when switched on; each person may turn them off). Never allowed to fail the action that caused them.
+const tell = (ids, kind, subject, text, path, exceptId) => { try { notifyUsers((ids || []).filter(x => x && x !== exceptId), { kind, subject, text, path }); } catch (e) { console.error('notice failed:', e.message); } };
+/** The people who check a task's work: whoever assigned it and the owner (or lead) of the stage it belongs to. */
+async function reviewersOf(task) {
+  const ids = [task.created_by];
+  if (task.stage_no) { const r = await pool.query('SELECT COALESCE(s.owner_user_id, p.lead_user_id) AS uid FROM rd_stages s JOIN rd_projects p ON p.id = s.project_id WHERE s.project_id = $1 AND s.stage_no = $2', [task.project_id, task.stage_no]); if (r.rows[0]) ids.push(r.rows[0].uid); }
+  return [...new Set(ids.filter(Boolean))];
+}
+const announceRequest = (req, id, number, title) => { try { notifyRole('rd', req.user.id, { kind: 'request', subject: `New R&D request ${number}`, text: `"${title}" was submitted by ${req.user.name} and is waiting to be assessed.`, path: `project.html?id=${id}` }); } catch (e) { console.error('notice failed:', e.message); } };
 const router = express.Router();
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -323,6 +334,7 @@ router.post('/projects', needPerm(KEYS.RD_CREATE), async (req, res) => {
     if (submitting) number = await submitInside(client, req, { id, title: ins.rows[0].title });
     else await audit(client, req, { action: 'rd.draft', entity: 'rd_project', id, summary: `Draft saved: ${ins.rows[0].title}` });
     await client.query('COMMIT');
+    if (submitting) announceRequest(req, id, number, ins.rows[0].title);
     res.status(201).json({ success: true, id, project_number: number, is_draft: !submitting });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -342,6 +354,7 @@ router.post('/projects/:id/submit', needPerm(KEYS.RD_CREATE), async (req, res) =
     if (errs.length) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: errs[0].message, errors: errs }); }
     const number = await submitInside(client, req, o.p);
     await client.query('COMMIT');
+    announceRequest(req, o.p.id, number, o.p.title);
     res.json({ success: true, id: o.p.id, project_number: number });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -770,6 +783,7 @@ router.post('/projects/:id/stages/:no/complete', needPerm(KEYS.RD_STAGE), async 
     await addUpdate(client, o.p.id, 'system', req, `Stage ${o.no} "${tpl.name}" completed on ${R.dmy(date)}`);
     await audit(client, req, { action: 'rd.stage_complete', entity: 'rd_stage', id: o.stage.id, summary: `${o.p.project_number} stage ${o.no} completed on ${R.dmy(date)}`, after: { date } });
     await client.query('COMMIT');
+    tell([o.p.requested_by_user, o.p.lead_user_id], 'stage', `Stage ${o.no} complete: ${o.p.project_number}`, `${req.user.name} completed stage ${o.no} (${tpl.name}) of ${o.p.project_number} "${o.p.title}".${o.no < 8 ? ' Next is stage ' + (o.no + 1) + '.' : ' All stages are complete.'}`, `project.html?id=${o.p.id}`, req.user.id);
     res.json({ success: true, stage: o.no, date, next_stage: o.no < 8 ? o.no + 1 : null, all_complete: o.no === 8 });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -829,6 +843,7 @@ router.post('/projects/:id/complete', needPerm(KEYS.RD_STAGE), async (req, res) 
     if (!(await changeProject(client, req, res, o, b.version, { status: 'Completed', completed_on: date, status_before_hold: null }, { action: 'rd.complete', summary: `${o.p.project_number} completed on ${R.dmy(date)}` }))) { await client.query('ROLLBACK'); return; }
     await addUpdate(client, o.p.id, 'system', req, `Project completed on ${R.dmy(date)}`);
     await client.query('COMMIT');
+    tell([o.p.requested_by_user, o.p.lead_user_id], 'project', `Project completed: ${o.p.project_number}`, `${req.user.name} marked ${o.p.project_number} "${o.p.title}" completed.`, `project.html?id=${o.p.id}`, req.user.id);
     res.json({ success: true, completed_on: date });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -926,6 +941,7 @@ router.post('/projects/:id/tasks', needPerm(KEYS.RD_EDIT), async (req, res) => {
     await audit(client, req, { action: 'rd.task_add', entity: 'rd_task', id: r.rows[0].id, summary: `${o.p.project_number}: task "${t.title}" added` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
+    tell([t.assignee_id], 'task_assigned', `New task: ${t.title}`, `${req.user.name} assigned you a task in ${o.p.project_number}: "${t.title}", due ${R.dmy(t.due_date)}.${schema ? ` When you hand it in you will fill in a "${schema.name}" ${schema.kind === 'checklist' ? 'checklist' : 'form'}.` : ''}`, 'my-day.html', req.user.id);
     res.status(201).json({ success: true, id: r.rows[0].id });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1018,6 +1034,8 @@ router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_E
     await audit(client, req, { action: submit ? 'rd.task_submit' : 'rd.task_complete', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" ${submit ? 'submitted for review' : 'completed'} with a result` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
+    if (submit) reviewersOf(task).then(ids => tell(ids, 'task_review', `Work to review: ${task.title}`, `${req.user.name} handed in "${task.title}" (${o.p.project_number}) for you to check.`, 'my-day.html#sReview', req.user.id)).catch(e => console.error('notice failed:', e.message));
+    else tell([task.created_by], 'task_done', `Task done: ${task.title}`, `${req.user.name} completed "${task.title}" (${o.p.project_number}).`, `project.html?id=${o.p.id}#list`, req.user.id);
     res.json({ success: true, version: task.version + 1, task_status: submit ? 'in_review' : 'done' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1049,6 +1067,7 @@ router.post('/tasks/:id/reopen', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     await audit(client, req, { action: 'rd.task_reopen', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" reopened` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
+    tell([task.assignee_id], 'task_reopened', `Task reopened: ${task.title}`, `${req.user.name} reopened "${task.title}" (${o.p.project_number}): ${reason}`, 'my-day.html', req.user.id);
     res.json({ success: true, version: task.version + 1 });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1086,6 +1105,7 @@ router.post('/tasks/:id/accept', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     await audit(client, req, { action: 'rd.task_accept', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" accepted` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
+    tell([task.assignee_id], 'task_accepted', `Accepted: ${task.title}`, `${req.user.name} accepted your work on "${task.title}" (${o.p.project_number}).${note ? ' ' + note : ''}`, 'my-day.html', req.user.id);
     res.json({ success: true });
   } catch (err) { await client.query('ROLLBACK').catch(() => {}); console.error('rd task accept failed:', err); fail(res, 500, 'Could not accept the task'); } finally { client.release(); }
 });
@@ -1107,6 +1127,7 @@ router.post('/tasks/:id/send-back', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_
     await audit(client, req, { action: 'rd.task_send_back', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" sent back` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
+    tell([task.assignee_id], 'task_sent_back', `Sent back: ${task.title}`, `${req.user.name} sent "${task.title}" (${o.p.project_number}) back for changes: ${note}`, 'my-day.html', req.user.id);
     res.json({ success: true });
   } catch (err) { await client.query('ROLLBACK').catch(() => {}); console.error('rd task send-back failed:', err); fail(res, 500, 'Could not send the task back'); } finally { client.release(); }
 });
@@ -1128,6 +1149,7 @@ router.post('/tasks/:id/cancel', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     await audit(client, req, { action: 'rd.task_cancel', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" cancelled` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
+    tell([task.assignee_id], 'task_cancelled', `Task cancelled: ${task.title}`, `${req.user.name} cancelled "${task.title}" (${o.p.project_number}): ${reason}`, 'my-day.html', req.user.id);
     res.json({ success: true });
   } catch (err) { await client.query('ROLLBACK').catch(() => {}); console.error('rd task cancel failed:', err); fail(res, 500, 'Could not cancel the task'); } finally { client.release(); }
 });

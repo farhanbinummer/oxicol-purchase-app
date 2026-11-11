@@ -1,0 +1,20 @@
+# Calls the app once each weekday morning so it can send the R&D "what is due today" message.
+# Needs two repository secrets: APP_URL (e.g. https://oxicol-purchase-app.onrender.com) and JOBS_TOKEN (same value as on Render).
+# The app only sends when email or WhatsApp is switched on there. See docs/NOTICES.md.
+name: Morning digest
+on:
+  schedule:
+    - cron: '30 2 * * 1-6'   # 08:00 India time, Monday to Saturday
+  workflow_dispatch:
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the app
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          JOBS_TOKEN: ${{ secrets.JOBS_TOKEN }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$JOBS_TOKEN" ]; then echo "APP_URL / JOBS_TOKEN secrets not set; nothing to do."; exit 0; fi
+          # The free Render site may be asleep: allow time to wake up and retry.
+          curl -sS --retry 5 --retry-delay 30 --retry-all-errors --max-time 120 -X POST -H "Authorization: Bearer $JOBS_TOKEN" "$APP_URL/api/jobs/morning-digest"

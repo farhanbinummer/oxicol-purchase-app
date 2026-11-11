@@ -54,6 +54,8 @@ app.use('/api/auth', require('./routes/auth'));
 
 // Everything below this line needs a logged-in session (backend/auth.js).
 // Each route file adds its own requireRole(...) on top of this where a department matters.
+// the daily job is called by an outside scheduler with its own secret token, not by a signed-in person
+app.use('/api/jobs', require('./routes/jobs'));
 app.use('/api', requireAuth);
 
 app.use('/api/suppliers', require('./routes/suppliers'));
@@ -74,6 +76,7 @@ app.use('/api/search', require('./routes/search'));
 app.use('/api/workspace', require('./routes/workspace'));
 app.use('/api/rd', require('./routes/rd'));
 app.use('/api/kpi', require('./routes/kpi'));
+app.use('/api/notices', require('./routes/notices'));
 
 // ---------- Error handling ----------
 // Unknown /api route -> JSON 404 (not an HTML page)

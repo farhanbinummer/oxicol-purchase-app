@@ -26,6 +26,16 @@
     </form>
   </div>
 
+  <div id="noticeBox" hidden>
+    <h3>Notices by email or WhatsApp</h3>
+    <p id="noticeWhere"></p>
+    <form id="noticeForm">
+      <p><label><input type="checkbox" id="nInstant"> Tell me straight away when something needs me (a task assigned, work sent back, work to review)</label></p>
+      <p><label><input type="checkbox" id="nMorning"> Send me a short message each weekday morning with what is due</label></p>
+      <p><button type="submit">Save notice settings</button></p>
+    </form>
+  </div>
+
   <h3>Change password</h3>
   <form id="pwForm">
     <p><label>Current password<br><input id="current" type="password" required></label></p>
@@ -60,6 +70,19 @@
       e.preventDefault();
       const d = await api('/api/workspace/preference', 'PUT', { default: document.getElementById('defaultWs').value || null });
       if (d.success) show('Default workspace saved. You will land there when you sign in.', true); else show(d.error, false);
+    });
+
+    api('/api/notices/prefs').then(n => {
+      if (!n.success) return;
+      document.getElementById('noticeBox').hidden = false;
+      document.getElementById('nInstant').checked = n.instant; document.getElementById('nMorning').checked = n.morning;
+      const on = [n.channels.email && n.email ? 'email (' + n.email + ')' : null, n.channels.whatsapp && n.phone ? 'WhatsApp (' + n.phone + ')' : null].filter(Boolean);
+      document.getElementById('noticeWhere').textContent = on.length ? 'Notices go to your ' + on.join(' and ') + '.' : 'Email and WhatsApp notices are not active for you yet (they need to be switched on, and an administrator needs to add your email or phone). You still see notices in the bell in the app.';
+    });
+    document.getElementById('noticeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = await api('/api/notices/prefs', 'PUT', { instant: document.getElementById('nInstant').checked, morning: document.getElementById('nMorning').checked });
+      if (d.success) show('Notice settings saved.', true); else show(d.error, false);
     });
 
     if (new URLSearchParams(location.search).get('force')) show('Your password was set by an administrator. Choose your own password to continue.', false);
