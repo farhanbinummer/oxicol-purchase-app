@@ -237,7 +237,7 @@ const WORKSPACES = {
     ]
   },
   rd: {
-    title: 'R&D Workspace', roles: ['rd'],
+    title: 'R&D Workspace', roles: ['rd', 'rd_trainee'],
     description: 'Your current stages, tasks that are due, the projects you lead and requests waiting to be assessed.',
     tabs: [{ label: 'My Day', icon: 'history', href: 'my-day.html' }, { label: 'Projects', icon: 'clipboardlist', href: 'projects.html' }],
     nav: [
@@ -740,7 +740,7 @@ BUILDERS.rd = async (ctx) => {
   const tasks = await pool.query(
     `SELECT t.id, t.title, t.status, t.priority, t.due_date, t.project_id, p.project_number, (${IST_TODAY} - t.due_date) AS days_late
        FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id
-      WHERE ${vis.clause} AND t.assignee_id = $1 AND t.status <> 'done' AND (t.due_date <= ${IST_TODAY} OR t.status = 'blocked')
+      WHERE ${vis.clause} AND t.assignee_id = $1 AND t.status NOT IN ('done','cancelled','in_review') AND (t.due_date <= ${IST_TODAY} OR t.status = 'blocked')
       ORDER BY t.due_date NULLS LAST, t.id`, vis.params);
   const dueNow = tasks.rows.filter(t => t.due_date && t.days_late >= 0);
   cards.push(card('tasks', 'My tasks due or overdue', dueNow.length, 'projects.html?mine=1', dueNow.some(t => t.days_late > 0) ? 'bad' : 'neutral', 'Open tasks assigned to you that are due today or late'));

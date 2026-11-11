@@ -78,6 +78,7 @@ test.before(async () => {
   tok.purchase = await mkUser('purchase', ['purchase']);
   tok.qc = await mkUser('qc', ['qc']);
   tok.store = await mkUser('store', ['store']);
+  tok.trainee = await mkUser('trainee', ['rd_trainee']);
 });
 
 test.after(async () => {
@@ -547,6 +548,76 @@ test('task results: a task is completed only with a result, by the right person,
   // the audit trail says what happened, not what was written
   const log = JSON.stringify((await pool.query("SELECT summary, before_data, after_data FROM audit_log WHERE entity = 'rd_task' AND entity_id = $1", [id])).rows);
   assert.ok(log.includes('completed') && !log.includes('tracking ABC123'), 'the result text is not copied into the audit log');
+});
+
+test('splitting a stage: a task is tied to a checklist item, a trainee\'s work is reviewed by someone else, and the stage cannot close over open work', async () => {
+  const p = await newProject(tok.kannur);
+  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.lead });
+  const today = R.todayIST();
+  const detail = async (who) => get(tok[who || 'lead'], p.id);
+  const stage1 = async () => (await detail()).stages[0];
+  const item0 = (await stage1()).checklist[0], item2 = (await detail()).stages[1].checklist[0];
+  const mk = (body, who) => api(tok[who || 'lead'], 'POST', `/api/rd/projects/${p.id}/tasks`, { due_date: today, ...body });
+  // a task can be tied to a checklist item, but only of its own stage
+  assert.equal((await mk({ title: 'bad link', assignee_id: uid.trainee, stage_no: 1, checklist_item_id: item2.id })).status, 400, 'an item of another stage is refused');
+  assert.equal((await mk({ title: 'no stage', assignee_id: uid.trainee, checklist_item_id: item0.id })).status, 400, 'an item needs its stage');
+  const a = await mk({ title: 'Measure viscosity of batch 1', assignee_id: uid.trainee, stage_no: 1, checklist_item_id: item0.id, description: 'Use the Brookfield, 25C' });
+  assert.equal(a.status, 201);
+  const A = async () => (await detail()).tasks.find(t => t.id === a.id);
+  assert.equal((await A()).requires_review, true, 'a trainee\'s work is always reviewed');
+  assert.equal((await A()).checklist_label, item0.label);
+  const withPeer = await mk({ title: 'Peer task', assignee_id: uid.rd2, stage_no: 1 }); assert.equal((await detail()).tasks.find(t => t.id === withPeer.id).requires_review, false, 'for others, review is the assigner\'s choice');
+  const asked = await mk({ title: 'Checked peer task', assignee_id: uid.rd2, stage_no: 1, requires_review: true }); assert.equal((await detail()).tasks.find(t => t.id === asked.id).requires_review, true);
+  // the person doing the work joins the team, so they can open the project; they get no edit rights
+  assert.equal((await detail('trainee')).project.id, p.id, 'the trainee can open the project they were given work on');
+  const lead = await detail('lead'); assert.equal(lead.stages[0].work.total, 3); assert.deepEqual(lead.stages[0].work.people.sort(), ['Test rd2', 'Test trainee'].sort());
+  const tr = await detail('trainee');
+  assert.equal(tr.can.edit, false); assert.equal(tr.can.stage, false); assert.equal(tr.can.technical, false);
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'x', assignee_id: uid.trainee, due_date: today })).status, 403, 'a trainee cannot assign work');
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/projects/${p.id}/stages/1/checklist/${item0.id}`, { done: true, result: 'tick' })).status, 403, 'a trainee cannot tick the checklist');
+  assert.equal((await api(tok.trainee, 'POST', '/api/rd/projects', valid())).status, 403, 'nor raise a request');
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: today, confirm: true })).status, 403, 'nor complete a stage');
+  // confidential lab results are not shown to a trainee
+  await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/checklist/${item0.id}`, { done: true, result: 'SECRETFORMULA-' + TAG });
+  assert.ok(!JSON.stringify(await detail('trainee')).includes('SECRETFORMULA'), 'the confidential result is not in the trainee\'s response');
+  await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/checklist/${item0.id}`, { done: false });
+  // submit: the trainee's completion waits for review instead of closing the task
+  const sub = await api(tok.trainee, 'POST', `/api/rd/tasks/${a.id}/complete`, { version: (await A()).version, result: 'Viscosity 92 KU at 25C, two readings.' });
+  assert.equal(sub.success, true); assert.equal(sub.task_status, 'in_review');
+  assert.equal((await A()).status, 'in_review');
+  assert.equal((await api(tok.trainee, 'PATCH', '/api/rd/tasks/' + a.id, { version: (await A()).version, status: 'in_progress' })).status, 409, 'work in review is locked');
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${a.id}/accept`, {})).status, 403, 'nobody accepts their own work');
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${a.id}/send-back`, { note: 'x' })).status, 403);
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${a.id}/accept`, {})).status, 403, 'a view-only person cannot review');
+  // the owner sees it to review, the trainee sees it as submitted, and it is not "late" or "open work" while waiting
+  const myDay = await api(tok.lead, 'GET', '/api/rd/my-day'); assert.ok(myDay.to_review.some(x => x.id === a.id && x.result && x.checklist_label), 'owner: to review, with the result and the item it belongs to');
+  assert.ok(!myDay.assigned.some(x => x.id === a.id), 'not double-listed as waiting on others');
+  const tDay = await api(tok.trainee, 'GET', '/api/rd/my-day'); assert.ok(tDay.submitted.some(x => x.id === a.id) && !tDay.mine.some(x => x.id === a.id), 'trainee: submitted, not open');
+  // send back with a comment: the trainee does it again
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${a.id}/send-back`, {})).status, 400, 'a comment is required');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${a.id}/send-back`, { note: 'Please repeat at 20C too.' })).success, true);
+  let t = await A(); assert.equal(t.status, 'in_progress'); assert.equal(t.review_note, 'Please repeat at 20C too.'); assert.equal(t.result, null);
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${a.id}/complete`, { result: 'Viscosity 92 KU at 25C and 95 KU at 20C.' })).status, 200);
+  // the stage cannot close while assigned work is open
+  for (const c of (await stage1()).checklist) await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/checklist/${c.id}`, { done: true, result: 'Done as written.' });
+  assert.ok((await stage1()).missing.some(m => /assigned task/.test(m)), 'the page says what is still open');
+  const blocked = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: today, confirm: true });
+  assert.equal(blocked.status, 422); assert.ok(blocked.missing.some(m => /3 assigned tasks not finished/.test(m)), 'review, peer and checked-peer tasks all count: ' + JSON.stringify(blocked.missing));
+  // accept, cancel (a reason is needed, and only R&D with edit rights), then the stage closes
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${a.id}/accept`, { note: 'Good.' })).success, true);
+  t = await A(); assert.equal(t.status, 'done'); assert.equal(t.reviewed_by_name, 'Test lead'); assert.equal(t.completed_by_name, 'Test trainee', 'the record names who did the work and who checked it');
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${withPeer.id}/cancel`, { reason: 'x' })).status, 403);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${withPeer.id}/cancel`, {})).status, 400, 'a reason is required');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${withPeer.id}/cancel`, { reason: 'No longer needed' })).success, true);
+  assert.equal((await api(tok.rd2, 'POST', `/api/rd/tasks/${asked.id}/complete`, { result: 'Checked the peer sample.' })).status, 200, 'an R&D peer\'s reviewed task is also submitted');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${asked.id}/accept`, {})).success, true);
+  const work = (await stage1()).work; assert.equal(work.total, 2, 'a cancelled task leaves the totals'); assert.equal(work.done, 2);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/stages/1/complete`, { date: today, confirm: true })).success, true, 'with the work finished the stage can close');
+  const hist = (await pool.query('SELECT action FROM rd_task_history WHERE task_id = $1 ORDER BY id', [a.id])).rows.map(r => r.action);
+  assert.deepEqual(hist, ['submitted', 'sent_back', 'submitted', 'accepted'], 'the whole review conversation is kept');
+  // a cancelled task can be reopened by R&D with a reason
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${withPeer.id}/reopen`, { reason: 'It is needed after all' })).success, true);
+  assert.equal((await detail()).tasks.find(x => x.id === withPeer.id).status, 'todo');
 });
 
 test('my day: a person sees their open tasks, the tasks they handed out, the stages they own and what was just finished', async () => {

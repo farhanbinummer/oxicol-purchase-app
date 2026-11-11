@@ -63,15 +63,17 @@
 
     /** Complete dialog: the result is required, so a task is never closed with nothing on record. */
     function completeDialog(t) {
+      const submit = !!t.requires_review;                      // these tasks are mine, so my completion is a hand-in
       const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'cdT');
-      const form = el('form'); form.method = 'dialog'; const h = el('h3', null, 'Complete task: ' + t.title); h.id = 'cdT';
+      const form = el('form'); form.method = 'dialog'; const h = el('h3', null, (submit ? 'Submit for review: ' : 'Complete task: ') + t.title); h.id = 'cdT';
       const lab = el('label', null, 'What was the result? What was done or found?'); lab.htmlFor = 'cdRes';
       const ta = el('textarea'); ta.id = 'cdRes'; ta.rows = 5; ta.maxLength = 2000;
-      const hint = el('div', 'oxi-section-note', 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.');
+      const hint = el('div', 'oxi-section-note', submit ? 'Saved under your name with today\'s date. Someone else checks it before it counts as done. At least 10 characters.' : 'Saved under your name with today\'s date. At least 10 characters. A completed task is locked until it is reopened.');
+      const back = t.review_note ? el('div', 'oxi-flag', 'Sent back: ' + t.review_note) : null;
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const row = el('div', 'row'); const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); };
-      const ok = el('button', null, 'Complete task'); ok.type = 'submit'; row.append(cancel, ok);
-      form.append(h, lab, ta, hint, err, row); dlg.appendChild(form); document.body.appendChild(dlg);
+      const ok = el('button', null, submit ? 'Submit for review' : 'Complete task'); ok.type = 'submit'; row.append(cancel, ok);
+      form.append(h); if (back) form.appendChild(back); form.append(lab, ta, hint, err, row); dlg.appendChild(form); document.body.appendChild(dlg);
       dlg.addEventListener('close', () => dlg.remove());
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault(); if (ok.disabled) return;
@@ -80,7 +82,29 @@
         const r = await api('/api/rd/tasks/' + t.id + '/complete', 'POST', { result: ta.value, version: t.version });
         ok.disabled = false;
         if (!r.success) { err.textContent = r.error || 'Could not complete the task.'; err.hidden = false; return; }      // the typed text stays
-        dlg.close(); note('Task completed: ' + t.title, true); load();
+        dlg.close(); note(r.task_status === 'in_review' ? 'Submitted for review: ' + t.title : 'Task completed: ' + t.title, true); load();
+      });
+      dlg.showModal(); ta.focus();
+    }
+
+    function reviewDialog(t, mode) {
+      const accept = mode === 'accept';
+      const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'rvT');
+      const form = el('form'); form.method = 'dialog'; const h = el('h3', null, (accept ? 'Accept: ' : 'Send back: ') + t.title); h.id = 'rvT';
+      const res = el('div', 'oxi-result'); res.append(el('strong', null, 'Result'), el('p', null, t.result || '-')); res.appendChild(el('div', 'oxi-ci-meta', 'Handed in by ' + (t.completed_by_name || t.assignee_name || '-')));
+      const lab = el('label', null, accept ? 'Comment (optional)' : 'What needs to change?'); lab.htmlFor = 'rvNote'; const ta = el('textarea'); ta.id = 'rvNote'; ta.rows = 3; ta.maxLength = 500;
+      const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+      const row = el('div', 'row'); const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); };
+      const ok = el('button', null, accept ? 'Accept work' : 'Send back'); ok.type = 'submit'; row.append(cancel, ok);
+      form.append(h, res, lab, ta, err, row); dlg.appendChild(form); document.body.appendChild(dlg); dlg.addEventListener('close', () => dlg.remove());
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault(); if (ok.disabled) return;
+        if (!accept && !ta.value.trim()) { err.textContent = 'Say what needs to change.'; err.hidden = false; ta.focus(); return; }
+        ok.disabled = true; err.hidden = true;
+        const r = await api('/api/rd/tasks/' + t.id + (accept ? '/accept' : '/send-back'), 'POST', { note: ta.value });
+        ok.disabled = false;
+        if (!r.success) { err.textContent = r.error || 'Could not save.'; err.hidden = false; return; }
+        dlg.close(); note(accept ? 'Accepted: ' + t.title : 'Sent back: ' + t.title, true); load();
       });
       dlg.showModal(); ta.focus();
     }
@@ -92,18 +116,25 @@
       const pr = el('a', null, t.project_number + ' ' + t.project_title); pr.href = 'project.html?id=' + t.project_id; sub.appendChild(pr);
       if (opts && opts.done) sub.appendChild(el('span', null, 'Completed ' + (t.completed_at ? dmy(String(t.completed_at).slice(0, 10)) : '') + (opts.who && t.completed_by_name ? ' by ' + t.completed_by_name : '')));
       else { sub.appendChild(el('span', w.cls, w.label)); if (t.status !== 'todo') sub.appendChild(el('span', null, STATUS[t.status])); }
+      if (t.checklist_label) sub.appendChild(el('span', null, 'For: ' + t.checklist_label));
+      if (t.review_note && t.status === 'in_progress') sub.appendChild(el('span', 'late', 'Sent back: ' + t.review_note));
       if (opts && opts.assignee) sub.appendChild(el('span', null, 'Responsible: ' + (t.assignee_name || '-')));
       else if (t.assigned_by_name) sub.appendChild(el('span', null, 'Assigned by ' + t.assigned_by_name));
       sub.appendChild(prioBadge(t.priority));
       main.appendChild(sub);
+      if (opts && (opts.review || opts.submitted)) { const r = el('div', 'oxi-result'); r.style.margin = '6px 0 0'; r.appendChild(el('p', null, t.result || '-')); main.appendChild(r); }
       if (opts && opts.done) { const r = el('div', 'oxi-result'); r.style.margin = '6px 0 0'; r.appendChild(el('p', null, t.result || 'No result recorded (completed before results were kept).')); main.appendChild(r); }
       row.appendChild(main);
       if (opts && opts.actions) {
         const act = el('div', 'md-act');
         if (t.status === 'todo') { const b = el('button', 'oxi-btn-secondary', 'Start'); b.type = 'button'; b.setAttribute('aria-label', 'Start: ' + t.title);
           b.onclick = async () => { b.disabled = true; const r = await api('/api/rd/tasks/' + t.id, 'PATCH', { version: t.version, status: 'in_progress' }); if (!r.success) { b.disabled = false; note(r.error || 'Could not start the task.', false); return; } load(); }; act.appendChild(b); }
-        const c = el('button', null, 'Complete'); c.type = 'button'; c.setAttribute('aria-label', 'Complete: ' + t.title); c.onclick = () => completeDialog(t); act.appendChild(c);
+        const c = el('button', null, t.requires_review ? 'Submit for review' : 'Complete'); c.type = 'button'; c.setAttribute('aria-label', (t.requires_review ? 'Submit for review: ' : 'Complete: ') + t.title); c.onclick = () => completeDialog(t); act.appendChild(c);
         row.appendChild(act);
+      }
+      if (opts && opts.review) {
+        const act = el('div', 'md-act'); const sb = el('button', 'oxi-btn-secondary', 'Send back'); sb.type = 'button'; sb.setAttribute('aria-label', 'Send back: ' + t.title); sb.onclick = () => reviewDialog(t, 'back');
+        const ac = el('button', null, 'Accept'); ac.type = 'button'; ac.setAttribute('aria-label', 'Accept: ' + t.title); ac.onclick = () => reviewDialog(t, 'accept'); act.append(sb, ac); row.appendChild(act);
       }
       li.appendChild(row); return li;
     }
@@ -127,18 +158,22 @@
       if (bucket.overdue.length) bits.push(plural(bucket.overdue.length, 'task') + ' overdue');
       bits.push(bucket.today.length ? plural(bucket.today.length, 'task') + ' due today' : 'nothing due today');
       if (bucket.tomorrow.length) bits.push(plural(bucket.tomorrow.length, 'task') + ' tomorrow');
-      hero.appendChild(el('p', null, (d.mine.length ? 'You have ' + bits.join(', ') + '.' : 'You have no open tasks.') + ' Today is ' + new Date(today + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) + '.'));
+      if (d.to_review.length) bits.unshift(plural(d.to_review.length, 'piece') + ' of work waiting for your review');
+      hero.appendChild(el('p', null, (d.mine.length || d.to_review.length ? 'You have ' + bits.join(', ') + '.' : 'You have no open tasks.') + ' Today is ' + new Date(today + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) + '.'));
       box.appendChild(hero);
 
       const sum = el('div', 'md-sum');
       const tile = (n, label, cls, target) => { const b = el('button', 'md-tile ' + (cls || '')); b.type = 'button'; b.append(el('b', null, String(n)), el('span', null, label)); b.setAttribute('aria-label', label + ': ' + n); b.onclick = () => { const e = $(target); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; sum.appendChild(b); };
+      if (d.to_review.length) tile(d.to_review.length, 'To review', 'warn', 'sReview');
       tile(bucket.overdue.length, 'Overdue', bucket.overdue.length ? 'bad' : 'ok', 'sOver'); tile(bucket.today.length, 'Today', '', 'sToday'); tile(bucket.tomorrow.length, 'Tomorrow', '', 'sTomorrow');
       tile(bucket.week.length + bucket.later.length, 'Later', '', 'sWeek'); tile(d.assigned.length, 'Waiting on others', d.assigned.length ? 'warn' : '', 'sWait');
       box.appendChild(sum);
       if (blocked) box.appendChild(el('p', 'oxi-section-note', plural(blocked, 'of your tasks') + ' blocked: tell the person who assigned it what you are waiting for.'));
 
       const build = (t) => taskRow(t, today, { actions: true });
-      if (!d.mine.length && !d.stages.length) { const c = el('div', 'oxi-card2 md-allclear'); c.append(el('strong', null, 'All clear'), el('p', 'oxi-section-note', 'Nothing is waiting for you. New work appears here as soon as it is assigned.')); box.appendChild(c); }
+      if (!d.mine.length && !d.stages.length && !d.to_review.length) { const c = el('div', 'oxi-card2 md-allclear'); c.append(el('strong', null, 'All clear'), el('p', 'oxi-section-note', 'Nothing is waiting for you. New work appears here as soon as it is assigned.')); box.appendChild(c); }
+      const rev = section('sReview', 'To review', d.to_review, 'bad', (t) => taskRow(t, today, { review: true, assignee: true }));
+      if (rev) { rev.appendChild(el('p', 'oxi-section-note', 'Work handed in by people you assigned it to. Accept it, or send it back with what needs to change.')); box.appendChild(rev); }
       [section('sOver', 'Overdue', bucket.overdue, 'bad', build), section('sToday', 'Today', bucket.today, '', build, d.mine.length ? 'Nothing is due today.' : null),
        section('sTomorrow', 'Tomorrow', bucket.tomorrow, '', build), section('sWeek', 'This week and later', bucket.week.concat(bucket.later), '', build)].forEach(s => s && box.appendChild(s));
 
@@ -150,6 +185,8 @@
         const open = el('a', 'oxi-btn oxi-btn-secondary', 'Open stage'); open.href = 'project.html?id=' + x.project_id; row.appendChild(open); li.appendChild(row); return li;
       }); if (stages) box.appendChild(stages);
 
+      const subm = section('sSubmitted', 'Submitted, waiting for review', d.submitted, '', (t) => taskRow(t, today, { submitted: true }));
+      if (subm) box.appendChild(subm);
       const wait = section('sWait', 'Waiting on others', d.assigned, '', (t) => taskRow(t, today, { assignee: true }));
       if (wait) { wait.appendChild(el('p', 'oxi-section-note', 'Tasks you assigned to other people. Their result appears here when they complete them.')); box.appendChild(wait); }
 

@@ -391,6 +391,7 @@ const STEPS = [
     name: '010_rd_permissions',
     async run(db) {
       for (const [role, keys] of Object.entries(DEFAULTS)) {
+        if (role === 'rd_trainee') continue;           // that role does not exist yet here; migration 014 creates it and seeds its one grant
         for (const key of keys.filter(k => k.startsWith('rd.') || k === 'field.rd_technical')) {
           await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
         }
@@ -432,6 +433,30 @@ const STEPS = [
         )`);
       await db.query('CREATE INDEX IF NOT EXISTS idx_rd_task_history_task ON rd_task_history(task_id)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_rd_tasks_created_by ON rd_tasks(created_by)');
+    }
+  },
+  {
+    // Splitting a big stage: tasks can be tied to a checklist item, can need a second person's review, and can be cancelled with a
+    // reason. A new restricted role, R&D Trainee, is added. Existing tasks, roles and grants are untouched.
+    name: '014_rd_stage_work_review',
+    async run(db) {
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS checklist_item_id INTEGER REFERENCES rd_checklist_items(id) ON DELETE SET NULL');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS requires_review BOOLEAN NOT NULL DEFAULT FALSE');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS reviewed_by INTEGER REFERENCES users(id)');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS review_note TEXT');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS cancel_reason TEXT');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_tasks_stage ON rd_tasks(project_id, stage_no)');
+      await db.query('ALTER TABLE rd_tasks DROP CONSTRAINT IF EXISTS rd_tasks_status_check');
+      await db.query("ALTER TABLE rd_tasks ADD CONSTRAINT rd_tasks_status_check CHECK (status IN ('todo','in_progress','blocked','in_review','done','cancelled'))");
+      await db.query('ALTER TABLE rd_task_history DROP CONSTRAINT IF EXISTS rd_task_history_action_check');
+      await db.query("ALTER TABLE rd_task_history ADD CONSTRAINT rd_task_history_action_check CHECK (action IN ('completed','reopened','submitted','accepted','sent_back','cancelled'))");
+      const ROLES = "('branch','production','store','purchase','accounts','admin','qc','manager','rd','rd_trainee')";
+      await db.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
+      await db.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ${ROLES})`);
+      await db.query('ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check');
+      await db.query("ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('branch','production','store','purchase','accounts','qc','manager','rd','rd_trainee'))");
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('rd_trainee','rd.view') ON CONFLICT DO NOTHING");
     }
   }
 ];

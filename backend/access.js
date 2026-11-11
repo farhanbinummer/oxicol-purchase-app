@@ -22,6 +22,7 @@ const ROLES = {
   store:      { label: 'Stores',        rank: 4 },
   qc:         { label: 'Quality check', rank: 5 },
   rd:         { label: 'R&D',           rank: 5.5 },
+  rd_trainee: { label: 'R&D Trainee',   rank: 5.6 },
   production: { label: 'Production',    rank: 6 },
   branch:     { label: 'Branch staff',  rank: 7, needsBranch: true }
 };

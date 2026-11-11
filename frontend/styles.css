@@ -1176,7 +1176,7 @@ a.oxi-kpi-chip { color: inherit; text-decoration: none; }
 a.oxi-kpi-chip:hover { border-color: var(--accent); }
 
 /* project page: Board and Timeline */
-.oxi-board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: var(--s3); overflow-x: auto; padding-bottom: var(--s2); }
+.oxi-board { display: grid; grid-template-columns: repeat(5, minmax(200px, 1fr)); gap: var(--s3); overflow-x: auto; padding-bottom: var(--s2); }
 .oxi-col { background: var(--bg-2, var(--primary-soft)); border: 1px solid var(--border); border-radius: var(--r-card); padding: var(--s3); min-height: 140px; }
 .oxi-col.over { outline: 2px dashed var(--accent); }
 .oxi-col h3 { margin: 0 0 var(--s3); font-size: 14px; }
@@ -1199,7 +1199,7 @@ a.oxi-kpi-chip:hover { border-color: var(--accent); }
 .oxi-gantt .vline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--accent); }
 .oxi-gantt .mark { position: absolute; top: 11px; width: 12px; height: 12px; margin-left: -6px; transform: rotate(45deg); background: var(--info); }
 .oxi-gantt .mark.late { background: var(--danger); } .oxi-gantt .mark.launch { background: var(--success); }
-@media (max-width: 900px) { .oxi-board { grid-template-columns: repeat(4, 240px); } }
+@media (max-width: 900px) { .oxi-board { grid-template-columns: repeat(5, 240px); } }
 .oxi-tabs { overflow-x: auto; flex-wrap: nowrap; } .oxi-tabs [role=tab] { flex: none; white-space: nowrap; }
 
 /* ============================================================
@@ -1318,3 +1318,14 @@ a.oxi-kpi-chip:hover { border-color: var(--accent); }
 .oxi-resultform label { display: block; font-weight: 600; margin-bottom: 4px; }
 .oxi-resultform textarea { width: 100%; min-height: 84px; }
 .oxi-resultform .row { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: 4px; }
+
+/* assigned work, review */
+.oxi-stack i.warn { background: var(--warn); } .oxi-legend i.warn { background: var(--warn); }
+.oxi-work { margin: var(--s3) 0 0; padding: var(--s3); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.oxi-work > h3 { margin: 0 0 4px; font-size: 15px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.oxi-work .roll { color: var(--text-2); font-weight: 500; font-size: 13px; }
+.oxi-work ul { list-style: none; margin: var(--s2) 0; padding: 0; display: grid; gap: 6px; }
+.oxi-work li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px; border-left: 4px solid var(--border-strong); border-radius: 8px; background: var(--surface-2); font-size: 14px; }
+.oxi-work li.review { border-left-color: var(--warn); } .oxi-work li.done { border-left-color: var(--success); } .oxi-work li.late { border-left-color: var(--danger); }
+.oxi-work li .grow { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; } .oxi-work li small { color: var(--text-2); display: block; }
+.oxi-ci-links { margin: 0 0 4px 26px; font-size: 13px; color: var(--text-2); }

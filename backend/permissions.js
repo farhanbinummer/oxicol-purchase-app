@@ -194,6 +194,8 @@ const DEFAULTS = {
 
 const RD_DEFAULTS = {
   rd: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_EDIT, KEYS.RD_STAGE, KEYS.FIELD_RD_TECHNICAL, KEYS.CATALOG_VIEW],
+  // a trainee sees only projects they are on and their own tasks: no edit, no stage completion, no confidential lab content
+  rd_trainee: [KEYS.RD_VIEW],
   manager: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_CREATE],
   branch: [KEYS.RD_VIEW],
   production: [KEYS.RD_VIEW], purchase: [KEYS.RD_VIEW], qc: [KEYS.RD_VIEW], store: [KEYS.RD_VIEW], accounts: [KEYS.RD_VIEW]
