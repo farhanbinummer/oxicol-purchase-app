@@ -116,7 +116,7 @@ async function deliver(u, { kind, subject, text, path, which }) {
   if (emailOn() && u.email) {
     const body = `Hello ${u.name},\n\n${text}${link}\n\n- Oxicol`;
     if (testMode()) { await logNotice(u, 'email', kind, subject, body, u.email, 'test'); out.push('email'); }
-    else { try { await sendEmail(u.email, 'Oxicol - ' + subject, body); await logNotice(u, 'email', kind, subject, body, u.email, 'sent'); out.push('email'); } catch (e) { await logNotice(u, 'email', kind, subject, body, u.email, 'failed', e.message); } }
+    else { try { await sendEmail(u.email, 'Oxicol - ' + subject, body); await logNotice(u, 'email', kind, subject, body, u.email, 'sent'); out.push('email'); } catch (e) { console.error('Email notice failed for', u.name + ':', e.message); await logNotice(u, 'email', kind, subject, body, u.email, 'failed', e.message); } }
   }
   if (whatsappOn() && u.phone && !testMode()) {
     const body = `Oxicol: ${text}${link}`;

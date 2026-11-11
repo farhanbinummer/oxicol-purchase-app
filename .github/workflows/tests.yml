@@ -55,8 +55,14 @@ jobs:
             sleep 1
           done
           curl -fs http://localhost:3100/api/health
+          # The server starts listening before its start-up database updates finish, so wait for the last one to be logged.
+          for i in $(seq 1 60); do
+            if grep -q "018_notices" ../server-boot.log; then break; fi
+            sleep 1
+          done
           kill $pid || true
           grep -q "014_rd_stage_work_review" ../server-boot.log
+          grep -q "018_notices" ../server-boot.log
 
       - name: Unit tests
         working-directory: backend
