@@ -700,6 +700,66 @@ test('notices: people are told about new tasks, work to review and work sent bac
   assert.equal(await has('lead', 'Work to review'), false, 'nothing is left waiting once the work is accepted');
 });
 
+test('team performance: numbers come from the records, bands follow the targets, nobody is ranked, and who may see what is enforced', async () => {
+  tok.kpi1 = await mkUser('kpi1', ['rd']); tok.kpi2 = await mkUser('kpi2', ['rd_trainee']); tok.kpi3 = await mkUser('kpi3', ['rd']);
+  const p = await newProject(tok.kannur);
+  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.kpi3 });
+  const today = R.todayIST(), plus = (n) => R.addDays(today, n), range = `from=${plus(-30)}&to=${today}`;
+  const mk = async (title, who, due) => (await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title, assignee_id: uid[who], due_date: due })).id;
+  // kpi1: two finished (one on time, one a day late) and two still open (one of them overdue)
+  const t1 = await mk('KPI on time', 'kpi1', plus(2)), t2 = await mk('KPI late', 'kpi1', plus(-1)); await mk('KPI open later', 'kpi1', plus(5)); await mk('KPI open overdue', 'kpi1', plus(-3));
+  for (const t of [t1, t2]) assert.equal((await api(tok.kpi1, 'POST', `/api/rd/tasks/${t}/complete`, { result: 'Finished and written up properly.' })).success, true);
+  // kpi2 is a trainee, so everything is reviewed (by kpi3): one task is sent back once, the other is right first time
+  const a = await mk('KPI reviewed A', 'kpi2', plus(1)), b = await mk('KPI reviewed B', 'kpi2', plus(1));
+  const submit = (id) => api(tok.kpi2, 'POST', `/api/rd/tasks/${id}/complete`, { result: 'Handed in with the full details.' });
+  await submit(a); await api(tok.kpi3, 'POST', `/api/rd/tasks/${a}/send-back`, { note: 'Add the batch number.' }); await submit(a); await api(tok.kpi3, 'POST', `/api/rd/tasks/${a}/accept`, {});
+  await submit(b); await api(tok.kpi3, 'POST', `/api/rd/tasks/${b}/accept`, {});
+  // a stage kpi3 owns, planned for yesterday and finished today
+  await pool.query('UPDATE rd_stages SET planned_date = $1 WHERE project_id = $2 AND stage_no = 1', [plus(-1), p.id]);
+  assert.equal((await completeStage(tok.lead, p.id, 1)).success, true);
+
+  const list = await api(tok.manager, 'GET', `/api/kpi/rd?${range}`);
+  assert.equal(list.success, true); const P = (n) => list.people.find(x => x.id === uid[n]);
+  const k1 = P('kpi1');
+  assert.deepEqual([k1.tasks.completed, k1.tasks.with_due, k1.tasks.on_time, k1.tasks.on_time_rate, k1.tasks.avg_days_late, k1.tasks.open_now, k1.tasks.overdue_now], [2, 2, 1, 50, 1, 2, 1], 'completed, on time, late, and what is still open');
+  assert.equal(k1.bands.on_time, 'red', '50% on time is below the amber line'); assert.equal(k1.bands.overdue, 'amber', 'one overdue task is amber'); assert.equal(k1.few.on_time, true, 'two items is too few to mean much');
+  const k2 = P('kpi2'); assert.deepEqual([k2.review.accepted, k2.review.first_time, k2.review.first_time_rate], [2, 1, 50], 'one of two accepted without a send-back');
+  const k3 = P('kpi3'); assert.equal(k3.review.reviews_done, 3, 'a send-back and two accepts'); assert.ok(k3.review.avg_review_days >= 0 && k3.review.avg_review_days < 1);
+  assert.deepEqual([k3.stages.done, k3.stages.with_plan, k3.stages.on_time, k3.stages.on_time_rate, k3.stages.avg_delay_days], [1, 1, 0, 0, 1], 'the stage was finished a day late');
+  assert.equal(k3.bands.stage_on_time, 'red');
+  // work somebody else closed is not counted as theirs, and nobody is ranked or scored
+  const k2tasks = await api(tok.manager, 'GET', `/api/kpi/rd/person/${uid.kpi1}?${range}`); assert.equal(k2tasks.success, true);
+  assert.ok(list.people.every((x, i, arr) => i === 0 || arr[i - 1].name.localeCompare(x.name) <= 0), 'people are listed alphabetically');
+  assert.ok(!JSON.stringify(list).match(/"(score|rank|ranking|position)"/), 'there is no score or rank');
+  // who may see what
+  for (const who of ['kpi1', 'kpi2', 'kannur']) assert.equal((await api(tok[who], 'GET', `/api/kpi/rd?${range}`)).status, 403, who + ' cannot see everyone\'s numbers');
+  assert.equal((await api(tok.admin, 'GET', `/api/kpi/rd?${range}`)).success, true, 'an administrator can');
+  const me = await api(tok.kpi1, 'GET', `/api/kpi/rd/me?${range}`); assert.equal(me.person.id, uid.kpi1); assert.equal(me.person.tasks.completed, 2, 'each person sees their own numbers');
+  assert.equal((await api(tok.kpi1, 'GET', `/api/kpi/rd/person/${uid.kpi2}?${range}`)).status, 403, 'but not a colleague\'s');
+  const own = await api(tok.kpi1, 'GET', `/api/kpi/rd/person/${uid.kpi1}?${range}`); assert.equal(own.success, true);
+  assert.equal(own.trend.length, 6); assert.equal(own.trend[5].completed, 2); assert.ok(own.tasks.some(t => t.title === 'KPI open overdue') && own.tasks.some(t => t.title === 'KPI late' && t.days_late === 1), 'the person\'s tasks are listed with how late');
+  assert.ok(own.tasks.find(t => t.title === 'KPI reviewed A') === undefined, 'tasks of other people are not mixed in');
+  // the period is checked
+  assert.equal((await api(tok.manager, 'GET', `/api/kpi/rd?from=${today}&to=${plus(-5)}`)).status, 400, 'start after end');
+  assert.equal((await api(tok.manager, 'GET', '/api/kpi/rd?from=2026-02-31&to=2026-03-01')).status, 400, 'not a real date');
+  assert.equal((await api(tok.manager, 'GET', `/api/kpi/rd?from=${plus(-400)}&to=${today}`)).status, 400, 'more than a year');
+  // a spreadsheet file of the same table
+  const csv = await fetch(BASE + `/api/kpi/rd/export?${range}`, { headers: { Authorization: 'Bearer ' + tok.manager } });
+  assert.equal(csv.status, 200); assert.match(csv.headers.get('content-type'), /text\/csv/); const text = await csv.text();
+  assert.match(text, /Person,Username,Roles/); assert.match(text, /Test kpi1/);
+  assert.equal((await fetch(BASE + `/api/kpi/rd/export?${range}`, { headers: { Authorization: 'Bearer ' + tok.kpi1 } })).status, 403);
+  // the targets: anyone may read them, only an administrator changes them, and the bands follow
+  assert.deepEqual((await api(tok.kpi1, 'GET', '/api/kpi/targets')).targets, { green_min: 90, amber_min: 70, overdue_amber_max: 2 });
+  assert.equal((await api(tok.manager, 'PUT', '/api/kpi/targets', { green_min: 80, amber_min: 50, overdue_amber_max: 1 })).status, 403, 'only an administrator');
+  assert.equal((await api(tok.admin, 'PUT', '/api/kpi/targets', { green_min: 50, amber_min: 60, overdue_amber_max: 1 })).status, 400, 'amber must be below green');
+  try {
+    assert.equal((await api(tok.admin, 'PUT', '/api/kpi/targets', { green_min: 40, amber_min: 30, overdue_amber_max: 0 })).success, true);
+    const again = await api(tok.manager, 'GET', `/api/kpi/rd?${range}`); const r1 = again.people.find(x => x.id === uid.kpi1);
+    assert.equal(r1.bands.on_time, 'green', '50% is green when green starts at 40%'); assert.equal(r1.bands.overdue, 'red', 'one overdue is red when amber allows none');
+  } finally { await api(tok.admin, 'PUT', '/api/kpi/targets', { green_min: 90, amber_min: 70, overdue_amber_max: 2 }); }
+  assert.ok((await pool.query("SELECT COUNT(*)::int n FROM audit_log WHERE action = 'kpi.targets'")).rows[0].n >= 1, 'a change of targets is audited');
+});
+
 test('my day: a person sees their open tasks, the tasks they handed out, the stages they own and what was just finished', async () => {
   const p = await newProject(tok.kannur);
   const d0 = await get(tok.lead, p.id);

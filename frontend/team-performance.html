@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Team Performance</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="rd-dashboard.html">R&amp;D Dashboard</a></p>
+  <h1>Team Performance</h1>
+  <p class="oxi-page-sub">How each R&amp;D person is doing, worked out from the work recorded in the app. Use it to start a conversation, not to rank people.</p>
+  <p id="message" role="status"></p>
+  <div class="kpi-tools" id="tools"></div>
+  <div id="explain"></div>
+  <div id="board" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
+
+  <script src="common.js"></script>
+  <script src="kpi-ui.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let PERIOD = null, DATA = null, closePanel = null;
+    const note = (t, ok) => { const m = $('message'); m.textContent = t; m.className = ok ? 'success' : 'error'; };
+    const isAdmin = () => { try { const m = oxiMe(); return !!(m && m.is_admin); } catch (e) { return false; } };
+    const qs = () => 'from=' + PERIOD.from + '&to=' + PERIOD.to;
+
+    function tools() {
+      const t = $('tools'); t.innerHTML = '';
+      const per = kpiPeriod((p) => { PERIOD = p; load(); }); t.appendChild(per); PERIOD = per.read();
+      const ex = kEl('button', 'oxi-btn-secondary', 'Export spreadsheet'); ex.type = 'button'; ex.onclick = exportCsv; t.appendChild(ex);
+      if (isAdmin()) { const tg = kEl('button', 'oxi-btn-secondary', 'Targets'); tg.type = 'button'; tg.onclick = targetsDialog; t.appendChild(tg); }
+      $('explain').appendChild(kpiExplain());
+    }
+
+    async function exportCsv() {
+      const r = await fetch('/api/kpi/rd/export?' + qs());
+      if (!r.ok) { const j = await r.json().catch(() => ({})); note(j.error || 'Could not export.', false); return; }
+      const blob = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'rd-team-performance-' + PERIOD.from + '-to-' + PERIOD.to + '.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    function targetsDialog() {
+      const T = DATA.targets, dlg = kEl('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'tgT');
+      const form = kEl('form'); form.method = 'dialog'; const h = kEl('h3', null, 'Performance targets'); h.id = 'tgT';
+      const mk = (id, label, val, hint, max) => { const w = kEl('div'); const l = kEl('label', null, label); l.htmlFor = id; const i = kEl('input'); i.id = id; i.type = 'number'; i.min = '0'; i.max = String(max); i.step = '1'; i.value = val; const s = kEl('small', null, hint); s.style.cssText = 'display:block;color:var(--text-2);margin:2px 0 8px'; w.append(l, i, s); return [w, i]; };
+      const [w1, g] = mk('tgG', 'Green from (%)', T.green_min, 'A percentage at or above this is "On target".', 100);
+      const [w2, a] = mk('tgA', 'Amber from (%)', T.amber_min, 'At or above this (but below green) is "Watch". Below it is "Below target".', 100);
+      const [w3, o] = mk('tgO', 'Overdue tasks that are still amber', T.overdue_amber_max, 'No overdue tasks is green. Up to this many is amber. More is below target.', 50);
+      const err = kEl('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
+      const row = kEl('div', 'row'); const cancel = kEl('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); }; const ok = kEl('button', null, 'Save targets'); ok.type = 'submit'; row.append(cancel, ok);
+      form.append(h, w1, w2, w3, err, row); dlg.appendChild(form); document.body.appendChild(dlg); dlg.addEventListener('close', () => dlg.remove());
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault(); ok.disabled = true; err.hidden = true;
+        const r = await api('/api/kpi/targets', 'PUT', { green_min: Number(g.value), amber_min: Number(a.value), overdue_amber_max: Number(o.value) });
+        ok.disabled = false; if (!r.success) { err.textContent = r.error || 'Could not save.'; err.hidden = false; return; }
+        dlg.close(); note('Targets saved.', true); load();
+      });
+      dlg.showModal(); g.focus();
+    }
+
+    function tile(value, label, cls) { const d = kEl('div', 'kpi-tile ' + (cls || '')); d.append(kEl('b', null, value), kEl('span', null, label)); return d; }
+
+    function render() {
+      const d = DATA, box = $('board'); box.innerHTML = ''; box.setAttribute('aria-busy', 'false');
+      const active = d.people.filter(p => p.has_activity);
+      const sum = (f) => active.reduce((a, p) => a + f(p), 0), withDue = sum(p => p.tasks.with_due), onTime = sum(p => p.tasks.on_time);
+      const rate = withDue ? Math.round(onTime / withDue * 1000) / 10 : null;
+      const reds = active.filter(p => Object.values(p.bands).includes('red')).length;
+      const tiles = kEl('div', 'kpi-tiles');
+      tiles.append(tile(String(sum(p => p.tasks.completed)), 'tasks completed by the team'), tile(rate == null ? '-' : kPct(rate), withDue ? 'on time (' + onTime + ' of ' + withDue + ')' : 'on time', rate == null ? '' : rate >= d.targets.green_min ? 'green' : rate >= d.targets.amber_min ? 'amber' : 'red'),
+        tile(String(sum(p => p.tasks.overdue_now)), 'tasks overdue right now', sum(p => p.tasks.overdue_now) ? 'amber' : 'green'), tile(String(reds), reds === 1 ? 'person with a number below target' : 'people with a number below target', reds ? 'red' : 'green'));
+      box.appendChild(tiles);
+      box.appendChild(kEl('p', 'kpi-note', 'Period ' + dmy(d.period.from) + ' to ' + dmy(d.period.to) + '. People are listed alphabetically: there is no overall score and no ranking. Targets: green from ' + d.targets.green_min + '%, amber from ' + d.targets.amber_min + '%.'));
+      if (!d.people.length) { box.appendChild(kEl('p', 'kpi-empty', 'No R&D people or R&D activity found.')); return; }
+      const wrap = kEl('div', 'oxi-table-scroll'); wrap.setAttribute('role', 'region'); wrap.setAttribute('aria-label', 'Performance by person'); wrap.tabIndex = 0;
+      const t = kEl('table', 'kpi-table'); t.innerHTML = '<thead><tr><th scope="col">Person</th><th scope="col">Tasks done</th><th scope="col">On time</th><th scope="col">Overdue now</th><th scope="col">Right first time</th><th scope="col">Stages on time</th><th scope="col">Review speed</th><th scope="col">Open now</th></tr></thead>';
+      const tb = kEl('tbody');
+      d.people.forEach(p => {
+        const tr = kEl('tr'); const c0 = kEl('td'); const b = kEl('button', 'kpi-person', p.name); b.type = 'button'; b.setAttribute('aria-label', 'Open the detail for ' + p.name); b.onclick = () => openPerson(p.id, b);
+        c0.append(b, kEl('span', 'kpi-role', p.roles.map(r => ({ rd: 'R&D', rd_trainee: 'R&D trainee', admin: 'Administrator', manager: 'Manager', qc: 'Quality check' }[r] || r)).join(', '))); tr.appendChild(c0);
+        const cell = (n) => { const c = kEl('td'); c.appendChild(n); return c; };
+        tr.append(
+          cell(kpiCell(String(p.tasks.completed), p.tasks.avg_days_late != null ? 'late ones averaged ' + p.tasks.avg_days_late + ' days' : '')),
+          cell(kpiCell(kPct(p.tasks.on_time_rate), p.tasks.with_due ? p.tasks.on_time + ' of ' + p.tasks.with_due : 'no tasks with a due date', p.bands.on_time, p.few.on_time)),
+          cell(kpiCell(String(p.tasks.overdue_now), p.tasks.open_now ? 'of ' + p.tasks.open_now + ' open' : 'nothing open', p.bands.overdue)),
+          cell(kpiCell(kPct(p.review.first_time_rate), p.review.accepted ? p.review.first_time + ' of ' + p.review.accepted + ' accepted' : 'no reviewed work', p.bands.first_time_right, p.few.first_time_right)),
+          cell(kpiCell(kPct(p.stages.on_time_rate), p.stages.with_plan ? p.stages.on_time + ' of ' + p.stages.with_plan + (p.stages.avg_delay_days != null ? ', late ones ' + p.stages.avg_delay_days + ' days' : '') : 'no stages finished', p.bands.stage_on_time, p.few.stage_on_time)),
+          cell(kpiCell(p.review.reviews_done ? kpiDays(p.review.avg_review_days) : '-', p.review.reviews_done ? kPlural(p.review.reviews_done, 'review') : 'does not review')),
+          cell(kpiCell(String(p.tasks.open_now), 'tasks in hand')));
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
+    }
+
+    async function openPerson(id, opener) {
+      const old = document.getElementById('kpiPanel'); if (old) old.remove();
+      const r = await api('/api/kpi/rd/person/' + id + '?' + qs());
+      if (!r.success) { note(r.error || 'Could not load the detail.', false); return; }
+      const p = r.person, bg = kEl('div', 'oxi-sidebg'); bg.id = 'kpiPanel';
+      const pn = kEl('aside', 'oxi-sidepanel'); pn.setAttribute('role', 'dialog'); pn.setAttribute('aria-modal', 'true'); pn.setAttribute('aria-labelledby', 'kpT'); pn.tabIndex = -1; pn.style.width = 'min(560px, 100%)';
+      const close = () => { bg.remove(); document.removeEventListener('keydown', esc); if (location.hash.indexOf('person=') > 0) history.replaceState(null, '', location.pathname); if (opener && opener.isConnected) opener.focus(); }; const esc = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', esc); bg.addEventListener('mousedown', (e) => { if (e.target === bg) close(); });
+      const head = kEl('div', 'oxi-sidehead'); const h = kEl('h2', null, p.name); h.id = 'kpT'; const x = kEl('button', 'oxi-btn-secondary', 'Close'); x.type = 'button'; x.onclick = close; head.append(h, x);
+      pn.append(head, kEl('p', 'oxi-section-note', dmy(r.period.from) + ' to ' + dmy(r.period.to)));
+      const grid = kEl('div', 'kpi-tiles');
+      grid.append(tile(String(p.tasks.completed), 'tasks completed'), tile(kPct(p.tasks.on_time_rate), p.tasks.with_due ? 'on time (' + p.tasks.on_time + ' of ' + p.tasks.with_due + ')' : 'on time', p.bands.on_time || ''), tile(String(p.tasks.overdue_now), 'overdue now', p.bands.overdue || ''), tile(kPct(p.review.first_time_rate), 'right first time', p.bands.first_time_right || ''));
+      pn.appendChild(grid);
+      pn.appendChild(kEl('h3', null, 'On-time rate, last six months')); pn.appendChild(kpiTrend(r.trend));
+      pn.appendChild(kEl('h3', null, 'Their tasks')); pn.appendChild(kpiTasks(r.tasks, r.period.today));
+      bg.appendChild(pn); document.body.appendChild(bg); x.focus();
+    }
+
+    async function load() {
+      const box = $('board'); box.setAttribute('aria-busy', 'true');
+      const d = await api('/api/kpi/rd?' + qs());
+      if (!d.success) { box.setAttribute('aria-busy', 'false'); box.innerHTML = ''; const e = kEl('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(kEl('p', null, d.error || 'Could not load the numbers.')); box.appendChild(e); return; }
+      DATA = d; render();
+      const m = location.hash.match(/person=(\d+)/); if (m) openPerson(Number(m[1]), null);
+    }
+    tools(); load().catch(() => note('Could not reach the server.', false));
+  </script>
+</body>
+</html>

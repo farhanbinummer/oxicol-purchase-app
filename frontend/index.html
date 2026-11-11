@@ -67,6 +67,11 @@
   <div id="controls" class="oxi-controls" hidden></div>
   <div class="oxi-metrics" id="cards" aria-busy="true"></div>
   <section class="oxi-charts" id="charts" hidden aria-label="Charts"></section>
+  <section id="kpiBox" hidden aria-labelledby="kpiTitle">
+    <h2 class="oxi-band-title" id="kpiTitle">Team performance</h2>
+    <div id="kpiTiles" class="kpi-tiles"></div>
+    <div id="kpiBelow"></div>
+  </section>
   <section id="extraBox" hidden aria-labelledby="extraTitle">
     <h2 class="oxi-band-title" id="extraTitle">R&amp;D projects</h2>
     <div class="oxi-metrics" id="extraCards"></div>
@@ -256,6 +261,23 @@
       const ex = $('extraCards'); ex.innerHTML = '';
       (d.extra_cards || []).forEach((c, i) => ex.appendChild(metricCard(c, i)));
       $('extraBox').hidden = !(d.extra_cards && d.extra_cards.length);
+
+      // the team's numbers (administrator and manager only): the server sends this only to people who may see it
+      const kb = $('kpiBox'), kt = d.team_kpis; kb.hidden = !kt; $('kpiTiles').innerHTML = ''; $('kpiBelow').innerHTML = '';
+      if (kt) {
+        $('kpiTitle').textContent = 'Team performance (last ' + kt.period.days + ' days)';
+        const mk = (value, label, cls) => { const t = el('div', 'kpi-tile ' + (cls || '')); t.append(el('b', null, value), el('span', null, label)); return t; };
+        const rate = kt.on_time_rate;
+        $('kpiTiles').append(mk(String(kt.completed), 'tasks completed by ' + kt.people + ' people'), mk(rate == null ? '-' : rate + '%', rate == null ? 'on time' : 'finished on time (' + kt.with_due + ' with a due date)', rate == null ? '' : rate >= kt.targets.green_min ? 'green' : rate >= kt.targets.amber_min ? 'amber' : 'red'),
+          mk(String(kt.overdue_now), 'tasks overdue right now', kt.overdue_now ? 'amber' : 'green'), mk(String(kt.below_target.length), kt.below_target.length === 1 ? 'person with a number below target' : 'people with a number below target', kt.below_target.length ? 'red' : 'green'));
+        if (kt.below_target.length) {
+          const ul = el('ul', 'kpi-below'); ul.setAttribute('aria-label', 'People with a number below target');
+          kt.below_target.forEach(p => { const li = el('li'); const a = el('a'); a.href = 'team-performance.html#person=' + p.id; a.append(el('strong', null, p.name), el('small', null, p.why.join('; '))); li.appendChild(a); ul.appendChild(li); });
+          $('kpiBelow').appendChild(ul);
+        }
+        const more = el('a', 'oxi-btn oxi-btn-secondary', 'Open Team Performance'); more.href = 'team-performance.html'; more.style.marginTop = '12px'; $('kpiBelow').appendChild(more);
+        $('kpiBelow').appendChild(el('p', 'oxi-section-note', 'Numbers come from recorded work only. They show where to ask a question, not who is better: there is no overall score or ranking.'));
+      }
 
       const ch = $('charts'); ch.innerHTML = '';
       [barsChart(d.cards), donutChart(d.activity)].forEach(c => { if (c) ch.appendChild(c); });

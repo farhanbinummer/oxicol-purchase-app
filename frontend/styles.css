@@ -1346,3 +1346,31 @@ dialog.oxi-dlg textarea, dialog.oxi-dlg input[type=text], dialog.oxi-dlg input[t
 .oxi-fbuild .frow.sub { grid-template-columns: 1fr 1fr 1fr; margin-left: 12px; } .oxi-fbuild .frow label { font-size: 13px; white-space: nowrap; }
 .oxi-fbuild .frow button { margin: 0; min-height: 34px; }
 @media (max-width: 520px) { .oxi-fbuild .frow { grid-template-columns: 1fr 1fr; } .oxi-fbuild .frow.sub { margin-left: 0; } }
+
+/* team performance */
+.kpi-tools { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin: 0 0 var(--s3); }
+.kpi-period { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; } .kpi-period select, .kpi-period input { min-height: 40px; }
+.kpi-explain { margin: 0 0 var(--s4); padding: var(--s3) var(--s4); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); }
+.kpi-explain summary { cursor: pointer; font-weight: 600; } .kpi-explain ul { margin: var(--s2) 0 0; padding-left: 20px; color: var(--text-2); font-size: 14px; } .kpi-explain li { margin: 4px 0; }
+.kpi-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--s3); margin: 0 0 var(--s4); }
+.kpi-tile { padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--border); border-top: 5px solid var(--info); border-radius: var(--r-card); box-shadow: var(--shadow-sm); }
+.kpi-tile.green { border-top-color: var(--success); } .kpi-tile.amber { border-top-color: var(--warn); } .kpi-tile.red { border-top-color: var(--danger); }
+.kpi-tile b { display: block; font-size: 28px; line-height: 1.1; } .kpi-tile span { font-size: 13px; color: var(--text-2); }
+.kpi-table { width: 100%; border-collapse: collapse; background: var(--surface); }
+.kpi-table th, .kpi-table td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--border); font-size: 14px; }
+.kpi-table thead th { border-top: 0; color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.kpi-person { display: block; background: none; border: 0; padding: 0; margin: 0; min-height: 0; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-align: left; box-shadow: none; }
+.kpi-person:hover { text-decoration: underline; background: none; } .kpi-role { display: block; color: var(--text-2); font-size: 12.5px; font-weight: 400; }
+.kpi-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; } .kpi-cell strong { font-size: 18px; } .kpi-sub { color: var(--text-2); font-size: 12.5px; }
+.kpi-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--surface-2); color: var(--text-2); }
+.kpi-chip.green { background: var(--success-bg); color: var(--success); } .kpi-chip.amber { background: var(--warn-bg); color: var(--warn); } .kpi-chip.red { background: var(--danger-bg); color: var(--danger); }
+.kpi-few { font-size: 12px; color: var(--warn); font-weight: 600; }
+.kpi-empty { color: var(--text-2); margin: 0; padding: 12px 0; }
+.kpi-trendsvg { width: 100%; max-width: 360px; height: auto; } .kpi-bar { fill: var(--info); } .kpi-bar.green { fill: var(--success); } .kpi-bar.amber { fill: var(--warn); } .kpi-bar.red { fill: var(--danger); } .kpi-bar.none { fill: var(--border-strong); }
+.kpi-num { fill: var(--text); font-size: 11px; font-weight: 700; } .kpi-mon { fill: var(--text-2); font-size: 11px; }
+.kpi-trend details { font-size: 13px; color: var(--text-2); } .kpi-trend ul { margin: 4px 0 0; padding-left: 18px; }
+.kpi-tasks { width: 100%; border-collapse: collapse; font-size: 14px; } .kpi-tasks th, .kpi-tasks td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--border); vertical-align: top; } .kpi-tasks th { border-top: 0; color: var(--text-2); }
+.kpi-state { font-weight: 600; } .kpi-state.bad { color: var(--danger); } .kpi-state.ok { color: var(--success); }
+.kpi-note { padding: 10px 12px; border-left: 4px solid var(--warn); background: var(--warn-bg); border-radius: 0 8px 8px 0; font-size: 14px; margin: 0 0 var(--s4); }
+.kpi-below { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s2) 0 0; padding: 0; list-style: none; }
+.kpi-below a { display: inline-flex; flex-direction: column; padding: 6px 12px; border: 1px solid var(--border); border-left: 4px solid var(--danger); border-radius: 10px; background: var(--surface); color: var(--text); text-decoration: none; font-size: 14px; } .kpi-below small { color: var(--text-2); }
