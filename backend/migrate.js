@@ -504,6 +504,35 @@ const STEPS = [
       await db.query('INSERT INTO kpi_targets (id) VALUES (1) ON CONFLICT DO NOTHING');
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager','kpi.view_all') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // Notices by email and WhatsApp: each person's choices, a record of every message tried (so an administrator can answer "did they
+    // get it?"), and a note of which daily job last ran so the morning message is never sent twice in a day. Nothing existing changes.
+    name: '018_notices',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS notice_prefs (
+          user_id  INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          instant  BOOLEAN NOT NULL DEFAULT TRUE,
+          morning  BOOLEAN NOT NULL DEFAULT TRUE
+        )`);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS notice_log (
+          id         BIGSERIAL PRIMARY KEY,
+          user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          channel    VARCHAR(10) NOT NULL,
+          kind       VARCHAR(30) NOT NULL,
+          subject    TEXT,
+          body       TEXT,
+          to_address VARCHAR(150),
+          status     VARCHAR(10) NOT NULL,
+          error      TEXT,
+          at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_notice_log_at ON notice_log(at DESC)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_notice_log_user ON notice_log(user_id, kind)');
+      await db.query('CREATE TABLE IF NOT EXISTS job_runs (name VARCHAR(40) PRIMARY KEY, last_run DATE NOT NULL)');
+    }
   }
 ];
 

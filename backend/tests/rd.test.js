@@ -67,7 +67,7 @@ test.before(async () => {
   for (const role of ['rd', 'branch']) await pool.query("INSERT INTO role_permissions (role, permission_key) VALUES ($1,'rd.create') ON CONFLICT DO NOTHING", [role]);
   const c = await pool.query('SELECT last_serial FROM rd_number_counters WHERE period = $1', [period]);
   counterBefore = c.rowCount ? c.rows[0].last_serial : null;
-  server = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
+  server = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(PORT), NOTIFY_TEST_MODE: '1', JOBS_TOKEN: 'testtoken' }, stdio: 'ignore' });
   for (let i = 0; i < 40; i++) { try { if ((await fetch(BASE + '/api/health')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 250)); }
   tok.admin = await mkUser('admin', ['admin']);
   tok.lead = await mkUser('lead', ['rd']);
@@ -843,4 +843,34 @@ test('the reviewable import: dry run changes nothing, apply creates the project 
   const st = (await pool.query('SELECT COUNT(*)::int n, COUNT(completed_at)::int done FROM rd_stages WHERE project_id = $1', [p.id])).rows[0];
   assert.equal(st.n, 8); assert.equal(st.done, 0, 'the reported same-day completions are not imported without confirmation');
   assert.equal((await pool.query("SELECT COUNT(*)::int n FROM rd_approvals WHERE project_id = $1 AND kind <> 'submission'", [p.id])).rows[0].n, 0, 'no approvals are invented');
+});
+
+// ---- email / WhatsApp notices (test mode: logged, never sent) ----
+test('notices: prefs can be read and saved; log is admin-only', async () => {
+  const a = await api(tok.rd2, 'GET', '/api/notices/prefs');
+  assert.equal(a.status, 200); assert.equal(a.instant, true);
+  const b = await api(tok.rd2, 'PUT', '/api/notices/prefs', { instant: false, morning: true });
+  assert.equal(b.status, 200);
+  assert.equal((await api(tok.rd2, 'GET', '/api/notices/prefs')).instant, false);
+  assert.equal((await api(tok.rd2, 'PUT', '/api/notices/prefs', { instant: 'x' })).status, 400);
+  assert.equal((await api(tok.rd2, 'GET', '/api/notices/log')).status, 403);
+  assert.equal((await api(tok.admin, 'GET', '/api/notices/log')).status, 200);
+  await pool.query('DELETE FROM notice_prefs WHERE user_id = $1', [uid.rd2]);
+});
+
+test('notices: the daily job needs its token and never works without one', async () => {
+  const call = (h) => fetch(BASE + '/api/jobs/morning-digest?dry_run=1&force=1', { method: 'POST', headers: h });
+  assert.equal((await call({})).status, 401);
+  assert.equal((await call({ Authorization: 'Bearer wrong' })).status, 401);
+  const ok = await call({ Authorization: 'Bearer testtoken' });
+  assert.equal(ok.status, 200);
+  const j = await ok.json(); assert.equal(j.success, true); assert.equal(j.dry_run, true);
+});
+
+test('notices: morning message lists what is due and is empty when nothing is', () => {
+  const { compose } = require('../digest');
+  const d = { overdue: [{ title: 'A', project_number: 'RD-1', due: '2026-01-01' }], today: [{ title: 'B', project_number: 'RD-1' }], tomorrow: [], sent_back: [], review: [] };
+  const m = compose('Asha Nair', d, '2026-01-05');
+  assert.match(m.text, /Good morning Asha/); assert.match(m.text, /1 task overdue/); assert.match(m.text, /Due today/);
+  assert.equal(compose('X', { overdue: [], today: [], tomorrow: [], sent_back: [], review: [] }, '2026-01-05'), null);
 });

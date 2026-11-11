@@ -15,7 +15,9 @@
 const nodemailer = require('nodemailer');
 const { pool } = require('./database');
 
-const emailOn = () => !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+// NOTIFY_TEST_MODE=1 (used only by the automated tests) records what WOULD be sent instead of sending anything.
+const testMode = () => process.env.NOTIFY_TEST_MODE === '1';
+const emailOn = () => testMode() || !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 const whatsappOn = () => !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID);
 
 let transporter = null;
@@ -98,4 +100,53 @@ function notify({ roles, branch, subject, text, path }) {
   })().catch(e => console.error('Alert failed:', e.message));
 }
 
-module.exports = { notify, ensureSchema, emailOn, whatsappOn };
+// ---------------------------------------------------------------------------------------------------------------------
+// Notices to named people (R&D tasks, reviews, the morning message). Each person chooses (notice_prefs, both on by default),
+// and every attempt is written to notice_log, so "did they get it?" has an answer. A failure is logged and never reaches the caller.
+// ---------------------------------------------------------------------------------------------------------------------
+async function logNotice(u, channel, kind, subject, body, to, status, error) {
+  await pool.query('INSERT INTO notice_log (user_id, channel, kind, subject, body, to_address, status, error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [u.id, channel, kind, subject, String(body).slice(0, 4000), to, status, error ? String(error).slice(0, 400) : null]).catch(e => console.error('notice log failed:', e.message));
+}
+
+/** Sends one notice to one person on every channel that is switched on and that they have an address for. Returns what happened. */
+async function deliver(u, { kind, subject, text, path, which }) {
+  const link = process.env.APP_URL && path ? `\n${process.env.APP_URL.replace(/\/$/, '')}/${path}` : '';
+  const out = [];
+  if (emailOn() && u.email) {
+    const body = `Hello ${u.name},\n\n${text}${link}\n\n- Oxicol`;
+    if (testMode()) { await logNotice(u, 'email', kind, subject, body, u.email, 'test'); out.push('email'); }
+    else { try { await sendEmail(u.email, 'Oxicol - ' + subject, body); await logNotice(u, 'email', kind, subject, body, u.email, 'sent'); out.push('email'); } catch (e) { await logNotice(u, 'email', kind, subject, body, u.email, 'failed', e.message); } }
+  }
+  if (whatsappOn() && u.phone && !testMode()) {
+    const body = `Oxicol: ${text}${link}`;
+    try { await sendWhatsApp(u.phone, body); await logNotice(u, 'whatsapp', kind, subject, body, u.phone, 'sent'); out.push('whatsapp'); } catch (e) { await logNotice(u, 'whatsapp', kind, subject, body, u.phone, 'failed', e.message); }
+  }
+  return out;
+}
+
+/** People (by id) who are active, have an address, and have not switched this kind of notice off. */
+async function reachable(ids, which) {
+  if (!ids.length) return [];
+  const col = which === 'morning' ? 'morning' : 'instant';
+  const r = await pool.query(
+    `SELECT u.id, u.name, u.email, u.phone FROM users u LEFT JOIN notice_prefs p ON p.user_id = u.id
+      WHERE u.id = ANY($1) AND u.active AND (u.email IS NOT NULL OR u.phone IS NOT NULL) AND COALESCE(p.${col}, TRUE)`, [ids]);
+  return r.rows;
+}
+
+/** Tells these people about something that just happened. Returns at once; sending happens in the background and can never fail the caller. */
+function notifyUsers(ids, { kind, subject, text, path }) {
+  if (!emailOn() && !whatsappOn()) return;
+  const unique = [...new Set(ids.filter(Boolean))];
+  (async () => { for (const u of await reachable(unique, 'instant')) await deliver(u, { kind, subject, text, path }); })()
+    .catch(e => console.error('Notice failed:', e.message));
+}
+/** The same, for everyone holding a role. */
+function notifyRole(role, exceptId, msg) {
+  if (!emailOn() && !whatsappOn()) return;
+  pool.query('SELECT DISTINCT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id WHERE u.active AND ur.role = $1 AND u.id <> $2', [role, exceptId || 0])
+    .then(r => notifyUsers(r.rows.map(x => x.id), msg)).catch(e => console.error('Notice failed:', e.message));
+}
+
+module.exports = { notify, notifyUsers, notifyRole, deliver, reachable, ensureSchema, emailOn, whatsappOn, testMode };
