@@ -36,6 +36,11 @@
     </form>
   </div>
 
+  <div id="logBox" hidden>
+    <h3>Recent notices sent (administrator)</h3>
+    <div class="oxi-table-scroll"><table id="logTable"><thead><tr><th>When</th><th>To</th><th>Kind</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+  </div>
+
   <h3>Change password</h3>
   <form id="pwForm">
     <p><label>Current password<br><input id="current" type="password" required></label></p>
@@ -83,6 +88,14 @@
       e.preventDefault();
       const d = await api('/api/notices/prefs', 'PUT', { instant: document.getElementById('nInstant').checked, morning: document.getElementById('nMorning').checked });
       if (d.success) show('Notice settings saved.', true); else show(d.error, false);
+    });
+
+    api('/api/notices/log').then(d => {
+      if (!d.success) return;
+      document.getElementById('logBox').hidden = false;
+      const tb = document.querySelector('#logTable tbody');
+      if (!d.log.length) { const tr = document.createElement('tr'); addCell(tr, 'Nothing has been sent yet.'); tb.appendChild(tr); }
+      d.log.slice(0, 20).forEach(x => { const tr = document.createElement('tr'); addCell(tr, new Date(x.at).toLocaleString()); addCell(tr, (x.name || '-') + ' (' + x.channel + ' ' + (x.to_address || '') + ')'); addCell(tr, x.kind); addCell(tr, x.status + (x.error ? ': ' + x.error : '')); tb.appendChild(tr); });
     });
 
     if (new URLSearchParams(location.search).get('force')) show('Your password was set by an administrator. Choose your own password to continue.', false);
