@@ -233,7 +233,7 @@ const WORKSPACES = {
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html'] },
         { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
         { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL } ] },
-      { title: 'Reports', items: [{ label: 'Variances', href: 'variance-report.html', icon: 'variance', perm: KEYS.DASHBOARD_VIEW }] }
+      { title: 'Reports', items: [{ label: 'Variances', href: 'variance-report.html', icon: 'variance', perm: KEYS.DASHBOARD_VIEW }, { label: 'Team Performance', href: 'team-performance.html', icon: 'dashboard', perm: KEYS.KPI_VIEW_ALL }] }
     ]
   },
   rd: {
@@ -244,6 +244,7 @@ const WORKSPACES = {
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Projects', items: [
         { label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW },
+        { label: 'My Performance', href: 'my-performance.html', icon: 'dashboard', perm: KEYS.RD_VIEW },
         { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW },
         { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html'] },
         { label: 'New R&D Request', href: 'project-new.html', icon: 'plus', perm: KEYS.RD_CREATE } ] },
@@ -264,6 +265,7 @@ const WORKSPACES = {
         { label: 'Finished Products', href: 'catalog.html', icon: 'tag', perm: KEYS.CATALOG_VIEW },
         { label: 'Recipes / Bill of Materials', href: 'recipes.html', icon: 'book', perm: KEYS.PRODUCTION_INDENT_VIEW },
         { label: 'Catalogue Review', href: 'catalog-review.html', icon: 'link', perm: KEYS.CATALOG_MAP_ITEMS } ] },
+      { title: 'Reports', items: [{ label: 'Team Performance', href: 'team-performance.html', icon: 'dashboard', perm: KEYS.KPI_VIEW_ALL }] },
       { title: 'System', items: [{ label: 'Integration Settings', href: 'system.html', icon: 'server', admin: true }] }
     ]
   }
@@ -273,7 +275,7 @@ const WORKSPACES = {
 // wider permission, all of them).
 for (const [id, w] of Object.entries(WORKSPACES)) {
   if (id === 'rd') continue;
-  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW }, { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
+  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW }, { label: 'My Performance', href: 'my-performance.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
 }
 
 /** Workspaces a person is assigned: those that list any of the roles they hold. Switching never adds permissions. */
@@ -866,6 +868,8 @@ async function buildDashboard(req, workspaceId, opts) {
     exceptions: { total: built.exceptions.length, items: sort(built.exceptions).slice(0, MAX_QUEUE) },
     activity: await recentActivity(ctx, ACTIVITY_KINDS[workspaceId] || []),
     notes: built.notes || [], controls: built.controls || [],
+    // the administrator's and manager's home also show how the team is doing (numbers from recorded work; never a ranking)
+    team_kpis: ['admin', 'manager'].includes(workspaceId) && ctx.can(KEYS.KPI_VIEW_ALL) ? await require('./routes/kpi').teamSummary().catch(e => { console.error('team summary failed:', e); return null; }) : null,
     generated_at: new Date().toISOString()
   };
 }

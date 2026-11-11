@@ -76,6 +76,20 @@ Ticking a checklist item records **what was found**, not only that it was done.
 * **A trainee's home page** shows only their own work: no "Projects I lead" or "Requests to assess".
 * The starter forms are defined in code (`FORM_TEMPLATES` in `rd-logic.js`). There is no screen yet for administrators to edit the starter library. Migration `015_rd_task_result_forms` adds the two columns.
 
+## Team performance (KPIs)
+
+* **Where:** administrators and the Manager open **Team Performance** (Reports in the menu, and a "Team performance" section on their home page). Every person opens **My Performance** for their own numbers only. Permission `kpi.view_all` (Administration > Permissions) controls who sees everyone: Manager by default, administrators always.
+* **Measured from records the app already keeps**, for a chosen period (last 30 days, this month, last month, last 90 days, or any dates up to a year):
+  * **Tasks done** and **on time** (finished on or before the due date, out of tasks that had a due date), with the counts, and how late the late ones were. Only tasks the person completed themselves count; a task someone else closed for them does not.
+  * **Overdue now** (to do, in progress or blocked and past due; work waiting for review is not late) and **open now** (workload).
+  * **Right first time:** work accepted without ever being sent back, out of work accepted in the period.
+  * **Stages on time:** stages the person owns (or leads when no owner is named) finished on or before the planned date, and the average delay.
+  * **Review speed:** for reviewers, average days from hand-in to accepted or sent back.
+* **Colour bands** (always with a word and a symbol, never colour alone): green from 90%, amber from 70%, below that "Below target"; overdue tasks green at none, amber up to 2, then below target. An administrator can change these under **Targets** (audited).
+* **No score and no ranking.** People are listed alphabetically; percentages always show the counts behind them, with a "few items" warning when there are too few to mean much. A short "How these numbers are measured" explanation sits on both pages. Numbers do not show how hard the work was.
+* **Detail per person:** a six-month on-time chart (with a text list) and their tasks. **Export spreadsheet** downloads the table as CSV.
+* **Limits:** only work recorded in the app counts; older tasks without due dates or results cannot. Only R&D is measured so far (Purchase, Stores, QC and Accounts are not yet). Migration `017_team_performance` adds the `kpi_targets` table and grants `kpi.view_all` to the Manager.
+
 ## Permission matrix (defaults)
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.

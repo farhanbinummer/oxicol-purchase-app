@@ -73,6 +73,7 @@ app.use('/api/admin', requireRole('admin'), require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/workspace', require('./routes/workspace'));
 app.use('/api/rd', require('./routes/rd'));
+app.use('/api/kpi', require('./routes/kpi'));
 
 // ---------- Error handling ----------
 // Unknown /api route -> JSON 404 (not an HTML page)

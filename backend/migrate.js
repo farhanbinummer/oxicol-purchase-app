@@ -486,6 +486,24 @@ const STEPS = [
         }
       }
     }
+  },
+  {
+    // Team performance: the thresholds that turn a percentage into green, amber or red (one row), and the new permission that lets
+    // the Manager see everyone's numbers (administrators always can). Nothing existing changes.
+    name: '017_team_performance',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS kpi_targets (
+          id                INTEGER PRIMARY KEY CHECK (id = 1),
+          green_min         NUMERIC(5,2) NOT NULL DEFAULT 90,
+          amber_min         NUMERIC(5,2) NOT NULL DEFAULT 70,
+          overdue_amber_max INTEGER NOT NULL DEFAULT 2,
+          updated_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await db.query('INSERT INTO kpi_targets (id) VALUES (1) ON CONFLICT DO NOTHING');
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager','kpi.view_all') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 

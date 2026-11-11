@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Performance</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="my-day.html">My Day</a></p>
+  <h1>My Performance</h1>
+  <p class="oxi-page-sub">Your own numbers, from the work you recorded. Only you and the people who manage the team can see them.</p>
+  <p id="message" role="status"></p>
+  <div class="kpi-tools" id="tools"></div>
+  <div id="explain"></div>
+  <div id="me" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
+
+  <script src="common.js"></script>
+  <script src="kpi-ui.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let PERIOD = null;
+    const myId = () => { try { return JSON.parse(localStorage.getItem('oxicol_user')).id; } catch (e) { return null; } };
+    const tile = (cell, label) => { const d = kEl('div', 'kpi-tile ' + (cell.band || '')); d.append(kEl('span', null, label)); d.appendChild(cell.node); return d; };
+    function metric(label, value, sub, band, few) { const n = kpiCell(value, sub, band, few); return { node: n, band }; }
+
+    async function load() {
+      const box = $('me'); box.setAttribute('aria-busy', 'true');
+      const r = await api('/api/kpi/rd/person/' + myId() + '?from=' + PERIOD.from + '&to=' + PERIOD.to);
+      box.setAttribute('aria-busy', 'false'); box.innerHTML = '';
+      if (!r.success) { const e = kEl('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(kEl('p', null, r.error || 'Could not load your numbers.')); box.appendChild(e); return; }
+      const p = r.person;
+      box.appendChild(kEl('p', 'kpi-note', 'Period ' + dmy(r.period.from) + ' to ' + dmy(r.period.to) + '. These numbers do not show how hard your work was. If something looks wrong or unfair, talk to the person who manages you.'));
+      const tiles = kEl('div', 'kpi-tiles');
+      tiles.append(
+        tile(metric('', String(p.tasks.completed), p.tasks.avg_days_late != null ? 'late ones averaged ' + p.tasks.avg_days_late + ' days' : ''), 'Tasks you completed'),
+        tile(metric('', kPct(p.tasks.on_time_rate), p.tasks.with_due ? p.tasks.on_time + ' of ' + p.tasks.with_due : 'no tasks with a due date', p.bands.on_time, p.few.on_time), 'Finished on time'),
+        tile(metric('', String(p.tasks.overdue_now), p.tasks.open_now ? 'of ' + p.tasks.open_now + ' open' : 'nothing open', p.bands.overdue), 'Overdue now'),
+        tile(metric('', kPct(p.review.first_time_rate), p.review.accepted ? p.review.first_time + ' of ' + p.review.accepted + ' accepted' : 'no reviewed work', p.bands.first_time_right, p.few.first_time_right), 'Right first time'));
+      if (p.stages.with_plan) tiles.appendChild(tile(metric('', kPct(p.stages.on_time_rate), p.stages.on_time + ' of ' + p.stages.with_plan, p.bands.stage_on_time, p.few.stage_on_time), 'Stages finished on time'));
+      if (p.review.reviews_done) tiles.appendChild(tile(metric('', kpiDays(p.review.avg_review_days), kPlural(p.review.reviews_done, 'review')), 'Your review speed'));
+      box.appendChild(tiles);
+      box.appendChild(kEl('h2', null, 'On-time rate, last six months')); box.appendChild(kpiTrend(r.trend));
+      box.appendChild(kEl('h2', null, 'Your tasks')); box.appendChild(kpiTasks(r.tasks, r.period.today));
+    }
+    const per = kpiPeriod((p) => { PERIOD = p; load(); }); $('tools').appendChild(per); PERIOD = per.read(); $('explain').appendChild(kpiExplain());
+    load().catch(() => { $('message').textContent = 'Could not reach the server.'; $('message').className = 'error'; });
+  </script>
+</body>
+</html>
