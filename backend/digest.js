@@ -59,7 +59,7 @@ function compose(name, d, today) {
   if (d.today.length) sections.push('Due today:\n' + lines(d.today, x => `${x.title} (${x.project_number})`));
   if (d.tomorrow.length) sections.push('Due tomorrow:\n' + lines(d.tomorrow, x => `${x.title} (${x.project_number})`));
   const subject = `Your day: ${bits.slice(0, 2).join(', ')}`;
-  const text = `Good morning ${String(name).split(' ')[0]}. Today is ${dmy(today)}. You have ${bits.join(', ')}.\n\n${sections.join('\n\n')}`;
+  const text = `Today is ${dmy(today)}. Here is what is on your plate: ${bits.join(', ')}.\n\n${sections.join('\n\n')}`;
   return { subject, text };
 }
 

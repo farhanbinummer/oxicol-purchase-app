@@ -13,6 +13,7 @@
 //   APP_URL (optional): base link put in messages, e.g. https://oxicol-purchase-app.onrender.com
 
 const nodemailer = require('nodemailer');
+const { renderEmail, KINDS } = require('./email-template');
 const { pool } = require('./database');
 
 // NOTIFY_TEST_MODE=1 (used only by the automated tests) records what WOULD be sent instead of sending anything.
@@ -61,18 +62,18 @@ async function recipients(roles, branch) {
   return r.rows;
 }
 
-async function sendEmail(to, subject, text) {
+async function sendEmail(to, subject, text, html) {
   if (brevoOn()) {
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ sender: { email: process.env.BREVO_FROM, name: process.env.BREVO_FROM_NAME || 'Oxicol' }, to: [{ email: to }], subject, textContent: text }),
+      body: JSON.stringify({ sender: { email: process.env.BREVO_FROM, name: process.env.BREVO_FROM_NAME || 'Oxicol' }, to: [{ email: to }], subject, textContent: text, ...(html ? { htmlContent: html } : {}) }),
       signal: AbortSignal.timeout(20000)
     });
     if (!res.ok) throw new Error('Brevo ' + res.status + ' ' + (await res.text()).slice(0, 200));
     return;
   }
-  await mailer().sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text });
+  await mailer().sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text, ...(html ? { html } : {}) });
 }
 
 async function sendWhatsApp(to, text) {
@@ -128,9 +129,10 @@ async function deliver(u, { kind, subject, text, path, which }) {
   const link = process.env.APP_URL && path ? `\n${process.env.APP_URL.replace(/\/$/, '')}/${path}` : '';
   const out = [];
   if (emailOn() && u.email) {
-    const body = `Hello ${u.name},\n\n${text}${link}\n\n- Oxicol`;
+    const mail = renderEmail({ kind, name: u.name, text, link: link.trim() });
+    const body = mail.text, mark = (KINDS[kind] || {}).emoji ? KINDS[kind].emoji + ' ' : '';
     if (testMode()) { await logNotice(u, 'email', kind, subject, body, u.email, 'test'); out.push('email'); }
-    else { try { await sendEmail(u.email, 'Oxicol - ' + subject, body); await logNotice(u, 'email', kind, subject, body, u.email, 'sent'); out.push('email'); } catch (e) { console.error('Email notice failed for', u.name + ':', e.message); await logNotice(u, 'email', kind, subject, body, u.email, 'failed', e.message); } }
+    else { try { await sendEmail(u.email, mark + 'Oxicol - ' + subject, body, mail.html); await logNotice(u, 'email', kind, subject, body, u.email, 'sent'); out.push('email'); } catch (e) { console.error('Email notice failed for', u.name + ':', e.message); await logNotice(u, 'email', kind, subject, body, u.email, 'failed', e.message); } }
   }
   if (whatsappOn() && u.phone && !testMode()) {
     const body = `Oxicol: ${text}${link}`;
