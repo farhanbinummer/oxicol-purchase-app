@@ -9,7 +9,8 @@ In-app notices (the bell) always work. Email and WhatsApp are **off until you se
 Each person can switch either kind off under **My Account > Notices**. People with no email/phone (set by an administrator on the Users page) get nothing outside the app.
 
 ## Switching it on (Render > Environment)
-- Email: the SMTP settings already read by `notify.js` (host, port, user, password, from) and `APP_URL` (the site address, used for links).
+- Email (recommended on Render's free plan, which blocks SMTP): create a free Brevo account, verify a sender address, make an API key, then set `BREVO_API_KEY` and `BREVO_FROM` (the verified address; optional `BREVO_FROM_NAME`). These take priority over SMTP.
+- Email by SMTP (only where outgoing SMTP is allowed): the SMTP settings already read by `notify.js` (host, port, user, password, from) and `APP_URL` (the site address, used for links).
 - WhatsApp: the WhatsApp Cloud API settings read by `notify.js`. Business-initiated WhatsApp messages need a Meta-approved message template; until you have one, rely on email.
 - Morning message: set `JOBS_TOKEN` on Render to a long random secret, then add GitHub repository secrets `APP_URL` and `JOBS_TOKEN` (same value). `.github/workflows/morning-digest.yml` calls the app each morning. Render's free tier sleeps, so the workflow retries while it wakes.
 
