@@ -17,7 +17,7 @@ const KINDS = {
   morning: { color: '#ea580c', soft: '#ffedd5', emoji: '☀️', head: 'Good morning! Here is your plan for the day', cheer: 'Take it one task at a time. You will do wonderfully today!' }
 };
 const DEFAULT_KIND = { color: '#0f766e', soft: '#ccfbf1', emoji: '👋', head: 'A quick note from Oxicol', cheer: 'Thank you for all you do!' };
-const SECTION_COLORS = { 'Sent back to you': '#d97706', 'Waiting for your review': '#4f46e5', 'Overdue': '#dc2626', 'Due today': '#ea580c', 'Due tomorrow': '#0f766e' };
+const SECTION_COLORS = { 'Sent back to you': '#d97706', 'Covering for a colleague who is away': '#7c3aed', 'Waiting for your review': '#4f46e5', 'Overdue': '#dc2626', 'Due today': '#ea580c', 'Due tomorrow': '#0f766e' };
 
 /** Turns the plain text of a notice into HTML paragraphs; lines starting with "  - " become list items, "Title:" lines become headings. */
 function bodyHtml(text, color) {

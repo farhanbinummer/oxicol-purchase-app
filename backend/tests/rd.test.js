@@ -897,3 +897,60 @@ test('notices: the colourful email escapes names and text and has a plain-text t
   assert.match(r.html, /Open in Oxicol/); assert.match(r.text, /Open in Oxicol: https:\/\/app.example\/my-day.html/);
   assert.match(renderEmail({ kind: 'unknown_kind', name: 'A', text: 'T', link: '' }).html, /Oxicol/);
 });
+
+// ---- cover while someone is away ----
+test('cover: an away person names a cover, who may then do their tasks (recorded on their behalf) but never review that work', async () => {
+  const p = await newProject(tok.lead);
+  const today = R.todayIST(), plus = (n) => R.addDays(today, n);
+  const mkTask = async (title) => { const r = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title, assignee_id: uid.trainee, due_date: plus(3), requires_review: true }); assert.equal(r.success, true, JSON.stringify(r)); return r; };
+  const t1 = await mkTask('Cover task 1'), t2 = await mkTask('Cover task 2');
+  const A = async (id) => (await get(tok.lead, p.id)).tasks.find(t => t.id === id);
+
+  // before any cover the manager (view-only) cannot do the trainee's task
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${t1.id}/complete`, { result: 'Done on their behalf, readings recorded.' })).status, 403);
+
+  // validation
+  const post = (token, body) => api(token, 'POST', '/api/rd/cover', body);
+  assert.equal((await post(tok.trainee, { cover_user_id: uid.trainee, from_date: today, to_date: plus(2) })).status, 400, 'not themselves');
+  assert.equal((await post(tok.trainee, { cover_user_id: uid.kannur, from_date: today, to_date: plus(2) })).status, 400, 'cover must be in R&D');
+  assert.equal((await post(tok.trainee, { cover_user_id: uid.manager, from_date: plus(3), to_date: plus(1) })).status, 400, 'last day before first');
+  assert.equal((await post(tok.trainee, { cover_user_id: uid.manager, from_date: plus(-5), to_date: plus(-2) })).status, 400, 'already past');
+  assert.equal((await post(tok.trainee, { cover_user_id: uid.manager, from_date: today, to_date: plus(120) })).status, 400, 'too long');
+  assert.equal((await post(tok.trainee, { user_id: uid.rd2, cover_user_id: uid.manager, from_date: today, to_date: plus(2) })).status, 403, 'only management can record it for someone else');
+
+  const set = await post(tok.trainee, { cover_user_id: uid.manager, from_date: today, to_date: plus(2), reason: 'Leave' });
+  assert.equal(set.status, 201, JSON.stringify(set));
+  assert.equal((await post(tok.trainee, { cover_user_id: uid.rd2, from_date: plus(1), to_date: plus(4) })).status, 409, 'overlapping absence');
+  assert.equal((await post(tok.rd2, { cover_user_id: uid.trainee, from_date: today, to_date: plus(1) })).status, 409, 'the cover is away themselves');
+
+  // My Day: the cover sees the task; the absent person sees their absence
+  const mDay = await api(tok.manager, 'GET', '/api/rd/my-day');
+  const cov = mDay.covering.find(c => c.user_id === uid.trainee);
+  assert.ok(cov && cov.tasks.some(t => t.id === t1.id) && cov.tasks.some(t => t.id === t2.id), 'cover sees the absent person\'s open tasks');
+  assert.ok((await api(tok.trainee, 'GET', '/api/rd/my-day')).my_absences.length >= 1);
+  assert.deepEqual((await get(tok.manager, p.id)).covering_ids, [uid.trainee]);
+
+  // the cover hands the work in on their behalf: it waits for review and records who it was for
+  const done = await api(tok.manager, 'POST', `/api/rd/tasks/${t1.id}/complete`, { result: 'Viscosity 92 KU at 25C, two readings.' });
+  assert.equal(done.status, 200, JSON.stringify(done)); assert.equal(done.task_status, 'in_review');
+  const after = await A(t1.id); assert.equal(after.completed_by, uid.manager); assert.equal(after.on_behalf_name, 'Test trainee');
+  assert.equal(after.assignee_id, uid.trainee, 'the task is still the absent person\'s');
+  // nobody reviews their own work, even when done for someone else
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${t1.id}/accept`, {})).status, 403);
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/tasks/${t1.id}/accept`, {})).status, 200);
+  const hist = await pool.query('SELECT on_behalf_of FROM rd_task_history WHERE task_id = $1 AND action = $2', [t1.id, 'submitted']);
+  assert.equal(hist.rows[0].on_behalf_of, uid.trainee);
+
+  // ending the cover takes the permission away again
+  assert.equal((await api(tok.kannur, 'POST', `/api/rd/cover/${set.id}/end`, {})).status, 403, 'a stranger cannot end it');
+  assert.equal((await api(tok.trainee, 'POST', `/api/rd/cover/${set.id}/end`, {})).status, 200);
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${t2.id}/complete`, { result: 'Should not be allowed now.' })).status, 403);
+  assert.equal((await api(tok.manager, 'GET', '/api/rd/my-day')).covering.length, 0);
+});
+
+test('cover: the morning message tells the cover what is due on the absent person\'s tasks', () => {
+  const { compose } = require('../digest');
+  const d = { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [{ title: 'Viscosity run', project_number: 'RD-1', for_name: 'Roshan P', kind: 'today' }] };
+  const m = compose('Asha Nair', d, '2026-01-05');
+  assert.match(m.text, /to cover for Roshan P/); assert.match(m.text, /Covering for a colleague who is away/);
+});

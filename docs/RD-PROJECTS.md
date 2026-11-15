@@ -138,3 +138,13 @@ The reported completion of all eight stages on the same day is **not imported**.
 6. **Attachments** need a decision on where files are stored (the app has none).
 7. **E-mail and messaging** stay disabled; the Inbox (not built) will show in-app items only.
 8. Fields on the request form record what the requester states. The application does not certify regulatory or safety compliance.
+
+
+## Cover while someone is away
+
+When a person is away, a task stays theirs but someone else can do it for them, and every action is recorded.
+
+- **Setting it up:** on **My Day**, press **I will be away**, choose who covers, the first and last day away (at most 90 days) and an optional reason. R&D managers and administrators can record it for someone else.
+- **What the cover can do:** while the dates are active, the cover sees the absent person's open tasks in their own My Day under "Covering for ...", can start and complete them (or hand them in for review), and gets the absent person's notices (tasks assigned, sent back, reopened, cancelled). The morning message lists them too. Anything done is recorded "on behalf of" the absent person, who is told.
+- **Safeguards:** the cover must be in the R&D team and not away themselves; absences cannot overlap; the person who did the work for someone can never accept or send it back (someone else reviews); it ends by itself after the last day, or earlier with **End early** (the person away, the cover, or R&D management).
+- **Numbers:** work done by a cover counts as the cover's completion, not the absent person's, in Team Performance.

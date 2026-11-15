@@ -6,6 +6,7 @@
 const { pool } = require('./database');
 const R = require('./rd-logic');
 const { emailOn, whatsappOn, reachable, deliver } = require('./notify');
+const cover = require('./routes/rd-cover');
 
 const MAX_LINES = 5;
 const LIVE = "p.is_draft = FALSE AND p.status NOT IN ('Completed', 'Rejected')";
@@ -31,10 +32,17 @@ async function gather(today) {
         WHERE x.uid IS NOT NULL AND x.uid IS DISTINCT FROM x.assignee_id ORDER BY x.id`)
   ]);
   const people = new Map();
-  const get = (uid) => { if (!people.has(uid)) people.set(uid, { overdue: [], today: [], tomorrow: [], sent_back: [], review: [] }); return people.get(uid); };
+  const get = (uid) => { if (!people.has(uid)) people.set(uid, { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [] }); return people.get(uid); };
   open.rows.forEach(r => { const d = String(r.due_date).slice(0, 10); get(r.uid)[d < today ? 'overdue' : d === today ? 'today' : 'tomorrow'].push({ ...r, due: d }); });
   back.rows.forEach(r => get(r.uid).sent_back.push(r));
   review.rows.forEach(r => get(r.uid).review.push(r));
+  // people who are away today: what is due on their tasks also goes to whoever covers for them
+  const away = await pool.query(`SELECT a.user_id, a.cover_user_id, u.name FROM rd_absences a JOIN users u ON u.id = a.user_id WHERE a.ended_at IS NULL AND a.from_date <= $1 AND a.to_date >= $1`, [today]);
+  for (const a of away.rows) {
+    const theirs = people.get(a.user_id); if (!theirs) continue;
+    const mine = get(a.cover_user_id);
+    ['sent_back', 'overdue', 'today', 'tomorrow'].forEach(k => theirs[k].forEach(x => mine.cover.push({ ...x, for_name: a.name, kind: k })));
+  }
   return people;
 }
 
@@ -44,7 +52,8 @@ const lines = (list, fmt) => list.slice(0, MAX_LINES).map(x => '  - ' + fmt(x)).
 
 /** The message for one person, or null when there is nothing to say. */
 function compose(name, d, today) {
-  const n = d.overdue.length + d.today.length + d.tomorrow.length + d.sent_back.length + d.review.length;
+  d.cover = d.cover || [];
+  const n = d.overdue.length + d.today.length + d.tomorrow.length + d.sent_back.length + d.review.length + d.cover.length;
   if (!n) return null;
   const bits = [];
   if (d.sent_back.length) bits.push(plural(d.sent_back.length, 'piece') + ' of work sent back');
@@ -52,12 +61,14 @@ function compose(name, d, today) {
   if (d.overdue.length) bits.push(plural(d.overdue.length, 'task') + ' overdue');
   if (d.today.length) bits.push(plural(d.today.length, 'task') + ' due today');
   if (d.tomorrow.length) bits.push(plural(d.tomorrow.length, 'task') + ' due tomorrow');
+  if (d.cover.length) bits.push(plural(d.cover.length, 'task') + ' to cover for ' + [...new Set(d.cover.map(x => x.for_name))].join(' and '));
   const sections = [];
   if (d.sent_back.length) sections.push('Sent back to you:\n' + lines(d.sent_back, x => `${x.title} (${x.project_number}): ${x.review_note}`));
   if (d.review.length) sections.push('Waiting for your review:\n' + lines(d.review, x => `${x.title} (${x.project_number})`));
   if (d.overdue.length) sections.push('Overdue:\n' + lines(d.overdue, x => `${x.title} (${x.project_number}), was due ${dmy(x.due)}`));
   if (d.today.length) sections.push('Due today:\n' + lines(d.today, x => `${x.title} (${x.project_number})`));
   if (d.tomorrow.length) sections.push('Due tomorrow:\n' + lines(d.tomorrow, x => `${x.title} (${x.project_number})`));
+  if (d.cover.length) sections.push('Covering for a colleague who is away:\n' + lines(d.cover, x => `${x.title} (${x.project_number}) for ${x.for_name}${x.kind === 'overdue' ? ', was due ' + dmy(x.due) : x.kind === 'today' ? ', due today' : x.kind === 'tomorrow' ? ', due tomorrow' : ', sent back'}`));
   const subject = `Your day: ${bits.slice(0, 2).join(', ')}`;
   const text = `Today is ${dmy(today)}. Here is what is on your plate: ${bits.join(', ')}.\n\n${sections.join('\n\n')}`;
   return { subject, text };
