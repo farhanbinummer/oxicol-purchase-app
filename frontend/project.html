@@ -27,6 +27,14 @@
     .tr-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .tr-res-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; align-items: end; padding: 8px 0; border-top: 1px solid var(--border); } .tr-res-name small { display: block; color: var(--text-2); }
     dialog.oxi-dlg { max-height: 92vh; overflow-y: auto; }
     table.oxi-nocards { display: table; overflow: visible; max-width: none; } #trialsview .oxi-card2, #trialsview .oxi-table-scroll { min-width: 0; max-width: 100%; } #trialsview .oxi-table-scroll { position: relative; }      /* keeps the hidden screen-reader text inside the scrolling grid */
+    .tr-warn { margin: 0 0 var(--s3); padding: 8px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-weight: 600; font-size: 14px; }
+    .tr-ovrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 var(--s2); } .tr-stat b { display: block; font-size: 22px; line-height: 1.2; } .tr-stat span { font-size: 13px; color: var(--text-2); }
+    .tr-extra-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin: 0 0 8px; align-items: center; }
+    .tr-files { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 8px; } .tr-file { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: 10px; }
+    .tr-thumb { width: 64px; height: 64px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; font-weight: 700; color: var(--text-2); } .tr-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .tr-fileinfo { min-width: 0; overflow-wrap: anywhere; } .tr-fileinfo small { display: block; color: var(--text-2); } .tr-fileact { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .tr-filebtn { display: inline-block; padding: 9px 14px; border: 1px solid var(--border-strong, var(--border)); border-radius: var(--r-control, 8px); font-weight: 600; cursor: pointer; background: var(--surface); } .tr-filebtn:focus-visible { outline: 3px solid var(--accent, #0f766e); outline-offset: 2px; }
+    @media (max-width: 560px) { .tr-extra-row { grid-template-columns: 1fr; } .tr-file { grid-template-columns: 56px 1fr; } .tr-fileact { grid-column: 1 / -1; justify-content: flex-start; } }
     @media (max-width: 560px) { .tr-two, .tr-res-row { grid-template-columns: 1fr; } .tr-dl { grid-template-columns: 1fr; } }
     @media (prefers-reduced-motion: reduce) { .tr-chart * { transition: none !important; animation: none !important; } }
   </style>
@@ -400,6 +408,7 @@
         } else {
           body.appendChild(el('p', null, 'Confirm that every checklist item for this stage is done and the work is finished. The completion date is recorded with your name and cannot be in the future. Reopening it later needs a reason.'));
         }
+        if (stage.no_trial_warning) body.appendChild(el('p', 'tr-warn', '⚠ No lab trial has been recorded for this stage. You can still complete it, but this will be written in the project history. Record trials on the Trials tab first if work was done.'));
         dateEl = dateInput(D.today, D.today); body.appendChild(field('Completion date', dateEl, 'cDate'));
         return () => ({ date: dateEl.value });
       }, 'Complete stage ' + stage.no, async (a, errBox) => {
@@ -759,6 +768,7 @@
       if (['Completed', 'Rejected'].includes(p.status)) return items;
       if (p.status === 'On Hold') items.push({ sev: 'warn', icon: 'pause', tag: 'Paused', title: 'Project is on hold', detail: 'No stage can be completed until work resumes.', act: D.can.edit ? { label: 'Change status', run: statusDialog } : null });
       D.stages.filter(s => s.overdue).forEach(s => items.push({ sev: 'bad', icon: 'clock', tag: 'Overdue', title: 'Stage ' + s.no + ': ' + s.name, detail: plural(s.delay, 'day') + ' overdue (planned ' + dmy(s.planned) + ')', act: D.can.edit ? { label: 'Edit dates', run: () => stageEditDialog(s) } : null }));
+      D.stages.filter(s => s.state === 'current' && s.no_trial_warning).forEach(s => items.push({ sev: 'warn', icon: 'alert', tag: 'Lab trial', title: 'Stage ' + s.no + ': no lab trial recorded', detail: 'Record a trial before completing this stage. You can still complete it without one; that will be written in the history.', act: D.can.trial_view ? { label: 'Open trials', run: () => setTab('trials', true) } : null }));
       D.stages.filter(s => s.review_flag).forEach(s => items.push({ sev: 'warn', icon: 'alert', tag: 'Needs review', title: 'Stage ' + s.no + ': ' + s.name, detail: s.review_flag, act: null }));
       if (!D.lead && D.next_step && !D.next_step.owner) items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: 'No project lead assigned', detail: 'Stages without a named owner have nobody accountable.', act: D.can.edit ? { label: 'Assign owner', run: focusLead } : null });
       D.tasks.filter(t => t.status === 'in_review').forEach(t => items.push({ sev: 'warn', icon: 'check', tag: 'To review', title: t.title, detail: (t.completed_by_name ? byName(t) : (t.assignee_name || 'Someone')) + ' handed in work' + (t.checklist_label ? ' for "' + t.checklist_label + '"' : ''), act: canReview(t) ? { label: 'Review', task: t } : null }));
@@ -791,10 +801,38 @@
       return c;
     }
 
+
+    /** The Overview's lab trials card: how many trials, the latest result, how it compares with the one before, and the preferred formula. */
+    function trialsCard() {
+      const sm = D.trials_summary; if (!sm || !D.can.trial_view || D.project.is_draft) return null;
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'tcT');
+      const h = el('h2', null, 'Lab trials'); h.id = 'tcT'; c.appendChild(h);
+      const open = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Open trials'); open.type = 'button'; open.onclick = () => setTab('trials', true);
+      if (!sm.count) {
+        const cur = D.stages.find(s => s.state === 'current');
+        c.appendChild(el('p', null, 'No lab trial recorded yet.' + (cur && cur.no_trial_warning ? ' Stage ' + cur.no + ' (' + cur.name + ') is the current stage.' : '')));
+        c.appendChild(open); return c;
+      }
+      const row = el('div', 'tr-ovrow');
+      const stat = (big, small) => { const d = el('div', 'tr-stat'); d.append(el('b', null, big), el('span', null, small)); return d; };
+      const l = sm.latest, trend = sm.previous ? (l.pass > sm.previous.pass ? ' ▲ up from ' + sm.previous.pass : l.pass < sm.previous.pass ? ' ▼ down from ' + sm.previous.pass : ' same as ' + sm.previous.label) : '';
+      row.append(stat(String(sm.count), sm.count === 1 ? 'trial recorded' : 'trials recorded'), stat(l.pass + ' of ' + sm.total, 'passed in ' + l.label + trend), stat(sm.days_since === 0 ? 'Today' : plural(sm.days_since, 'day') + ' ago', 'last trial (' + dmy(sm.last_date) + ')'));
+      c.appendChild(row);
+      const meta = el('p', 'oxi-section-note'); meta.textContent = 'Latest outcome: ' + l.outcome + '. ' + (sm.preferred ? '★ Preferred formula: ' + sm.preferred.label + (sm.preferred.formula_ref ? ' (' + sm.preferred.formula_ref + ')' : '') + '.' : 'No preferred formula chosen yet.');
+      c.appendChild(meta);
+      if (sm.series.length > 1 && sm.total) {                          // a small picture of the pass count, trial by trial (the numbers are printed too)
+        const w = 18 + sm.series.length * 34, svg = svgEl('svg', { viewBox: '0 0 ' + w + ' 56', width: w, height: 56, role: 'img', class: 'tr-chart' });
+        svg.setAttribute('aria-label', 'Requirements passed per trial: ' + sm.series.map(x => x.label + ' ' + x.pass + ' of ' + sm.total).join(', '));
+        sm.series.forEach((x, i) => { const hh = Math.max(2, x.pass / sm.total * 34), xx = 10 + i * 34; svg.appendChild(svgEl('rect', { x: xx, y: 38 - hh, width: 24, height: hh, rx: 3, class: 'tr-pass' })); const tx = svgEl('text', { x: xx + 12, y: 52, 'text-anchor': 'middle', class: 'tr-axis' }); tx.textContent = x.label; svg.appendChild(tx); const nn = svgEl('text', { x: xx + 12, y: 34 - hh, 'text-anchor': 'middle', class: 'tr-axis' }); nn.textContent = x.pass; svg.appendChild(nn); });
+        const sc = el('div', 'tr-chartbox'); sc.appendChild(svg); c.appendChild(sc);
+      }
+      c.appendChild(open); return c;
+    }
+
     function renderOverview() {
       const o = $('overview'); o.innerHTML = ''; o.setAttribute('aria-busy', 'false');
       const top = el('div', 'oxi-ovgrid'); top.append(nextStepCard(), attentionCard());
-      o.append(summaryRow(), top, milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard());
+      o.append(...[summaryRow(), top, trialsCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard()].filter(Boolean));
     }
 
     // ------------------------------------------------------------------ List tab (tasks)
@@ -1308,6 +1346,95 @@
       t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
     }
 
+
+    // ---- extra fields and attachments for a trial ----
+    const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+    /** Photographs are shrunk in the browser first (longest side 1800 px, JPEG), so a phone photo uploads quickly and stays under the 5 MB limit. */
+    async function prepareFile(file) {
+      const limit = T.limits.attach_max_bytes;
+      if (file.type === 'application/pdf') { if (file.size > limit) throw new Error(file.name + ' is larger than ' + kb(limit)); return { blob: file, name: file.name }; }
+      if (!/^image\/(jpeg|png)$/.test(file.type)) throw new Error(file.name + ' is not a JPEG, PNG or PDF');
+      let blob = file, name = file.name;
+      const bmp = await createImageBitmap(file).catch(() => null);
+      if (bmp && (Math.max(bmp.width, bmp.height) > 1800 || file.size > 1.5 * 1048576)) {
+        const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+        const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+        const out = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85)); if (out) { blob = out; name = name.replace(/\.[a-z0-9]+$/i, '') + '.jpg'; }
+      }
+      if (blob.size > limit) throw new Error(file.name + ' is still larger than ' + kb(limit) + ' after shrinking');
+      return { blob, name };
+    }
+    async function uploadTrialFile(trialId, file) {
+      const f = await prepareFile(file);
+      const res = await fetch('/api/rd/projects/' + pid + '/trials/' + trialId + '/attachments', { method: 'POST', headers: { 'Content-Type': f.blob.type, 'X-File-Name': encodeURIComponent(f.name) }, body: f.blob });
+      const r = await res.json().catch(() => ({})); if (!res.ok || !r.success) throw new Error(r.error || 'Could not save ' + file.name);
+      return r;
+    }
+    const FILE_ACCEPT = 'image/jpeg,image/png,application/pdf';
+
+    /** The editable list of extra fields: name, value, Remove; plus "Add a field". Returns { box, read }. */
+    function extraFieldsEditor(initial) {
+      const box = el('div', 'tr-extra'), rows = [], list = el('div'); const max = T.limits.max_extra_fields;
+      const add = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Add a field'); add.type = 'button';
+      const sync = () => { add.disabled = rows.length >= max; add.textContent = rows.length >= max ? 'Field limit reached (' + max + ')' : 'Add a field'; };
+      const addRow = (label, value, focus) => {
+        const r = {}; const w = el('div', 'tr-extra-row');
+        r.l = el('input'); r.l.type = 'text'; r.l.maxLength = 60; r.l.value = label || ''; r.l.setAttribute('aria-label', 'Field name'); r.l.placeholder = 'Field name, e.g. Pot life';
+        r.v = el('input'); r.v.type = 'text'; r.v.maxLength = 300; r.v.value = value || ''; r.v.setAttribute('aria-label', 'Value' + (label ? ' of ' + label : '')); r.v.placeholder = 'Value';
+        r.l.addEventListener('input', () => r.v.setAttribute('aria-label', 'Value' + (r.l.value ? ' of ' + r.l.value : '')));
+        const rm = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Remove'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove this field');
+        rm.onclick = () => { const i = rows.indexOf(r); rows.splice(i, 1); w.remove(); sync(); (rows[Math.min(i, rows.length - 1)] ? rows[Math.min(i, rows.length - 1)].l : add).focus(); };
+        w.append(r.l, r.v, rm); list.appendChild(w); rows.push(r); sync(); if (focus) r.l.focus();
+      };
+      (initial || []).forEach(f => addRow(f.label, f.value));
+      add.onclick = () => addRow('', '', true);
+      box.append(list, add);
+      return { box, read: () => rows.map(r => ({ label: r.l.value, value: r.v.value })) };
+    }
+
+    /** Photographs and PDFs of the trial's results: thumbnails, open, remove (with a reason), add. Confidential: only for people with technical access. */
+    function attachmentsBlock(x) {
+      const box = el('section'); box.setAttribute('aria-label', 'Photographs and files'); box.appendChild(el('h4', null, 'Photographs and files'));
+      if (!T.can.technical) { box.appendChild(el('p', 'oxi-section-note', x.attachment_count ? x.attachment_count + ' file' + (x.attachment_count === 1 ? '' : 's') + ' attached. They are confidential and not shown to you.' : 'No files attached.')); return box; }
+      const urls = []; const dlgOf = () => box.closest('dialog'); const stop = () => { const d = dlgOf(); if (d) d.addEventListener('close', () => urls.forEach(u => URL.revokeObjectURL(u)), { once: true }); };
+      const msg = el('div', 'oxi-errtext'); msg.setAttribute('role', 'alert'); msg.hidden = true;
+      const grid = el('ul', 'tr-files');
+      if (!x.attachments.length) box.appendChild(el('p', 'oxi-section-note', 'No photographs or files yet.'));
+      x.attachments.forEach(a => {
+        const li = el('li', 'tr-file'); const th = el('div', 'tr-thumb'); th.textContent = a.mime === 'application/pdf' ? 'PDF' : '…';
+        const info = el('div', 'tr-fileinfo'); info.appendChild(el('strong', null, a.file_name)); info.appendChild(el('small', null, kb(a.size_bytes) + ' · ' + a.by + ' · ' + dmy(String(a.at).slice(0, 10))));
+        const get = async () => { const res = await fetch('/api/rd/projects/' + pid + '/trials/' + x.id + '/attachments/' + a.id); if (!res.ok) throw new Error('Could not load the file'); const u = URL.createObjectURL(await res.blob()); urls.push(u); return u; };
+        if (a.mime !== 'application/pdf') get().then(u => { const im = el('img'); im.src = u; im.alt = 'Photograph ' + a.file_name; th.textContent = ''; th.appendChild(im); }).catch(() => { th.textContent = '!'; });
+        const act = el('div', 'tr-fileact');
+        const open = el('button', 'oxi-btn-secondary oxi-btn-sm', a.mime === 'application/pdf' ? 'Download' : 'View'); open.type = 'button'; open.setAttribute('aria-label', (a.mime === 'application/pdf' ? 'Download ' : 'View ') + a.file_name);
+        open.onclick = async () => { try { const u = await get(); if (a.mime === 'application/pdf') { const l = document.createElement('a'); l.href = u; l.download = a.file_name; l.click(); } else window.open(u, '_blank', 'noopener'); } catch (e) { msg.textContent = e.message; msg.hidden = false; } };
+        act.appendChild(open);
+        if (T.can.add) {
+          const rm = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Remove'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove ' + a.file_name);
+          rm.onclick = () => { const d = dlgOf(); d.close(); setTimeout(() => dialog('Remove ' + a.file_name, (b) => { const ta = el('textarea'); ta.rows = 2; ta.maxLength = 1000; b.appendChild(el('p', 'oxi-section-note', 'The file is kept in the history; it stops being shown. Say why it is being removed.')); b.appendChild(field('Reason (required)', ta, 'rmWhy')); return () => ({ reason: ta.value }); }, 'Remove file', async (v, err) => {
+            const r = await api('/api/rd/projects/' + pid + '/trials/' + x.id + '/attachments/' + a.id + '/remove', 'POST', { reason: v.reason }); if (!r.success) { err.textContent = r.error || 'Could not remove it.'; err.hidden = false; return false; }
+            await loadTrials(); setTimeout(() => trialDetail(x.id), 0); return true; }), 0); };
+          act.appendChild(rm);
+        }
+        li.append(th, info, act); grid.appendChild(li);
+      });
+      box.appendChild(grid);
+      if (T.can.add) {
+        const inp = el('input'); inp.type = 'file'; inp.accept = FILE_ACCEPT; inp.multiple = true; inp.id = 'trFiles' + x.id; inp.className = 'oxi-sr-only';
+        const lab = el('label', 'tr-filebtn', 'Add photographs or files'); lab.htmlFor = inp.id; lab.tabIndex = 0; lab.setAttribute('role', 'button');
+        lab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inp.click(); } });
+        box.append(lab, inp, el('p', 'oxi-section-note', 'JPEG, PNG or PDF, up to ' + kb(T.limits.attach_max_bytes) + ' each and ' + T.limits.attach_max_per_trial + ' per trial. Photographs are shrunk before they are sent.'));
+        inp.onchange = async () => {
+          const files = [...inp.files]; if (!files.length) return; msg.hidden = true; lab.textContent = 'Uploading…'; const bad = [];
+          for (const f of files) { try { await uploadTrialFile(x.id, f); } catch (e) { bad.push(e.message); } }
+          await loadTrials();
+          if (bad.length) note(bad.join(' '), false); else note('Saved.', true);
+          const d = dlgOf(); if (d) d.close(); setTimeout(() => trialDetail(x.id), 0);
+        };
+      }
+      box.appendChild(msg); stop(); setTimeout(stop, 0); return box;
+    }
+
     function trialDetail(id) {
       const x = T.trials.find(y => y.id === id); if (!x) return;
       dialog('Trial ' + x.label, (body) => {
@@ -1317,11 +1444,13 @@
         row('Outcome', Object.assign(el('span', OUT_BADGE[x.outcome] || 'badge', x.outcome)));
         if (T.can.technical) { row('Formula or version', x.formula_ref); row('What changed', x.changed_variables || 'Nothing recorded'); } else row('Formula, what changed, observations', 'Confidential: not shown to you');
         row('Batch size', x.batch_size_text); if (T.can.technical) row('Observations', x.observations);
+        if (T.can.technical) (x.extra_fields || []).forEach(f => row(f.label, f.value || '-'));
         if (T.can.prices) row('Raw-material cost', x.rm_cost_per_kg == null ? 'Not recorded' : rupeesPerKg(x.rm_cost_per_kg));
         body.appendChild(dl);
         const rt = el('table', 'oxi-nocards'); const rh = el('tr'); ['Requirement', 'Result'].concat(T.can.technical ? ['Measured'] : []).forEach(c => { const th = el('th', null, c); th.scope = 'col'; rh.appendChild(th); }); const th0 = el('thead'); th0.appendChild(rh); rt.appendChild(th0);
         const rb = el('tbody'); T.requirements.forEach(q => { const r = x.results.find(y => y.requirement_id === q.id) || { result: 'Not tested' }; const tr = el('tr'); tr.appendChild(el('td', null, (q.parameter || '(unnamed)') + (q.target ? ' (target ' + q.target + ')' : ''))); const td = el('td'); td.appendChild(el('span', 'tr-res tr-c-' + r.result.replace(' ', '').toLowerCase(), RES_SYM[r.result] + ' ' + r.result)); tr.appendChild(td); if (T.can.technical) tr.appendChild(el('td', null, r.measured_value || '')); rb.appendChild(tr); });
         rt.appendChild(rb); const rw = el('div', 'oxi-table-scroll'); rw.appendChild(rt); body.appendChild(rw);
+        body.appendChild(attachmentsBlock(x));
         body.appendChild(el('h4', null, 'Corrections'));
         if (!x.corrections.length) body.appendChild(el('p', 'oxi-section-note', 'This trial has not been corrected.'));
         else { const ul = el('ul', 'tr-corr'); x.corrections.slice().reverse().forEach(c => { const li = el('li'); li.appendChild(el('strong', null, dmy(String(c.at).slice(0, 10)) + ', ' + c.by + ': ' + (c.fields.length ? 'changed ' + c.fields.map(f => f.replace(/_/g, ' ')).join(', ') : 'corrected'))); if (c.reason) li.appendChild(el('div', null, 'Reason: ' + c.reason)); if (c.old) { const old = Object.entries(c.old).filter(([k]) => k !== 'results').map(([k, v]) => k.replace(/_/g, ' ') + ' was "' + (v == null ? '' : v) + '"'); if (c.old.results) old.push('results were changed'); if (old.length) li.appendChild(el('div', 'oxi-section-note', 'Before: ' + old.join('; '))); } ul.appendChild(li); }); body.appendChild(ul); }
@@ -1345,6 +1474,10 @@
         body.appendChild(field('What changed from the previous trial', f.changed, 'trChanged', 'For example "solvent 40% to 35%". Leave empty for the first trial.'));
         f.batch = el('input'); f.batch.type = 'text'; f.batch.maxLength = 100; f.batch.value = x ? (x.batch_size_text || '') : ''; body.appendChild(field('Batch size', f.batch, 'trBatch'));
         f.obs = el('textarea'); f.obs.rows = 3; f.obs.maxLength = 3000; f.obs.value = x ? (x.observations || '') : ''; body.appendChild(field('Observations', f.obs, 'trObs', 'For example viscosity, solids, appearance.'));
+        body.appendChild(el('h4', null, 'Extra fields'));
+        body.appendChild(el('p', 'oxi-section-note', 'Add anything else worth recording for this trial, for example "Pot life" or "Colour match". Names are copied from the last trial so you do not retype them: change a value, rename or remove a field as needed.'));
+        const prevTrial = T.trials.length ? T.trials[T.trials.length - 1] : null;
+        f.extra = extraFieldsEditor(x ? (x.extra_fields || []) : ((prevTrial && prevTrial.extra_fields) || []).map(e => ({ label: e.label, value: '' }))); body.appendChild(f.extra.box);
         body.appendChild(el('h4', null, 'Results against each requirement'));
         f.res = {};
         if (!T.requirements.length) body.appendChild(el('p', 'oxi-section-note', 'This project has no performance requirements.'));
@@ -1359,10 +1492,14 @@
         const hint = el('p', 'oxi-section-note', 'Preferred formula only records the outcome. It does not complete a stage, tick a checklist item or record an approval. If another trial was preferred, it is set back to "Needs another trial" with a note.'); hint.hidden = f.outcome.value !== 'Preferred formula'; body.appendChild(hint);
         f.outcome.onchange = () => { hint.hidden = f.outcome.value !== 'Preferred formula'; };
         if (T.can.prices) { f.cost = el('input'); f.cost.type = 'text'; f.cost.inputMode = 'decimal'; f.cost.value = x && x.rm_cost_per_kg != null ? String(x.rm_cost_per_kg) : ''; body.appendChild(field('Raw-material cost per kg (₹, optional)', f.cost, 'trCost', 'Up to two decimals.')); }
+        if (!x) {
+          const fi = el('input'); fi.type = 'file'; fi.accept = FILE_ACCEPT; fi.multiple = true; f.files = fi;
+          body.appendChild(field('Photographs or files of the results (optional)', fi, 'trNewFiles', 'JPEG, PNG or PDF, up to ' + kb(T.limits.attach_max_bytes) + ' each. They are added right after the trial is saved. More can be added later from the trial.'));
+        }
         if (x) { f.reason = el('textarea'); f.reason.rows = 2; f.reason.maxLength = 1000; body.appendChild(field('Reason for the correction (required)', f.reason, 'trReason', 'The earlier values are kept in the correction history.')); }
         return () => f;
       }, x ? 'Save correction' : 'Save trial', async (f, err) => {
-        const payload = { trial_date: f.date.value, stage_no: Number(f.stage.value), formula_ref: f.formula.value, changed_variables: f.changed.value, batch_size_text: f.batch.value, observations: f.obs.value, outcome: f.outcome.value,
+        const payload = { trial_date: f.date.value, stage_no: Number(f.stage.value), formula_ref: f.formula.value, changed_variables: f.changed.value, batch_size_text: f.batch.value, observations: f.obs.value, extra_fields: f.extra.read(), outcome: f.outcome.value,
           results: T.requirements.map(q => ({ requirement_id: q.id, result: f.res[q.id].sel.value, measured_value: f.res[q.id].mv.value })) };
         if (f.cost) payload.rm_cost_per_kg = f.cost.value;
         let r;
@@ -1372,7 +1509,10 @@
           r = await api('/api/rd/projects/' + pid + '/trials/' + x.id, 'PATCH', payload);
         } else r = await api('/api/rd/projects/' + pid + '/trials', 'POST', payload);
         if (!r.success) { trialFail(r, err); return false; }
-        note(x ? 'Correction saved. The earlier values are kept in the history.' : 'Trial ' + r.label + ' recorded.', true);
+        let bad = [];
+        if (!x && f.files && f.files.files.length) { for (const file of [...f.files.files]) { try { await uploadTrialFile(r.id, file); } catch (e) { bad.push(e.message); } } }
+        if (bad.length) note('Trial ' + r.label + ' recorded, but some files could not be added: ' + bad.join(' ') + ' Open the trial to add them again.', false);
+        else note(x ? 'Correction saved. The earlier values are kept in the history.' : 'Trial ' + r.label + ' recorded.', true);
         await loadTrials();
         // the lists were redrawn, so give focus back to the matching control in the new page content
         lastFocus = x ? $('trialsview').querySelector('button[aria-label="Open trial ' + x.label + '"]') : $('trialsview').querySelector('.tr-head button');

@@ -351,8 +351,45 @@ const TRIAL_RESULTS = ['Pass', 'Fail', 'Not tested'];
 const TRIAL_STAGES = [2, 3];                                      // First Lab Batch, Lab Trials & Optimisation
 const TRIAL_TEXT_LIMITS = { formula_ref: 200, changed_variables: 500, batch_size_text: 100, observations: 3000, measured_value: 200 };
 const MAX_TRIAL_COST = 1000000;
-const CONFIDENTIAL_TRIAL_FIELDS = ['formula_ref', 'changed_variables', 'observations'];     // plus every measured_value
+const CONFIDENTIAL_TRIAL_FIELDS = ['formula_ref', 'changed_variables', 'observations', 'extra_fields'];     // plus every measured_value
 const trialLabel = (no) => 'T' + no;
+
+const MAX_EXTRA_FIELDS = 15, MAX_EXTRA_LABEL = 60, MAX_EXTRA_VALUE = 300;
+/** The fields a person adds to a trial ("Add a field"): a list of { label, value }. Returns { fields } or { error }. Empty rows are dropped. */
+function cleanExtraFields(input) {
+  if (input == null || input === '') return { fields: [] };
+  if (!Array.isArray(input)) return { error: 'Extra fields must be a list' };
+  const out = [], seen = new Set();
+  for (const f of input) {
+    const label = String((f && f.label) == null ? '' : f.label).trim().replace(/\s+/g, ' '), value = String((f && f.value) == null ? '' : f.value).trim();
+    if (!label && !value) continue;
+    if (!label) return { error: 'Every extra field needs a name' };
+    if (label.length > MAX_EXTRA_LABEL) return { error: `A field name is too long (${MAX_EXTRA_LABEL} characters at most)` };
+    if (value.length > MAX_EXTRA_VALUE) return { error: `The value of "${label}" is too long (${MAX_EXTRA_VALUE} characters at most)` };
+    const key = label.toLowerCase();
+    if (seen.has(key)) return { error: `The field "${label}" appears twice` };
+    seen.add(key); out.push({ label, value });
+  }
+  if (out.length > MAX_EXTRA_FIELDS) return { error: `A trial can have at most ${MAX_EXTRA_FIELDS} extra fields` };
+  return { fields: out };
+}
+
+// Attachments: photographs or PDFs of trial results. The file's own first bytes decide what it is, never the name or the header it came with.
+const ATTACH_MAX_BYTES = 5 * 1024 * 1024, ATTACH_MAX_PER_TRIAL = 10, ATTACH_MAX_PER_PROJECT_BYTES = 60 * 1024 * 1024;
+function sniffAttachment(buf) {
+  if (!buf || buf.length < 8) return null;
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 && buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A) return 'image/png';
+  if (buf.slice(0, 1024).toString('latin1').includes('%PDF-')) return 'application/pdf';
+  return null;
+}
+/** A name that is safe to store and show: no folders, no control characters, at most 120 characters. */
+function safeFileName(name, mime) {
+  let n = String(name || '').split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '').trim().slice(0, 120);
+  if (!n) n = 'file';
+  const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'application/pdf': '.pdf' }[mime];
+  return ext && !n.toLowerCase().endsWith(ext) && !(ext === '.jpg' && /\.jpe?g$/i.test(n)) ? n + ext : n;
+}
 
 /** The money field: a non-negative number with at most two decimals, or null. Returns { value } or { error }. */
 function parseTrialCost(v) {
@@ -394,6 +431,7 @@ function validateTrial(input, { requirementIds, today, partial } = {}) {
   text('observations', 'Observations', false);
   if (has('outcome')) { if (!TRIAL_OUTCOMES.includes(b.outcome)) err('outcome', 'Choose an outcome: ' + TRIAL_OUTCOMES.join(', ')); else clean.outcome = b.outcome; }
   if (has('rm_cost_per_kg')) { const c = parseTrialCost(b.rm_cost_per_kg); if (c.error) err('rm_cost_per_kg', c.error); else clean.rm_cost_per_kg = c.value; }
+  if (has('extra_fields')) { const x = cleanExtraFields(b.extra_fields); if (x.error) err('extra_fields', x.error); else clean.extra_fields = x.fields; }
   if (has('results')) {
     const known = new Set(requirementIds || []), seen = new Set(), out = [];
     if (b.results != null && !Array.isArray(b.results)) err('results', 'Results must be a list');
@@ -441,5 +479,5 @@ module.exports = {
   formatProjectNumber, periodOf, numberFor, parseProjectNumber,
   currentStageNo, autoPlan, findConflicts, delayDays, replanPreview,
   cleanRequirementRows, validateRequest,
-  TRIAL_OUTCOMES, TRIAL_RESULTS, TRIAL_STAGES, TRIAL_TEXT_LIMITS, CONFIDENTIAL_TRIAL_FIELDS, trialLabel, parseTrialCost, validateTrial, trialSummary, diffTrial
+  TRIAL_OUTCOMES, TRIAL_RESULTS, TRIAL_STAGES, TRIAL_TEXT_LIMITS, CONFIDENTIAL_TRIAL_FIELDS, MAX_EXTRA_FIELDS, cleanExtraFields, ATTACH_MAX_BYTES, ATTACH_MAX_PER_TRIAL, ATTACH_MAX_PER_PROJECT_BYTES, sniffAttachment, safeFileName, trialLabel, parseTrialCost, validateTrial, trialSummary, diffTrial
 };

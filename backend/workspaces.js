@@ -739,6 +739,18 @@ BUILDERS.rd = async (ctx) => {
     reason: `${RD.STAGES[r.stage_no - 1].name} is the current stage`, responsible: 'You', due: ymdOf(r.planned_date), overdue: r.days_late > 0,
     waiting_days: r.days_late > 0 ? r.days_late : null, progress: `Stage ${r.stage_no} of 8`, next: { label: 'Open project', href: 'project.html?id=' + r.id }, tone: r.days_late > 0 ? 'bad' : 'info' })));
 
+  // Lab trials: projects you own whose current stage is a lab stage (2 or 3) with no trial recorded, or none for 14 days. A prompt in your to-do list, not a block (the dashboard keeps its four cards).
+  if (ctx.access.isAdmin || ctx.can(KEYS.RD_TRIAL_VIEW)) {
+    const lab = stages.rows.filter(r => RD.TRIAL_STAGES.includes(r.stage_no));
+    const stats = lab.length ? await pool.query(`SELECT project_id, COUNT(*)::int AS n, MAX(trial_date) AS last FROM rd_trials WHERE project_id = ANY($1) GROUP BY project_id`, [lab.map(r => r.id)]) : { rows: [] };
+    const byProject = new Map(stats.rows.map(r => [r.project_id, r]));
+    const stale = lab.map(r => { const st = byProject.get(r.id); const last = st ? ymdOf(st.last) : null; const since = last ? RD.daysBetween(last, RD.todayIST()) : null; return { ...r, n: st ? st.n : 0, last, since }; }).filter(r => r.n === 0 || r.since > 14);
+    stale.filter(r => r.owner_id === uid).forEach(r => queue.push(task({
+      type: 'Lab trial', number: r.project_number, href: 'project.html?id=' + r.id + '#trials', party: r.title,
+      reason: r.n === 0 ? `Stage ${r.stage_no} (${RD.STAGES[r.stage_no - 1].name}) has no lab trial recorded` : `Last lab trial was ${plural(r.since, 'day')} ago (${nice(r.last)})`,
+      responsible: 'You', progress: `Stage ${r.stage_no} of 8`, next: { label: 'Open trials', href: 'project.html?id=' + r.id + '#trials' }, tone: 'warn' })));
+  }
+
   const tasks = await pool.query(
     `SELECT t.id, t.title, t.status, t.priority, t.due_date, t.project_id, p.project_number, (${IST_TODAY} - t.due_date) AS days_late
        FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id
