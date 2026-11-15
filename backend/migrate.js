@@ -613,6 +613,31 @@ const STEPS = [
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('rd', 'rd.trial_edit') ON CONFLICT DO NOTHING");
       await db.query("INSERT INTO role_permissions (role, permission_key) SELECT DISTINCT role, 'rd.trial_view' FROM role_permissions WHERE permission_key = 'rd.view_all' OR role = 'rd' ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // Extra fields a person adds to a trial (label and value, up to 15), and photos or PDFs of the results. Files are stored in the
+    // database (the hosting disk is not permanent), at most 5 MB each. Removing an attachment keeps the file and records who removed
+    // it and why. Additive only.
+    name: '021_rd_trial_fields_and_files',
+    async run(db) {
+      await db.query("ALTER TABLE rd_trials ADD COLUMN IF NOT EXISTS extra_fields JSONB NOT NULL DEFAULT '[]'::jsonb");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_trial_attachments (
+          id               SERIAL PRIMARY KEY,
+          trial_id         INTEGER NOT NULL REFERENCES rd_trials(id) ON DELETE CASCADE,
+          file_name        VARCHAR(150) NOT NULL,
+          mime             VARCHAR(40) NOT NULL CHECK (mime IN ('image/jpeg', 'image/png', 'application/pdf')),
+          size_bytes       INTEGER NOT NULL CHECK (size_bytes > 0),
+          data             BYTEA NOT NULL,
+          uploaded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          uploaded_by_name VARCHAR(150) NOT NULL,
+          created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          removed_at       TIMESTAMPTZ,
+          removed_by_name  VARCHAR(150),
+          removed_reason   TEXT
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_trial_attachments_trial ON rd_trial_attachments(trial_id, id)');
+    }
   }
 ];
 

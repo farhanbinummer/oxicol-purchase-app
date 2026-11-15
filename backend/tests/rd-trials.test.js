@@ -218,3 +218,84 @@ test('trials: the project page learns what the person may do', async () => {
   assert.equal((await api(tok.lead, 'GET', '/api/rd/projects/' + pid)).can.trial_edit, true);
   const m = await api(tok.manager, 'GET', '/api/rd/projects/' + pid); assert.equal(m.can.trial_view, true); assert.equal(m.can.trial_edit, false);
 });
+
+// ---------------------------------------------------------------- extra fields, attachments, overview summary and stage warning
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1]), crypto.randomBytes(200)]);
+const upload = (token, pid, tid, body, type, name) => fetch(`${BASE}/api/rd/projects/${pid}/trials/${tid}/attachments`, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': type || 'image/jpeg', 'X-File-Name': encodeURIComponent(name || 'plate 1.jpg') }, body }).then(async r => ({ status: r.status, ...(await r.json().catch(() => ({}))) }));
+const download = (token, pid, tid, aid) => fetch(`${BASE}/api/rd/projects/${pid}/trials/${tid}/attachments/${aid}`, { headers: { Authorization: 'Bearer ' + token } });
+
+test('trials: "Add a field" - extra fields are saved, confidential, corrected with history, and checked', async () => {
+  const pid = await newProject(); const { requirements } = await list(tok.lead, pid);
+  const t = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements, { extra_fields: [{ label: 'Pot life', value: '4 h ' + SECRET }, { label: 'Colour match', value: 'good' }, { label: '', value: '' }] }));
+  assert.equal(t.status, 201, JSON.stringify(t));
+  const l = (await list(tok.lead, pid)).trials[0]; assert.deepEqual(l.extra_fields, [{ label: 'Pot life', value: '4 h ' + SECRET }, { label: 'Colour match', value: 'good' }], 'the empty row was dropped');
+  const m = await list(tok.manager, pid); assert.ok(!JSON.stringify(m).includes('Pot life') && !JSON.stringify(m).includes(SECRET) && !('extra_fields' in m.trials[0]), 'confidential: left out for a viewer without technical access');
+  const url = `/api/rd/projects/${pid}/trials/${t.id}`;
+  const c = await api(tok.lead, 'PATCH', url, { version: 1, reason: 'Added a field and removed another', extra_fields: [{ label: 'Pot life', value: '4 h' }, { label: 'Gloss at 60 deg', value: '82' }] });
+  assert.equal(c.status, 200, JSON.stringify(c)); assert.deepEqual(c.fields, ['extra_fields']);
+  const after = (await list(tok.lead, pid)).trials[0]; assert.equal(after.extra_fields.length, 2); assert.equal(after.corrections[0].old.extra_fields[1].label, 'Colour match', 'the removed field is kept in the history');
+  assert.equal((await api(tok.lead, 'PATCH', url, { version: 2, reason: 'Same fields again', extra_fields: [{ label: 'Pot life', value: '4 h' }, { label: 'Gloss at 60 deg', value: '82' }] })).status, 400, 'nothing changed');
+  for (const bad of [[{ label: 'A', value: '1' }, { label: 'a', value: '2' }], [{ label: '', value: 'x' }], Array.from({ length: 16 }, (_, i) => ({ label: 'F' + i, value: '' })), 'nope']) {
+    const r = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements, { extra_fields: bad })); assert.equal(r.status, 400); assert.ok(r.errors.some(e => e.field === 'extra_fields'));
+  }
+  const aud = await pool.query("SELECT * FROM audit_log WHERE entity = 'rd_trial' AND entity_id = $1", [t.id]); assert.ok(!JSON.stringify(aud.rows).includes('Pot life') && !JSON.stringify(aud.rows).includes(SECRET), 'the audit never stores extra field names or values');
+});
+
+test('trials: photographs and PDFs - checked by their bytes, confidential, capped, removed only with a reason, kept in the history', async () => {
+  const pid = await newProject(); const { requirements } = await list(tok.lead, pid);
+  const t = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements));
+  const ok = await upload(tok.lead, pid, t.id, JPEG, 'image/jpeg', '../../My Plate<1>.jpg'); assert.equal(ok.status, 201, JSON.stringify(ok)); assert.equal(ok.file_name, 'My Plate1.jpg'); assert.equal(ok.mime, 'image/jpeg');
+  // the file itself comes back unchanged, with safe headers
+  const dl = await download(tok.lead, pid, t.id, ok.id); assert.equal(dl.status, 200); assert.equal(dl.headers.get('content-type'), 'image/jpeg'); assert.equal(dl.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok(Buffer.from(await dl.arrayBuffer()).equals(JPEG));
+  // listing shows details to R&D, only a count to a viewer without technical access, who also cannot download
+  const l = (await list(tok.lead, pid)).trials[0]; assert.equal(l.attachments.length, 1); assert.equal(l.attachments[0].file_name, 'My Plate1.jpg'); assert.ok(!('data' in l.attachments[0]));
+  const mg = (await list(tok.manager, pid)).trials[0]; assert.equal(mg.attachment_count, 1); assert.ok(!('attachments' in mg));
+  assert.equal((await download(tok.manager, pid, t.id, ok.id)).status, 403); assert.equal((await upload(tok.manager, pid, t.id, JPEG)).status, 403);
+  assert.equal((await download(tok.qc, pid, t.id, ok.id)).status, 403, 'no trial_view');
+  // a person who cannot open the project, and a file reached through the wrong trial
+  assert.equal((await download(tok.trainee, pid, t.id, ok.id)).status, 403, 'no technical access (and the project is not theirs to open)');
+  const other = await newProject(); const ot = await api(tok.lead, 'POST', `/api/rd/projects/${other}/trials`, trialBody((await list(tok.lead, other)).requirements));
+  assert.equal((await download(tok.lead, other, ot.id, ok.id)).status, 404, 'a file of another project trial');
+  // what is accepted is decided by the bytes
+  assert.equal((await upload(tok.lead, pid, t.id, Buffer.from('<html><script>alert(1)</script></html>'), 'image/jpeg')).status, 400, 'HTML sent as an image');
+  assert.equal((await upload(tok.lead, pid, t.id, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'), 'image/png')).status, 400, 'SVG');
+  assert.equal((await upload(tok.lead, pid, t.id, JPEG, 'text/plain')).status, 400, 'other content types are not read at all');
+  assert.equal((await upload(tok.lead, pid, t.id, Buffer.alloc(0), 'image/jpeg')).status, 400, 'empty');
+  const pdf = await upload(tok.lead, pid, t.id, Buffer.from('%PDF-1.7\n' + 'x'.repeat(500)), 'application/pdf', 'report.pdf'); assert.equal(pdf.status, 201);
+  assert.match((await download(tok.lead, pid, t.id, pdf.id)).headers.get('content-disposition'), /^attachment/, 'PDFs are downloaded, never rendered in the page');
+  const big = await upload(tok.lead, pid, t.id, Buffer.concat([JPEG, Buffer.alloc(R.ATTACH_MAX_BYTES + 4096)]), 'image/jpeg'); assert.ok([400, 413].includes(big.status), 'over 5 MB: ' + big.status);
+  // removing needs a reason; the file is hidden but kept
+  const rurl = `/api/rd/projects/${pid}/trials/${t.id}/attachments/${ok.id}/remove`;
+  assert.equal((await api(tok.lead, 'POST', rurl, {})).status, 400); assert.equal((await api(tok.manager, 'POST', rurl, { reason: 'Not mine to remove' })).status, 403);
+  assert.equal((await api(tok.lead, 'POST', rurl, { reason: 'Wrong plate photographed' })).status, 200);
+  assert.equal((await download(tok.lead, pid, t.id, ok.id)).status, 404); assert.equal((await list(tok.lead, pid)).trials[0].attachments.length, 1);
+  const kept = await pool.query('SELECT removed_reason, removed_by_name, size_bytes FROM rd_trial_attachments WHERE id = $1', [ok.id]); assert.equal(kept.rows[0].removed_reason, 'Wrong plate photographed'); assert.equal(kept.rows[0].size_bytes, JPEG.length);
+  // the audit and feed record that a file was added or removed, never its name
+  const aud = await pool.query("SELECT * FROM audit_log WHERE action IN ('rd.trial_attach','rd.trial_attach_remove') AND entity_id = $1", [t.id]); assert.equal(aud.rowCount, 3); assert.ok(!JSON.stringify(aud.rows).includes('Plate') && !JSON.stringify(aud.rows).includes('report.pdf'));
+  // ten files per trial
+  const t2 = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements));
+  for (let i = 0; i < R.ATTACH_MAX_PER_TRIAL; i++) assert.equal((await upload(tok.lead, pid, t2.id, Buffer.concat([JPEG, Buffer.from([i])]))).status, 201);
+  assert.equal((await upload(tok.lead, pid, t2.id, JPEG)).status, 409, 'the eleventh');
+  // none on a closed or paused project
+  await pool.query("UPDATE rd_projects SET status = 'On Hold' WHERE id = $1", [pid]);
+  assert.equal((await upload(tok.lead, pid, t.id, JPEG)).status, 409); assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials/${t.id}/attachments/${pdf.id}/remove`, { reason: 'Project is on hold' })).status, 409);
+  assert.equal((await download(tok.lead, pid, t.id, pdf.id)).status, 200, 'still readable');
+  await pool.query("UPDATE rd_projects SET status = 'Received' WHERE id = $1", [pid]);
+});
+
+test('trials: the Overview summary and the soft stage warning', async () => {
+  const pid = await newProject(); const { requirements } = await list(tok.lead, pid);
+  let d = await api(tok.lead, 'GET', '/api/rd/projects/' + pid);
+  assert.equal(d.trials_summary.count, 0); assert.equal(d.stages[1].no_trial_warning, true); assert.equal(d.stages[2].no_trial_warning, true); assert.equal(d.stages[0].no_trial_warning, false, 'only the lab stages');
+  assert.equal(d.stages[0].trial_count, null);
+  await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements.map(q => q), { stage_no: 2, results: requirements.map((q, i) => ({ requirement_id: q.id, result: i < 2 ? 'Pass' : 'Fail' })) }));
+  await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements, { stage_no: 3, outcome: 'Preferred formula', results: requirements.map(q => ({ requirement_id: q.id, result: 'Pass' })) }));
+  d = await api(tok.lead, 'GET', '/api/rd/projects/' + pid);
+  const sm = d.trials_summary; assert.equal(sm.count, 2); assert.equal(sm.total, requirements.length); assert.equal(sm.latest.pass, requirements.length); assert.equal(sm.previous.pass, 2); assert.equal(sm.preferred.label, 'T2'); assert.ok(sm.preferred.formula_ref.includes(SECRET)); assert.equal(sm.days_since, 0);
+  assert.equal(d.stages[1].trial_count, 1); assert.equal(d.stages[1].no_trial_warning, false); assert.equal(d.stages[2].no_trial_warning, false);
+  // someone without technical access gets the numbers but not the formula; someone without trial_view gets nothing
+  const m = await api(tok.manager, 'GET', '/api/rd/projects/' + pid); assert.equal(m.trials_summary.count, 2); assert.ok(!JSON.stringify(m.trials_summary).includes(SECRET)); assert.ok(!('formula_ref' in m.trials_summary.preferred));
+  // the warning is only a warning: completing the stage is not blocked by it (checked at the rule level: the route has no trial condition)
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'routes', 'rd.js'), 'utf8'); assert.ok(/no lab trial was recorded/.test(src) && !/missing\.push\([^)]*trial/i.test(src));
+});

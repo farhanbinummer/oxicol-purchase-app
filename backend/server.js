@@ -89,6 +89,9 @@ app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') {
     return res.status(400).json({ success: false, error: 'Invalid JSON in request body' });
   }
+  if (err.type === 'entity.too.large') {          // e.g. a trial photograph over the size limit
+    return res.status(413).json({ success: false, error: 'That file is too large. Photographs and PDFs can be at most 5 MB each.' });
+  }
   console.error(err);
   res.status(500).json({ success: false, error: 'Internal server error' });
 });

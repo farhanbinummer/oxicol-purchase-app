@@ -383,8 +383,30 @@ router.post('/projects/:id/submit', needPerm(KEYS.RD_CREATE), async (req, res) =
 });
 
 /** Everything one project screen needs, with confidential content removed for people without access to it. */
+/** What the project's Overview shows about its lab trials: how many, the latest result and the preferred formula. Nothing confidential (the formula name only with technical access). */
+async function trialsSummary(p, technical) {
+  if (p.is_draft) return { count: 0 };
+  const [rows, reqs] = await Promise.all([
+    pool.query(`SELECT t.id, t.trial_no, t.stage_no, t.trial_date, t.outcome, t.formula_ref,
+                       COUNT(r.id) FILTER (WHERE r.result = 'Pass')::int AS pass, COUNT(r.id) FILTER (WHERE r.result = 'Fail')::int AS fail
+                  FROM rd_trials t LEFT JOIN rd_trial_results r ON r.trial_id = t.id WHERE t.project_id = $1 GROUP BY t.id ORDER BY t.trial_no`, [p.id]),
+    pool.query('SELECT COUNT(*)::int AS n FROM rd_requirements WHERE project_id = $1', [p.id])
+  ]);
+  const total = reqs.rows[0].n, list = rows.rows;
+  if (!list.length) return { count: 0, total };
+  const last = list[list.length - 1], prev = list.length > 1 ? list[list.length - 2] : null, pref = list.find(x => x.outcome === 'Preferred formula');
+  const lastDate = ymd(last.trial_date), t = today();
+  return { count: list.length, total, last_date: lastDate, days_since: R.daysBetween(lastDate, t),
+    latest: { label: R.trialLabel(last.trial_no), date: lastDate, outcome: last.outcome, pass: last.pass, fail: last.fail },
+    previous: prev ? { label: R.trialLabel(prev.trial_no), pass: prev.pass } : null,
+    preferred: pref ? { label: R.trialLabel(pref.trial_no), ...(technical ? { formula_ref: pref.formula_ref } : {}) } : null,
+    series: list.map(x => ({ label: R.trialLabel(x.trial_no), pass: x.pass })) };
+}
+
 async function detail(req, p, members, acc) {
   const t = today();
+  const trialCounts = (await pool.query('SELECT stage_no, COUNT(*)::int AS n FROM rd_trials WHERE project_id = $1 GROUP BY stage_no', [p.id])).rows;
+  const trialsAt = (no) => (trialCounts.find(x => x.stage_no === no) || { n: 0 }).n;
   const [reqs, stageRows, items, tasks, updates, approvals, mem, fav, people] = await Promise.all([
     pool.query('SELECT * FROM rd_requirements WHERE project_id = $1 ORDER BY position', [p.id]),
     pool.query('SELECT s.*, ou.name AS owner_name, cu.name AS completed_by_name FROM rd_stages s LEFT JOIN users ou ON ou.id = s.owner_user_id LEFT JOIN users cu ON cu.id = s.completed_by WHERE s.project_id = $1 ORDER BY s.stage_no', [p.id]),
@@ -426,6 +448,8 @@ async function detail(req, p, members, acc) {
       no: s.stage_no, name: tpl.name, days: l.days, planned: l.planned, actual: l.actual, remarks: s.remarks, version: s.version,
       owner: s.owner_user_id ? { id: s.owner_user_id, name: s.owner_name, explicit: true } : (lead ? { id: lead.id, name: lead.name, explicit: false } : null),
       completed_at: s.completed_at, completed_by_name: s.completed_by_name, review_flag: s.review_flag,
+      trial_count: R.TRIAL_STAGES.includes(s.stage_no) ? trialsAt(s.stage_no) : null,
+      no_trial_warning: !done && R.TRIAL_STAGES.includes(s.stage_no) && trialsAt(s.stage_no) === 0,        // a warning only: it never blocks completing the stage
       state: done ? 'done' : s.stage_no === currentNo ? 'current' : 'pending',
       delay: R.delayDays({ planned: l.planned, actual: l.actual }, t),
       overdue: !done && !!l.planned && t > l.planned,
@@ -444,6 +468,7 @@ async function detail(req, p, members, acc) {
     can: { ...acc, create_task: acc.edit && !p.is_draft, trial_view: req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_VIEW), trial_edit: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && can(req.access, KEYS.FIELD_RD_TECHNICAL) }
   };
   out.project.lead_name = lead ? lead.name : null;
+  if (out.can.trial_view) out.trials_summary = await trialsSummary(p, acc.technical);
   if (!acc.technical) { delete out.project.technical_approach; delete out.project.risks; out.confidential_hidden = true; }
   return out;
 }
@@ -801,8 +826,10 @@ router.post('/projects/:id/stages/:no/complete', needPerm(KEYS.RD_STAGE), async 
     if (!upd.rowCount) { await client.query('ROLLBACK'); return conflict(res, `Stage ${o.no} was completed by someone else a moment ago.`, { already: true }); }
     await client.query(`INSERT INTO rd_stage_history (stage_id, action, action_date, actor_id) VALUES ($1,'completed',$2,$3)`, [o.stage.id, date, req.user.id]);
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
-    await addUpdate(client, o.p.id, 'system', req, `Stage ${o.no} "${tpl.name}" completed on ${R.dmy(date)}`);
-    await audit(client, req, { action: 'rd.stage_complete', entity: 'rd_stage', id: o.stage.id, summary: `${o.p.project_number} stage ${o.no} completed on ${R.dmy(date)}`, after: { date } });
+    // a warning only: stages 2 and 3 can still be completed without a recorded lab trial, but it is written down so nobody has to guess
+    const noTrial = R.TRIAL_STAGES.includes(o.no) && (await client.query('SELECT 1 FROM rd_trials WHERE project_id = $1 AND stage_no = $2 LIMIT 1', [o.p.id, o.no])).rowCount === 0;
+    await addUpdate(client, o.p.id, 'system', req, `Stage ${o.no} "${tpl.name}" completed on ${R.dmy(date)}` + (noTrial ? ' (no lab trial was recorded for this stage)' : ''));
+    await audit(client, req, { action: 'rd.stage_complete', entity: 'rd_stage', id: o.stage.id, summary: `${o.p.project_number} stage ${o.no} completed on ${R.dmy(date)}` + (noTrial ? ' without a recorded lab trial' : ''), after: noTrial ? { date, no_lab_trial: true } : { date } });
     await client.query('COMMIT');
     tell([o.p.requested_by_user, o.p.lead_user_id], 'stage', `Stage ${o.no} complete: ${o.p.project_number}`, `${req.user.name} completed stage ${o.no} (${tpl.name}) of ${o.p.project_number} "${o.p.title}".${o.no < 8 ? ' Next is stage ' + (o.no + 1) + '.' : ' All stages are complete.'}`, `project.html?id=${o.p.id}`, req.user.id);
     res.json({ success: true, stage: o.no, date, next_stage: o.no < 8 ? o.no + 1 : null, all_complete: o.no === 8 });
@@ -1202,7 +1229,7 @@ router.post('/projects/:id/updates', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD
 // measured values are confidential (field.rd_technical); cost per kg needs field.prices; marking a trial "Preferred formula" records
 // the outcome only (it completes no stage, ticks no item and records no approval); at most one trial per project is Preferred.
 // ---------------------------------------------------------------------------------------------------------------
-const TRIAL_COLS = ['trial_date', 'stage_no', 'formula_ref', 'changed_variables', 'batch_size_text', 'observations', 'outcome', 'rm_cost_per_kg', 'results'];
+const TRIAL_COLS = ['trial_date', 'stage_no', 'formula_ref', 'changed_variables', 'batch_size_text', 'observations', 'extra_fields', 'outcome', 'rm_cost_per_kg', 'results'];
 const TRIAL_CONFIDENTIAL = new Set([...R.CONFIDENTIAL_TRIAL_FIELDS, 'results']);       // results carry measured values
 const trialOpen = (p) => !p.is_draft && !R.CLOSED_STATUSES.includes(p.status) && p.status !== R.HOLD_STATUS;
 const trialClosedMessage = (p) => (p.is_draft ? 'The request has not been submitted yet' : `The project is ${p.status}. Trials cannot be added or corrected on it.`);
@@ -1213,13 +1240,13 @@ async function requirementRows(db, projectId) {
   return (await db.query('SELECT id, position, parameter, target, acceptable_range FROM rd_requirements WHERE project_id = $1 ORDER BY position, id', [projectId])).rows;
 }
 /** One trial as the signed-in person may see it. Confidential text and cost are left out (not just blanked) when not allowed. */
-function shapeTrial(row, results, corrections, ctx) {
+function shapeTrial(row, results, corrections, ctx, files) {
   const t = {
     id: row.id, trial_no: row.trial_no, label: R.trialLabel(row.trial_no), stage_no: row.stage_no, trial_date: ymd(row.trial_date),
     recorded_by_name: row.recorded_by_name, batch_size_text: row.batch_size_text, outcome: row.outcome, version: row.version,
     created_at: row.created_at, updated_at: row.updated_at,
     results: results.map(r => ({ requirement_id: r.requirement_id, result: r.result, ...(ctx.technical ? { measured_value: r.measured_value } : {}) })),
-    summary: R.trialSummary(results, ctx.total),
+    summary: R.trialSummary(results, ctx.total), attachment_count: (files || []).length,
     corrections: corrections.map(c => {
       const keys = Object.keys(c.new_values || {}).filter(k => ctx.prices || k !== 'rm_cost_per_kg').filter(k => ctx.technical || !TRIAL_CONFIDENTIAL.has(k));
       const base = { id: c.id, at: c.created_at, by: c.corrected_by_name, fields: keys };
@@ -1228,7 +1255,10 @@ function shapeTrial(row, results, corrections, ctx) {
       return { ...base, reason: c.reason, old: strip(c.old_values), new: strip(c.new_values) };
     })
   };
-  if (ctx.technical) { t.formula_ref = row.formula_ref; t.changed_variables = row.changed_variables; t.observations = row.observations; }
+  if (ctx.technical) {
+    t.formula_ref = row.formula_ref; t.changed_variables = row.changed_variables; t.observations = row.observations; t.extra_fields = row.extra_fields || [];
+    t.attachments = (files || []).map(f => ({ id: f.id, file_name: f.file_name, mime: f.mime, size_bytes: f.size_bytes, by: f.uploaded_by_name, at: f.created_at }));
+  }
   if (ctx.prices) t.rm_cost_per_kg = row.rm_cost_per_kg == null ? null : Number(row.rm_cost_per_kg);
   return t;
 }
@@ -1236,11 +1266,12 @@ async function loadTrials(db, projectId, ctx, onlyId) {
   const rows = (await db.query(`SELECT * FROM rd_trials WHERE project_id = $1${onlyId ? ' AND id = $2' : ''} ORDER BY trial_no`, onlyId ? [projectId, onlyId] : [projectId])).rows;
   if (!rows.length) return [];
   const ids = rows.map(r => r.id);
-  const [res, cor] = await Promise.all([
+  const [res, cor, fil] = await Promise.all([
     db.query('SELECT trial_id, requirement_id, result, measured_value FROM rd_trial_results WHERE trial_id = ANY($1) ORDER BY requirement_id', [ids]),
-    db.query('SELECT id, trial_id, corrected_by_name, reason, old_values, new_values, created_at FROM rd_trial_corrections WHERE trial_id = ANY($1) ORDER BY id', [ids])
+    db.query('SELECT id, trial_id, corrected_by_name, reason, old_values, new_values, created_at FROM rd_trial_corrections WHERE trial_id = ANY($1) ORDER BY id', [ids]),
+    db.query('SELECT id, trial_id, file_name, mime, size_bytes, uploaded_by_name, created_at FROM rd_trial_attachments WHERE trial_id = ANY($1) AND removed_at IS NULL ORDER BY id', [ids])      // never the file itself
   ]);
-  return rows.map(r => shapeTrial(r, res.rows.filter(x => x.trial_id === r.id), cor.rows.filter(x => x.trial_id === r.id), ctx));
+  return rows.map(r => shapeTrial(r, res.rows.filter(x => x.trial_id === r.id), cor.rows.filter(x => x.trial_id === r.id), ctx, fil.rows.filter(x => x.trial_id === r.id)));
 }
 const trialCtx = (req, total) => ({ technical: can(req.access, KEYS.FIELD_RD_TECHNICAL), prices: can(req.access, KEYS.FIELD_PRICES), total });
 
@@ -1250,7 +1281,7 @@ router.get('/projects/:id/trials', needTrialView, async (req, res) => {
     const reqs = await requirementRows(pool, o.p.id);
     const ctx = trialCtx(req, reqs.length);
     res.json({
-      success: true, today: today(), project_status: o.p.status, requirements: reqs, outcomes: R.TRIAL_OUTCOMES, results: R.TRIAL_RESULTS,
+      success: true, today: today(), project_status: o.p.status, requirements: reqs, outcomes: R.TRIAL_OUTCOMES, results: R.TRIAL_RESULTS, limits: { max_extra_fields: R.MAX_EXTRA_FIELDS, attach_max_bytes: R.ATTACH_MAX_BYTES, attach_max_per_trial: R.ATTACH_MAX_PER_TRIAL },
       trials: o.p.is_draft ? [] : await loadTrials(pool, o.p.id, ctx),
       can: { add: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && ctx.technical && trialOpen(o.p), technical: ctx.technical, prices: ctx.prices, open: trialOpen(o.p), closed_reason: trialOpen(o.p) ? null : trialClosedMessage(o.p) }
     });
@@ -1287,9 +1318,9 @@ router.post('/projects/:id/trials', needTrialEdit, async (req, res) => {
     const next = (await client.query('SELECT COALESCE(MAX(trial_no), 0) + 1 AS n FROM rd_trials WHERE project_id = $1', [o.p.id])).rows[0].n;
     if (clean.outcome === 'Preferred formula') await supersedePreferred(client, req, o.p.id, null, R.trialLabel(next));      // before the insert: only one Preferred at a time
     const ins = await client.query(
-      `INSERT INTO rd_trials (project_id, trial_no, stage_no, trial_date, recorded_by, recorded_by_name, formula_ref, changed_variables, batch_size_text, observations, outcome, rm_cost_per_kg)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-      [o.p.id, next, clean.stage_no, clean.trial_date, req.user.id, req.user.name, clean.formula_ref, clean.changed_variables || '', clean.batch_size_text || '', clean.observations || '', clean.outcome, prices ? (clean.rm_cost_per_kg == null ? null : clean.rm_cost_per_kg) : null]);
+      `INSERT INTO rd_trials (project_id, trial_no, stage_no, trial_date, recorded_by, recorded_by_name, formula_ref, changed_variables, batch_size_text, observations, outcome, rm_cost_per_kg, extra_fields)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING id`,
+      [o.p.id, next, clean.stage_no, clean.trial_date, req.user.id, req.user.name, clean.formula_ref, clean.changed_variables || '', clean.batch_size_text || '', clean.observations || '', clean.outcome, prices ? (clean.rm_cost_per_kg == null ? null : clean.rm_cost_per_kg) : null, JSON.stringify(clean.extra_fields || [])]);
     const given = new Map((clean.results || []).map(r => [r.requirement_id, r]));
     for (const r of reqs) {
       const g = given.get(r.id) || { result: 'Not tested', measured_value: '' };
@@ -1334,13 +1365,13 @@ router.patch('/projects/:id/trials/:trialId', needTrialEdit, async (req, res) =>
     if (errors.length) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: errors[0].message, errors }); }
     // the values as stored now, in the same shape as the corrected ones, so only real changes are recorded
     const curRes = (await client.query('SELECT requirement_id, result, measured_value FROM rd_trial_results WHERE trial_id = $1 ORDER BY requirement_id', [tr.id])).rows;
-    const before = { trial_date: ymd(tr.trial_date), stage_no: tr.stage_no, formula_ref: tr.formula_ref, changed_variables: tr.changed_variables, batch_size_text: tr.batch_size_text, observations: tr.observations, outcome: tr.outcome, rm_cost_per_kg: tr.rm_cost_per_kg == null ? null : Number(tr.rm_cost_per_kg), results: curRes };
+    const before = { trial_date: ymd(tr.trial_date), stage_no: tr.stage_no, formula_ref: tr.formula_ref, changed_variables: tr.changed_variables, batch_size_text: tr.batch_size_text, observations: tr.observations, extra_fields: tr.extra_fields || [], outcome: tr.outcome, rm_cost_per_kg: tr.rm_cost_per_kg == null ? null : Number(tr.rm_cost_per_kg), results: curRes };
     if (clean.results) { const given = new Map(clean.results.map(r => [r.requirement_id, r])); clean.results = reqs.map(r => ({ requirement_id: r.id, ...(given.get(r.id) || { result: 'Not tested', measured_value: '' }) })).sort((x, y) => x.requirement_id - y.requirement_id); }
     const d = R.diffTrial(before, clean, TRIAL_COLS);
     if (!d.fields.length) { await client.query('ROLLBACK'); return fail(res, 400, 'Nothing was changed'); }
     if (d.fields.includes('outcome') && clean.outcome === 'Preferred formula') await supersedePreferred(client, req, o.p.id, tr.id, R.trialLabel(tr.trial_no));      // before the update: only one Preferred at a time
     const set = [], vals = [];
-    for (const k of d.fields) if (k !== 'results') { vals.push(clean[k] == null ? null : clean[k]); set.push(`${k} = $${vals.length}`); }
+    for (const k of d.fields) if (k !== 'results') { vals.push(k === 'extra_fields' ? JSON.stringify(clean[k]) : (clean[k] == null ? null : clean[k])); set.push(`${k} = $${vals.length}${k === 'extra_fields' ? '::jsonb' : ''}`); }
     vals.push(tr.id, tr.version);
     const upd = await client.query(`UPDATE rd_trials SET ${set.concat(['version = version + 1', 'updated_at = NOW()']).join(', ')} WHERE id = $${vals.length - 1} AND version = $${vals.length} RETURNING version`, vals);
     if (!upd.rowCount) { await client.query('ROLLBACK'); return conflict(res, 'Someone else changed this trial at the same moment. Reload and try again.'); }
@@ -1357,6 +1388,83 @@ router.patch('/projects/:id/trials/:trialId', needTrialEdit, async (req, res) =>
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('rd trial correct failed:', err); fail(res, 500, 'Could not correct the trial');
+  } finally { client.release(); }
+});
+
+// ---- photographs and PDFs of trial results (stored in the database; the file's own bytes decide what it is) ----
+const attachBody = express.raw({ type: ['image/jpeg', 'image/png', 'application/pdf'], limit: R.ATTACH_MAX_BYTES + 1024 });
+const needTechnical = (req, res, next) => (can(req.access, KEYS.FIELD_RD_TECHNICAL) ? next() : fail(res, 403, 'Trial photographs and files are confidential R&D content and need R&D technical access'));
+
+router.post('/projects/:id/trials/:trialId/attachments', needTrialEdit, needTechnical, attachBody, async (req, res) => {
+  const trialId = idOf(req.params.trialId);
+  if (!trialId) return fail(res, 400, 'Invalid trial id');
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || !buf.length) return fail(res, 400, 'Send a JPEG, PNG or PDF file (no larger than ' + Math.round(R.ATTACH_MAX_BYTES / 1048576) + ' MB)');
+  const mime = R.sniffAttachment(buf);
+  if (!mime) return fail(res, 400, 'That file is not a JPEG, PNG or PDF');
+  let name = ''; try { name = decodeURIComponent(String(req.headers['x-file-name'] || '')); } catch (e) { name = ''; }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    req.params.id = String(idOf(req.params.id) || 0);
+    const o = await open(req, res, { db: client, lock: true });
+    if (!o) { await client.query('ROLLBACK'); return; }
+    if (!trialOpen(o.p)) { await client.query('ROLLBACK'); return conflict(res, trialClosedMessage(o.p)); }
+    const tr = (await client.query('SELECT id, trial_no FROM rd_trials WHERE id = $1 AND project_id = $2', [trialId, o.p.id])).rows[0];
+    if (!tr) { await client.query('ROLLBACK'); return fail(res, 404, 'Trial not found'); }
+    const used = (await client.query('SELECT COALESCE(SUM(a.size_bytes), 0)::bigint AS bytes FROM rd_trial_attachments a JOIN rd_trials t ON t.id = a.trial_id WHERE t.project_id = $1', [o.p.id])).rows[0];
+    const mine = (await client.query('SELECT COUNT(*)::int AS n FROM rd_trial_attachments WHERE trial_id = $1 AND removed_at IS NULL', [tr.id])).rows[0].n;
+    if (mine >= R.ATTACH_MAX_PER_TRIAL) { await client.query('ROLLBACK'); return conflict(res, `A trial can have at most ${R.ATTACH_MAX_PER_TRIAL} files. Remove one first.`); }
+    if (Number(used.bytes) + buf.length > R.ATTACH_MAX_PER_PROJECT_BYTES) { await client.query('ROLLBACK'); return conflict(res, 'This project has reached its limit for stored trial files.'); }
+    const fileName = R.safeFileName(name, mime);
+    const ins = await client.query('INSERT INTO rd_trial_attachments (trial_id, file_name, mime, size_bytes, data, uploaded_by, uploaded_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [tr.id, fileName, mime, buf.length, buf, req.user.id, req.user.name]);
+    await addUpdate(client, o.p.id, 'system', req, `A ${mime === 'application/pdf' ? 'file' : 'photograph'} was added to lab trial ${R.trialLabel(tr.trial_no)}`);
+    await audit(client, req, { action: 'rd.trial_attach', entity: 'rd_trial', id: tr.id, summary: `${o.p.project_number}: ${mime === 'application/pdf' ? 'file' : 'photograph'} added to trial ${R.trialLabel(tr.trial_no)}`, after: { type: mime, size_bytes: buf.length } });
+    await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, id: ins.rows[0].id, file_name: fileName, mime, size_bytes: buf.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('rd trial attach failed:', err); fail(res, 500, 'Could not save the file');
+  } finally { client.release(); }
+});
+
+router.get('/projects/:id/trials/:trialId/attachments/:attId', needTrialView, needTechnical, async (req, res) => {
+  const trialId = idOf(req.params.trialId), attId = idOf(req.params.attId);
+  if (!trialId || !attId) return fail(res, 400, 'Invalid id');
+  try {
+    const o = await open(req, res); if (!o) return;
+    const r = await pool.query('SELECT a.file_name, a.mime, a.data FROM rd_trial_attachments a JOIN rd_trials t ON t.id = a.trial_id WHERE a.id = $1 AND a.trial_id = $2 AND t.project_id = $3 AND a.removed_at IS NULL', [attId, trialId, o.p.id]);
+    const f = r.rows[0]; if (!f) return fail(res, 404, 'File not found');
+    res.set({ 'Content-Type': f.mime, 'Content-Length': f.data.length, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store',
+      'Content-Security-Policy': "default-src 'none'; sandbox", 'Content-Disposition': `${f.mime === 'application/pdf' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(f.file_name)}` });
+    res.send(f.data);
+  } catch (err) { console.error('rd trial file failed:', err); fail(res, 500, 'Could not load the file'); }
+});
+
+/** Removing a file keeps it in the database and records who removed it and why; it just stops being shown. */
+router.post('/projects/:id/trials/:trialId/attachments/:attId/remove', needTrialEdit, needTechnical, async (req, res) => {
+  const trialId = idOf(req.params.trialId), attId = idOf(req.params.attId);
+  const reason = String((req.body && req.body.reason) || '').trim();
+  if (!trialId || !attId) return fail(res, 400, 'Invalid id');
+  if (reason.length < 5) return fail(res, 400, 'Say why you are removing this file (at least 5 characters)');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    req.params.id = String(idOf(req.params.id) || 0);
+    const o = await open(req, res, { db: client, lock: true });
+    if (!o) { await client.query('ROLLBACK'); return; }
+    if (!trialOpen(o.p)) { await client.query('ROLLBACK'); return conflict(res, trialClosedMessage(o.p)); }
+    const r = await client.query(`UPDATE rd_trial_attachments a SET removed_at = NOW(), removed_by_name = $4, removed_reason = $5 FROM rd_trials t
+      WHERE a.id = $1 AND a.trial_id = $2 AND t.id = a.trial_id AND t.project_id = $3 AND a.removed_at IS NULL RETURNING t.trial_no`, [attId, trialId, o.p.id, req.user.name, reason.slice(0, 1000)]);
+    if (!r.rowCount) { await client.query('ROLLBACK'); return fail(res, 404, 'File not found'); }
+    await addUpdate(client, o.p.id, 'system', req, `A file was removed from lab trial ${R.trialLabel(r.rows[0].trial_no)}`);
+    await audit(client, req, { action: 'rd.trial_attach_remove', entity: 'rd_trial', id: trialId, summary: `${o.p.project_number}: file removed from trial ${R.trialLabel(r.rows[0].trial_no)}`, reason });
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('rd trial attach remove failed:', err); fail(res, 500, 'Could not remove the file');
   } finally { client.release(); }
 });
 

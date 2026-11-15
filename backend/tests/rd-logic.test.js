@@ -204,3 +204,25 @@ test('trials: cost parsing, summary and diff', () => {
   const d = R.diffTrial({ a: 'x', b: null, c: [1] }, { a: 'x', b: 'y', c: [1] }, ['a', 'b', 'c', 'z']);
   assert.deepEqual(d, { fields: ['b'], old: { b: null }, new: { b: 'y' } });
 });
+
+test('trials: extra fields are cleaned, limited and de-duplicated', () => {
+  assert.deepEqual(R.cleanExtraFields(null), { fields: [] });
+  assert.deepEqual(R.cleanExtraFields([{ label: '  Pot   life ', value: ' 4 h ' }, { label: '', value: '' }]).fields, [{ label: 'Pot life', value: '4 h' }]);
+  assert.ok(R.cleanExtraFields([{ label: 'A', value: '1' }, { label: 'a', value: '2' }]).error, 'duplicate names');
+  assert.ok(R.cleanExtraFields([{ label: '', value: 'x' }]).error, 'a value needs a name');
+  assert.ok(R.cleanExtraFields('x').error);
+  assert.ok(R.cleanExtraFields(Array.from({ length: R.MAX_EXTRA_FIELDS + 1 }, (_, i) => ({ label: 'F' + i, value: '' }))).error, 'too many');
+  assert.ok(R.cleanExtraFields([{ label: 'x'.repeat(61), value: '' }]).error && R.cleanExtraFields([{ label: 'a', value: 'y'.repeat(301) }]).error);
+  assert.ok(R.validateTrial({ extra_fields: [{ label: 'a', value: '1' }, { label: 'A', value: '2' }] }, { partial: true }).errors.some(e => e.field === 'extra_fields'));
+});
+
+test('trials: attachments are identified by their bytes, and names are made safe', () => {
+  assert.equal(R.sniffAttachment(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73])), 'image/jpeg');
+  assert.equal(R.sniffAttachment(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0])), 'image/png');
+  assert.equal(R.sniffAttachment(Buffer.from('%PDF-1.7\n1 0 obj')), 'application/pdf');
+  for (const bad of ['<html><script>alert(1)</script></html>', '<svg xmlns="http://www.w3.org/2000/svg"></svg>', 'GIF89a......', 'MZ\u0090\u0000\u0003 executable']) assert.equal(R.sniffAttachment(Buffer.from(bad)), null, bad);
+  assert.equal(R.sniffAttachment(Buffer.alloc(0)), null);
+  assert.equal(R.safeFileName('../../etc/pa<ss>wd.PNG', 'image/png'), 'passwd.PNG');
+  assert.equal(R.safeFileName('', 'application/pdf'), 'file.pdf'); assert.equal(R.safeFileName('IMG_1.jpeg', 'image/jpeg'), 'IMG_1.jpeg'); assert.equal(R.safeFileName('shot', 'image/jpeg'), 'shot.jpg');
+  assert.ok(R.safeFileName('a'.repeat(300) + '.png', 'image/png').length <= 124);
+});
