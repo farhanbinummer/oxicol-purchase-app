@@ -871,7 +871,7 @@ test('notices: morning message lists what is due and is empty when nothing is', 
   const { compose } = require('../digest');
   const d = { overdue: [{ title: 'A', project_number: 'RD-1', due: '2026-01-01' }], today: [{ title: 'B', project_number: 'RD-1' }], tomorrow: [], sent_back: [], review: [] };
   const m = compose('Asha Nair', d, '2026-01-05');
-  assert.match(m.text, /Good morning Asha/); assert.match(m.text, /1 task overdue/); assert.match(m.text, /Due today/);
+  assert.match(m.text, /Here is what is on your plate/); assert.match(m.text, /1 task overdue/); assert.match(m.text, /Due today/);
   assert.equal(compose('X', { overdue: [], today: [], tomorrow: [], sent_back: [], review: [] }, '2026-01-05'), null);
 });
 
@@ -888,4 +888,12 @@ test('notices: email uses the Brevo web API when its settings are present', asyn
     assert.equal(JSON.parse(seen.init.body).to[0].email, 'a@example.com');
     assert.equal(seen.init.headers['api-key'], 'k');
   } finally { global.fetch = realFetch; Object.keys(process.env).forEach(k => { if (!(k in saved)) delete process.env[k]; }); Object.assign(process.env, saved); delete require.cache[require.resolve('../notify')]; await pool.query("DELETE FROM notice_log WHERE kind = 'test' AND user_id = $1", [uid.admin]); }
+});
+
+test('notices: the colourful email escapes names and text and has a plain-text twin', () => {
+  const { renderEmail } = require('../email-template');
+  const r = renderEmail({ kind: 'task_accepted', name: '<i>Asha</i> Nair', text: 'Done "x" <script>alert(1)</script>', link: 'https://app.example/my-day.html' });
+  assert.ok(!/<script>/.test(r.html)); assert.ok(r.html.includes('&lt;script&gt;'));
+  assert.match(r.html, /Open in Oxicol/); assert.match(r.text, /Open in Oxicol: https:\/\/app.example\/my-day.html/);
+  assert.match(renderEmail({ kind: 'unknown_kind', name: 'A', text: 'T', link: '' }).html, /Oxicol/);
 });
