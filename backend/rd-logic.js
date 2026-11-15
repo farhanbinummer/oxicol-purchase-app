@@ -343,6 +343,95 @@ function summarise(schema, data) {
   return lines.join('\n').slice(0, MAX_RESULT_LENGTH);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Lab trials (pure: no database)
+// ---------------------------------------------------------------------------------------------------------------
+const TRIAL_OUTCOMES = ['Rejected', 'Needs another trial', 'Preferred formula'];
+const TRIAL_RESULTS = ['Pass', 'Fail', 'Not tested'];
+const TRIAL_STAGES = [2, 3];                                      // First Lab Batch, Lab Trials & Optimisation
+const TRIAL_TEXT_LIMITS = { formula_ref: 200, changed_variables: 500, batch_size_text: 100, observations: 3000, measured_value: 200 };
+const MAX_TRIAL_COST = 1000000;
+const CONFIDENTIAL_TRIAL_FIELDS = ['formula_ref', 'changed_variables', 'observations'];     // plus every measured_value
+const trialLabel = (no) => 'T' + no;
+
+/** The money field: a non-negative number with at most two decimals, or null. Returns { value } or { error }. */
+function parseTrialCost(v) {
+  if (v == null || String(v).trim() === '') return { value: null };
+  const t = String(v).trim();
+  if (!/^\d{1,7}(\.\d{1,2})?$/.test(t)) return { error: 'Cost per kg must be a number with at most two decimals' };
+  const n = Number(t);
+  if (n > MAX_TRIAL_COST) return { error: 'Cost per kg is too large' };
+  return { value: n };
+}
+
+/**
+ * Checks a trial as typed and returns { errors, clean }. Every problem is listed (like the project form). `requirementIds` are the
+ * project's performance requirement ids: each result must name one of them, once. Requirements left out count as "Not tested".
+ * `partial` (corrections) validates only the fields that were sent.
+ */
+function validateTrial(input, { requirementIds, today, partial } = {}) {
+  const b = input || {}, errors = [], clean = {};
+  const has = (k) => !partial || Object.prototype.hasOwnProperty.call(b, k);
+  const err = (field, message) => errors.push({ field, message });
+  const text = (k, label, required) => {
+    if (!has(k)) return;
+    const v = String(b[k] == null ? '' : b[k]).trim();
+    if (required && !v) return err(k, `${label} is required`);
+    if (v.length > TRIAL_TEXT_LIMITS[k]) return err(k, `${label} is too long (${TRIAL_TEXT_LIMITS[k]} characters at most)`);
+    clean[k] = v;
+  };
+  if (has('trial_date')) {
+    const d = String(b.trial_date || '');
+    if (!isValidDate(d)) err('trial_date', 'Trial date must be a valid date');
+    else if (today && d > today) err('trial_date', 'Trial date cannot be in the future');
+    else if (d < '2000-01-01') err('trial_date', 'Trial date is too far in the past');
+    else clean.trial_date = d;
+  }
+  if (has('stage_no')) { const n = Number(b.stage_no); if (!TRIAL_STAGES.includes(n)) err('stage_no', 'Choose stage 2 (First Lab Batch) or stage 3 (Lab Trials & Optimisation)'); else clean.stage_no = n; }
+  text('formula_ref', 'Formula or version', true);
+  text('changed_variables', 'What changed', false);
+  text('batch_size_text', 'Batch size', false);
+  text('observations', 'Observations', false);
+  if (has('outcome')) { if (!TRIAL_OUTCOMES.includes(b.outcome)) err('outcome', 'Choose an outcome: ' + TRIAL_OUTCOMES.join(', ')); else clean.outcome = b.outcome; }
+  if (has('rm_cost_per_kg')) { const c = parseTrialCost(b.rm_cost_per_kg); if (c.error) err('rm_cost_per_kg', c.error); else clean.rm_cost_per_kg = c.value; }
+  if (has('results')) {
+    const known = new Set(requirementIds || []), seen = new Set(), out = [];
+    if (b.results != null && !Array.isArray(b.results)) err('results', 'Results must be a list');
+    for (const r of Array.isArray(b.results) ? b.results : []) {
+      const id = Number(r && r.requirement_id);
+      if (!known.has(id)) { err('results', 'A result names a requirement that is not on this project'); continue; }
+      if (seen.has(id)) { err('results', 'A requirement appears twice in the results'); continue; }
+      seen.add(id);
+      const result = r.result == null || r.result === '' ? 'Not tested' : r.result;
+      if (!TRIAL_RESULTS.includes(result)) { err('results', 'A result must be Pass, Fail or Not tested'); continue; }
+      const mv = String(r.measured_value == null ? '' : r.measured_value).trim();
+      if (mv.length > TRIAL_TEXT_LIMITS.measured_value) { err('results', `A measured value is too long (${TRIAL_TEXT_LIMITS.measured_value} characters at most)`); continue; }
+      out.push({ requirement_id: id, result, measured_value: mv });
+    }
+    clean.results = out;
+  }
+  return { errors, clean };
+}
+
+/** "4 of 6 pass" numbers from a trial's results against the project's requirement count. */
+function trialSummary(results, totalRequirements) {
+  const r = results || [];
+  const pass = r.filter(x => x.result === 'Pass').length, fail = r.filter(x => x.result === 'Fail').length;
+  const tested = pass + fail;
+  return { pass, fail, tested, not_tested: Math.max(0, (totalRequirements || 0) - tested), total: totalRequirements || 0 };
+}
+
+/** What changed between a stored trial and a correction: { fields: [...], old, new }. Results are compared as one value. */
+function diffTrial(before, after, keys) {
+  const fields = [], old = {}, neu = {};
+  for (const k of keys) {
+    if (!(k in after)) continue;
+    const a = JSON.stringify(before[k] == null ? null : before[k]), b = JSON.stringify(after[k] == null ? null : after[k]);
+    if (a !== b) { fields.push(k); old[k] = before[k] == null ? null : before[k]; neu[k] = after[k] == null ? null : after[k]; }
+  }
+  return { fields, old, new: neu };
+}
+
 module.exports = {
   FIELD_TYPES, MAX_FORM_FIELDS, FORM_TEMPLATES, validateSchema, validateAnswers, rangeFlags, summarise,
   PROJECT_TYPES, PRODUCT_CATEGORIES, BASE_SYSTEMS, PRIORITIES, DEPARTMENTS, STATUSES, FEASIBILITY, COST_BASES,
@@ -351,5 +440,6 @@ module.exports = {
   isValidDate, addDays, daysBetween, maxDate, todayIST, dmy,
   formatProjectNumber, periodOf, numberFor, parseProjectNumber,
   currentStageNo, autoPlan, findConflicts, delayDays, replanPreview,
-  cleanRequirementRows, validateRequest
+  cleanRequirementRows, validateRequest,
+  TRIAL_OUTCOMES, TRIAL_RESULTS, TRIAL_STAGES, TRIAL_TEXT_LIMITS, CONFIDENTIAL_TRIAL_FIELDS, trialLabel, parseTrialCost, validateTrial, trialSummary, diffTrial
 };

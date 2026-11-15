@@ -558,6 +558,61 @@ const STEPS = [
       await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS on_behalf_of INTEGER REFERENCES users(id) ON DELETE SET NULL');
       await db.query('ALTER TABLE rd_task_history ADD COLUMN IF NOT EXISTS on_behalf_of INTEGER REFERENCES users(id) ON DELETE SET NULL');
     }
+  },
+  {
+    // Structured lab trials: one row per trial, one result row per trial per performance requirement, and an append-only
+    // corrections table (a trial is never deleted; a correction keeps the previous values). Also seeds the two new permission keys:
+    // rd.trial_edit to the R&D role only, rd.trial_view to R&D and to every role that already holds rd.view_all. Existing grants are
+    // never touched (ON CONFLICT DO NOTHING).
+    name: '020_rd_trials',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_trials (
+          id                SERIAL PRIMARY KEY,
+          project_id        INTEGER NOT NULL REFERENCES rd_projects(id) ON DELETE CASCADE,
+          trial_no          INTEGER NOT NULL,
+          stage_no          INTEGER NOT NULL CHECK (stage_no IN (2, 3)),
+          trial_date        DATE NOT NULL,
+          recorded_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          recorded_by_name  VARCHAR(150) NOT NULL,
+          formula_ref       VARCHAR(200) NOT NULL DEFAULT '',
+          changed_variables VARCHAR(500) NOT NULL DEFAULT '',
+          batch_size_text   VARCHAR(100) NOT NULL DEFAULT '',
+          observations      TEXT NOT NULL DEFAULT '',
+          outcome           VARCHAR(30) NOT NULL CHECK (outcome IN ('Rejected', 'Needs another trial', 'Preferred formula')),
+          rm_cost_per_kg    NUMERIC(12,2) CHECK (rm_cost_per_kg IS NULL OR rm_cost_per_kg >= 0),
+          version           INTEGER NOT NULL DEFAULT 1,
+          created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (project_id, trial_no)
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_trials_project ON rd_trials(project_id, trial_no)');
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_trial_results (
+          id             SERIAL PRIMARY KEY,
+          trial_id       INTEGER NOT NULL REFERENCES rd_trials(id) ON DELETE CASCADE,
+          requirement_id INTEGER NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
+          result         VARCHAR(12) NOT NULL CHECK (result IN ('Pass', 'Fail', 'Not tested')),
+          measured_value VARCHAR(200) NOT NULL DEFAULT '',
+          UNIQUE (trial_id, requirement_id)
+        )`);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_trial_corrections (
+          id                SERIAL PRIMARY KEY,
+          trial_id          INTEGER NOT NULL REFERENCES rd_trials(id) ON DELETE CASCADE,
+          corrected_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          corrected_by_name VARCHAR(150) NOT NULL,
+          reason            TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
+          old_values        JSONB NOT NULL,
+          new_values        JSONB NOT NULL,
+          created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_trial_corrections_trial ON rd_trial_corrections(trial_id, id)');
+      // backstop for the rule "at most one preferred formula per project" (the server clears the earlier one first)
+      await db.query("CREATE UNIQUE INDEX IF NOT EXISTS uq_rd_trials_one_preferred ON rd_trials(project_id) WHERE outcome = 'Preferred formula'");
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('rd', 'rd.trial_edit') ON CONFLICT DO NOTHING");
+      await db.query("INSERT INTO role_permissions (role, permission_key) SELECT DISTINCT role, 'rd.trial_view' FROM role_permissions WHERE permission_key = 'rd.view_all' OR role = 'rd' ON CONFLICT DO NOTHING");
+    }
   }
 ];
 

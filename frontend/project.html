@@ -9,6 +9,27 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .oxi-tabs { overflow-x: auto; scrollbar-width: thin; } .oxi-tabs button { white-space: nowrap; }
+    .tr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0 0 var(--s2); } .tr-head h2 { margin: 0; }
+    .tr-pref { margin: 0 0 var(--s3); padding: 8px 12px; border-radius: 10px; background: var(--success-bg); color: var(--success); font-weight: 600; font-size: 14px; }
+    .tr-empty { text-align: center; padding: var(--s5) var(--s3); } .tr-empty strong { display: block; font-size: 18px; margin-bottom: 4px; }
+    .tr-chartbox { max-width: 100%; overflow-x: auto; } .tr-chart { display: block; max-width: none; }
+    .tr-pass { fill: var(--success); background: var(--success); } .tr-fail { fill: var(--danger); background: var(--danger); } .tr-none { fill: var(--border-strong, #94a3b8); background: var(--border-strong, #94a3b8); }
+    .tr-num { fill: #fff; font: 700 12px sans-serif; } .tr-num.dark { fill: var(--text); } .tr-axis { fill: var(--text-2); font: 12px sans-serif; } .tr-star { fill: var(--success); font: 700 11px sans-serif; } .tr-grid { stroke: var(--border); stroke-width: 1; }
+    .tr-legend { list-style: none; display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; padding: 0; font-size: 13px; color: var(--text-2); }
+    .tr-key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; }
+    .tr-grid-table th, .tr-grid-table td { text-align: center; } .tr-grid-table th:first-child { text-align: left; min-width: 150px; }
+    .tr-cell { font-weight: 700; min-width: 54px; } .tr-c-pass { background: var(--success-bg); color: var(--success); } .tr-c-fail { background: var(--danger-bg); color: var(--danger); } .tr-c-nottested { background: var(--surface-2); color: var(--text-2); }
+    .tr-res { display: inline-block; padding: 2px 8px; border-radius: 8px; font-weight: 600; font-size: 13px; }
+    .tr-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0 0 var(--s3); } .tr-dl dt { color: var(--text-2); font-weight: 600; } .tr-dl dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .tr-corr { margin: 0 0 var(--s3); padding-left: 18px; } .tr-corr li { margin: 0 0 8px; overflow-wrap: anywhere; }
+    .tr-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .tr-res-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; align-items: end; padding: 8px 0; border-top: 1px solid var(--border); } .tr-res-name small { display: block; color: var(--text-2); }
+    dialog.oxi-dlg { max-height: 92vh; overflow-y: auto; }
+    table.oxi-nocards { display: table; overflow: visible; max-width: none; } #trialsview .oxi-card2, #trialsview .oxi-table-scroll { min-width: 0; max-width: 100%; } #trialsview .oxi-table-scroll { position: relative; }      /* keeps the hidden screen-reader text inside the scrolling grid */
+    @media (max-width: 560px) { .tr-two, .tr-res-row { grid-template-columns: 1fr; } .tr-dl { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) { .tr-chart * { transition: none !important; animation: none !important; } }
+  </style>
 </head>
 <body>
   <p><a href="index.html">Home</a> &rsaquo; <a href="projects.html">R&amp;D Projects</a></p>
@@ -27,6 +48,7 @@
     <button type="button" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="false" data-tab="board" tabindex="-1">Board</button>
     <button type="button" role="tab" id="tab-timeline" aria-controls="panel-timeline" aria-selected="false" data-tab="timeline" tabindex="-1">Timeline</button>
     <button type="button" role="tab" id="tab-activity" aria-controls="panel-activity" aria-selected="false" data-tab="activity" tabindex="-1">Activity</button>
+    <button type="button" role="tab" id="tab-trials" aria-controls="panel-trials" aria-selected="false" data-tab="trials" tabindex="-1" hidden>Trials</button>
   </div>
 
   <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview"><div id="overview" aria-busy="true"></div></div>
@@ -34,6 +56,7 @@
   <div id="panel-board" role="tabpanel" aria-labelledby="tab-board" hidden><div id="boardview"></div></div>
   <div id="panel-timeline" role="tabpanel" aria-labelledby="tab-timeline" hidden><div id="timelineview"></div></div>
   <div id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden><div id="activityview"></div></div>
+  <div id="panel-trials" role="tabpanel" aria-labelledby="tab-trials" hidden><div id="trialsview"></div></div>
 
   <script src="common.js"></script>
   <script>
@@ -1181,8 +1204,185 @@
       box.appendChild(c);
     }
 
+    // ------------------------------------------------------------------ Trials tab (structured lab trials)
+    let T = null;                                        // what /trials returned for the signed-in person
+    const STAGE_NAMES = { 2: 'First Lab Batch', 3: 'Lab Trials & Optimisation' };
+    const OUT_BADGE = { 'Preferred formula': 'badge badge-good', 'Rejected': 'badge badge-bad', 'Needs another trial': 'badge badge-warn' };
+    const RES_SYM = { 'Pass': '✓', 'Fail': '✕', 'Not tested': '–' };
+    const rupeesPerKg = (v) => '₹ ' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' /kg';
+    const trialErrors = (r) => (r && r.errors && r.errors.length ? r.errors.map(e => e.message).join(' ') : null);
+    function trialFail(r, box) { fail(r, box); const m = trialErrors(r); if (m && box) { box.textContent = m; box.hidden = false; } }
+
+    async function loadTrials() {
+      if (!D.can.trial_view) return;
+      const r = await api('/api/rd/projects/' + pid + '/trials');
+      if (!r.success) { const b = $('trialsview'); b.innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, r.error || 'Could not load the trials.')); const t = el('button', null, 'Try again'); t.type = 'button'; t.onclick = loadTrials; e.appendChild(t); b.appendChild(e); return; }
+      T = r; renderTrials();
+    }
+
+    /** One stacked bar per trial (pass / fail / not tested), so improvement from trial to trial is visible. Numbers are printed on the bars. */
+    function trialChart(trials) {
+      const total = T.requirements.length, n = trials.length;
+      const bw = 44, gap = 18, left = 34, top = 18, h = 130, w = Math.max(280, left + n * (bw + gap) + gap);
+      const svg = svgEl('svg', { viewBox: '0 0 ' + w + ' ' + (top + h + 40), width: w, height: top + h + 40, class: 'tr-chart', role: 'img' });
+      svg.setAttribute('aria-label', 'Requirements passed in each trial: ' + trials.map(t => t.label + ' ' + t.summary.pass + ' of ' + total).join(', '));
+      [0, 0.5, 1].forEach(f => { const y = top + h - f * h; svg.appendChild(svgEl('line', { x1: left - 4, x2: w - 6, y1: y, y2: y, class: 'tr-grid' })); const tx = svgEl('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'tr-axis' }); tx.textContent = Math.round(f * total); svg.appendChild(tx); });
+      trials.forEach((t, i) => {
+        const x = left + gap + i * (bw + gap); let y = top + h;
+        [['pass', t.summary.pass], ['fail', t.summary.fail], ['none', t.summary.not_tested]].forEach(([k, v]) => {
+          if (!v || !total) return; const hh = v / total * h; y -= hh;
+          const r = svgEl('rect', { x, y, width: bw, height: hh, class: 'tr-' + k, rx: 3 }); const ti = svgEl('title'); ti.textContent = t.label + ': ' + v + (k === 'pass' ? ' pass' : k === 'fail' ? ' fail' : ' not tested'); r.appendChild(ti); svg.appendChild(r);
+          if (hh >= 16) { const tx = svgEl('text', { x: x + bw / 2, y: y + hh / 2 + 4, 'text-anchor': 'middle', class: 'tr-num' + (k === 'none' ? ' dark' : '') }); tx.textContent = v; svg.appendChild(tx); }
+        });
+        const lb = svgEl('text', { x: x + bw / 2, y: top + h + 16, 'text-anchor': 'middle', class: 'tr-axis' }); lb.textContent = t.label; svg.appendChild(lb);
+        if (t.outcome === 'Preferred formula') { const st = svgEl('text', { x: x + bw / 2, y: top + h + 32, 'text-anchor': 'middle', class: 'tr-star' }); st.textContent = '★ preferred'; svg.appendChild(st); }
+      });
+      return svg;
+    }
+    function trialLegend() {
+      const l = el('ul', 'tr-legend'); l.setAttribute('aria-label', 'Chart key');
+      [['pass', '✓ Pass'], ['fail', '✕ Fail'], ['none', '– Not tested']].forEach(([k, t]) => { const li = el('li'); li.appendChild(Object.assign(el('span', 'tr-key tr-' + k), { })); li.appendChild(document.createTextNode(' ' + t)); l.appendChild(li); });
+      return l;
+    }
+    /** Rows = requirements, columns = trials. Each cell says Pass, Fail or Not tested in words (for screen readers) and with a symbol, as well as colour. */
+    function trialGrid(trials) {
+      const wrap = el('div', 'oxi-table-scroll'); wrap.tabIndex = 0; wrap.setAttribute('role', 'region'); wrap.setAttribute('aria-label', 'Results of each trial against each requirement');
+      const t = el('table', 'tr-grid-table oxi-nocards'); const cap = el('caption', 'oxi-sr-only', 'Result of each trial against each performance requirement'); t.appendChild(cap);
+      const hr = el('tr'); hr.appendChild(Object.assign(el('th', null, 'Requirement'), { scope: 'col' })); trials.forEach(x => hr.appendChild(Object.assign(el('th', null, x.label), { scope: 'col' })));
+      const th = el('thead'); th.appendChild(hr); t.appendChild(th);
+      const tb = el('tbody');
+      T.requirements.forEach(q => {
+        const tr = el('tr'); const rh = el('th', null, q.parameter || '(unnamed)'); rh.scope = 'row'; if (q.target) { const s = el('small', null, 'Target: ' + q.target); s.style.display = 'block'; rh.appendChild(s); } tr.appendChild(rh);
+        trials.forEach(x => {
+          const r = x.results.find(y => y.requirement_id === q.id), res = r ? r.result : 'Not tested';
+          const td = el('td', 'tr-cell tr-c-' + res.replace(' ', '').toLowerCase()); td.appendChild(el('span', null, RES_SYM[res])); td.appendChild(el('span', 'oxi-sr-only', ' ' + res));
+          td.title = x.label + ' / ' + (q.parameter || 'requirement') + ': ' + res + (r && r.measured_value ? ' (' + r.measured_value + ')' : ''); tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); wrap.appendChild(t); return wrap;
+    }
+
+    function renderTrials() {
+      const box = $('trialsview'); box.innerHTML = '';
+      const trials = T.trials;
+      const head = el('div', 'tr-head'); head.appendChild(el('h2', null, 'Lab trials'));
+      let addBtn = null;
+      if (T.can.add) { addBtn = el('button', null, 'Add trial'); addBtn.type = 'button'; addBtn.onclick = () => trialDialog(null); head.appendChild(addBtn); }
+      box.appendChild(head);
+      box.appendChild(el('p', 'oxi-section-note', 'Each trial records what was tried and how it did against every performance requirement. Trials are never deleted: a mistake is fixed with a correction that keeps the earlier values. Attachments not available yet.'));
+      if (!T.can.technical) box.appendChild(el('p', 'oxi-section-note', 'The formula, what changed, observations and measured values are confidential and are not shown to you.'));
+      if (!T.can.open) box.appendChild(el('p', 'oxi-section-note', T.can.closed_reason));
+      if (!trials.length) {
+        const c = el('div', 'oxi-card2 tr-empty'); c.append(el('strong', null, 'No trials recorded yet'), el('p', 'oxi-section-note', T.can.add ? 'Record the first lab batch to start the history.' : 'Trials appear here once R&D records them.'));
+        if (T.can.add) { const b = el('button', null, 'Add trial'); b.type = 'button'; b.onclick = () => trialDialog(null); c.appendChild(b); }
+        box.appendChild(c); return;
+      }
+      const pref = trials.find(t => t.outcome === 'Preferred formula');
+      if (pref) box.appendChild(el('p', 'tr-pref', '★ Preferred formula so far: ' + pref.label + (T.can.technical && pref.formula_ref ? ' (' + pref.formula_ref + ')' : '') + '. Marking a trial as preferred only records the outcome; it does not complete a stage or record an approval.'));
+
+      const cc = el('section', 'oxi-card2'); cc.setAttribute('aria-labelledby', 'trChartT'); const ch = el('h3', null, 'Requirements passed, trial by trial'); ch.id = 'trChartT'; cc.appendChild(ch);
+      if (!T.requirements.length) cc.appendChild(el('p', 'oxi-section-note', 'This project has no performance requirements, so there is nothing to compare.'));
+      else {
+        const sc = el('div', 'tr-chartbox'); sc.tabIndex = 0; sc.setAttribute('role', 'region'); sc.setAttribute('aria-label', 'Chart of requirements passed in each trial'); sc.appendChild(trialChart(trials)); cc.appendChild(sc); cc.appendChild(trialLegend());
+        const dl = el('details'); dl.appendChild(el('summary', null, 'The same numbers as a list'));
+        const ul = el('ul'); trials.forEach(t => ul.appendChild(el('li', null, t.label + ' (' + dmy(t.trial_date) + '): ' + t.summary.pass + ' of ' + t.summary.total + ' pass, ' + t.summary.fail + ' fail, ' + t.summary.not_tested + ' not tested. Outcome: ' + t.outcome + '.'))); dl.appendChild(ul); cc.appendChild(dl);
+        const gh = el('h3', null, 'Each requirement in each trial'); gh.style.marginTop = '14px'; cc.appendChild(gh); cc.appendChild(trialGrid(trials));
+      }
+      box.appendChild(cc);
+
+      const wrap = el('div', 'oxi-table-scroll'); wrap.tabIndex = 0; wrap.setAttribute('role', 'region'); wrap.setAttribute('aria-label', 'Trials');
+      const t = el('table'); t.appendChild(el('caption', 'oxi-sr-only', 'Lab trials'));
+      const cols = ['Trial', 'Date', 'Recorded by', 'What changed', 'Outcome', 'Passes']; if (T.can.prices) cols.push('Cost'); cols.push('');
+      const hr = el('tr'); cols.forEach(c => { const th = el('th', null, c); th.scope = 'col'; if (!c) th.appendChild(el('span', 'oxi-sr-only', 'Actions')); hr.appendChild(th); }); const thd = el('thead'); thd.appendChild(hr); t.appendChild(thd);
+      const tb = el('tbody');
+      trials.slice().reverse().forEach(x => {
+        const tr = el('tr'); tr.appendChild(el('td', null, x.label + ' (stage ' + x.stage_no + ')')); tr.appendChild(el('td', null, dmy(x.trial_date))); tr.appendChild(el('td', null, x.recorded_by_name));
+        const ch2 = el('td', null, T.can.technical ? (x.changed_variables || 'Nothing recorded') : 'Confidential'); if (!T.can.technical) ch2.style.color = 'var(--text-2)'; tr.appendChild(ch2);
+        const oc = el('td'); oc.appendChild(el('span', OUT_BADGE[x.outcome] || 'badge', x.outcome)); tr.appendChild(oc);
+        tr.appendChild(el('td', null, x.summary.total ? x.summary.pass + ' of ' + x.summary.total + ' pass' : 'No requirements'));
+        if (T.can.prices) tr.appendChild(el('td', null, x.rm_cost_per_kg == null ? '-' : rupeesPerKg(x.rm_cost_per_kg)));
+        const ac = el('td'); const ob = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Open'); ob.type = 'button'; ob.setAttribute('aria-label', 'Open trial ' + x.label); ob.onclick = () => trialDetail(x.id); ac.appendChild(ob); tr.appendChild(ac);
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
+    }
+
+    function trialDetail(id) {
+      const x = T.trials.find(y => y.id === id); if (!x) return;
+      dialog('Trial ' + x.label, (body) => {
+        const dl = el('dl', 'tr-dl');
+        const row = (k, v) => { if (v == null || v === '') return; dl.appendChild(el('dt', null, k)); const dd = el('dd'); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; dl.appendChild(dd); };
+        row('Stage', x.stage_no + ': ' + STAGE_NAMES[x.stage_no]); row('Date', dmy(x.trial_date)); row('Recorded by', x.recorded_by_name);
+        row('Outcome', Object.assign(el('span', OUT_BADGE[x.outcome] || 'badge', x.outcome)));
+        if (T.can.technical) { row('Formula or version', x.formula_ref); row('What changed', x.changed_variables || 'Nothing recorded'); } else row('Formula, what changed, observations', 'Confidential: not shown to you');
+        row('Batch size', x.batch_size_text); if (T.can.technical) row('Observations', x.observations);
+        if (T.can.prices) row('Raw-material cost', x.rm_cost_per_kg == null ? 'Not recorded' : rupeesPerKg(x.rm_cost_per_kg));
+        body.appendChild(dl);
+        const rt = el('table', 'oxi-nocards'); const rh = el('tr'); ['Requirement', 'Result'].concat(T.can.technical ? ['Measured'] : []).forEach(c => { const th = el('th', null, c); th.scope = 'col'; rh.appendChild(th); }); const th0 = el('thead'); th0.appendChild(rh); rt.appendChild(th0);
+        const rb = el('tbody'); T.requirements.forEach(q => { const r = x.results.find(y => y.requirement_id === q.id) || { result: 'Not tested' }; const tr = el('tr'); tr.appendChild(el('td', null, (q.parameter || '(unnamed)') + (q.target ? ' (target ' + q.target + ')' : ''))); const td = el('td'); td.appendChild(el('span', 'tr-res tr-c-' + r.result.replace(' ', '').toLowerCase(), RES_SYM[r.result] + ' ' + r.result)); tr.appendChild(td); if (T.can.technical) tr.appendChild(el('td', null, r.measured_value || '')); rb.appendChild(tr); });
+        rt.appendChild(rb); const rw = el('div', 'oxi-table-scroll'); rw.appendChild(rt); body.appendChild(rw);
+        body.appendChild(el('h4', null, 'Corrections'));
+        if (!x.corrections.length) body.appendChild(el('p', 'oxi-section-note', 'This trial has not been corrected.'));
+        else { const ul = el('ul', 'tr-corr'); x.corrections.slice().reverse().forEach(c => { const li = el('li'); li.appendChild(el('strong', null, dmy(String(c.at).slice(0, 10)) + ', ' + c.by + ': ' + (c.fields.length ? 'changed ' + c.fields.map(f => f.replace(/_/g, ' ')).join(', ') : 'corrected'))); if (c.reason) li.appendChild(el('div', null, 'Reason: ' + c.reason)); if (c.old) { const old = Object.entries(c.old).filter(([k]) => k !== 'results').map(([k, v]) => k.replace(/_/g, ' ') + ' was "' + (v == null ? '' : v) + '"'); if (c.old.results) old.push('results were changed'); if (old.length) li.appendChild(el('div', 'oxi-section-note', 'Before: ' + old.join('; '))); } ul.appendChild(li); }); body.appendChild(ul); }
+        if (T.can.add) { const cb = el('button', 'oxi-btn-secondary', 'Correct this trial'); cb.type = 'button'; cb.onclick = () => { body.closest('dialog').close(); setTimeout(() => trialDialog(x), 0); }; body.appendChild(cb); }
+        return null;
+      }, '', null, { cancelLabel: 'Close' });
+    }
+
+    /** The add form (existing = null) and the correction form (existing = a trial). Typed text stays when a save fails. */
+    function trialDialog(existing) {
+      const x = existing, today = D.today;
+      dialog(x ? 'Correct trial ' + x.label : 'Add a lab trial', (body) => {
+        const f = {};
+        const row = el('div', 'tr-two');
+        f.date = dateInput(x ? x.trial_date : today, today); f.date.required = true;
+        f.stage = select([[2, '2: First Lab Batch'], [3, '3: Lab Trials & Optimisation']], x ? x.stage_no : (D.current_stage_no === 2 ? 2 : 3));
+        row.append(field('Trial date', f.date, 'trDate'), field('Stage', f.stage, 'trStage')); body.appendChild(row);
+        f.formula = el('input'); f.formula.type = 'text'; f.formula.maxLength = 200; f.formula.value = x ? (x.formula_ref || '') : '';
+        body.appendChild(field('Formula or version used (required)', f.formula, 'trFormula', 'For example the formula number and version. Confidential.'));
+        f.changed = el('input'); f.changed.type = 'text'; f.changed.maxLength = 500; f.changed.value = x ? (x.changed_variables || '') : '';
+        body.appendChild(field('What changed from the previous trial', f.changed, 'trChanged', 'For example "solvent 40% to 35%". Leave empty for the first trial.'));
+        f.batch = el('input'); f.batch.type = 'text'; f.batch.maxLength = 100; f.batch.value = x ? (x.batch_size_text || '') : ''; body.appendChild(field('Batch size', f.batch, 'trBatch'));
+        f.obs = el('textarea'); f.obs.rows = 3; f.obs.maxLength = 3000; f.obs.value = x ? (x.observations || '') : ''; body.appendChild(field('Observations', f.obs, 'trObs', 'For example viscosity, solids, appearance.'));
+        body.appendChild(el('h4', null, 'Results against each requirement'));
+        f.res = {};
+        if (!T.requirements.length) body.appendChild(el('p', 'oxi-section-note', 'This project has no performance requirements.'));
+        T.requirements.forEach((q, i) => {
+          const cur = x && x.results.find(r => r.requirement_id === q.id);
+          const rw = el('div', 'tr-res-row'); const nm = el('div', 'tr-res-name'); nm.appendChild(el('strong', null, q.parameter || '(unnamed)')); if (q.target || q.acceptable_range) nm.appendChild(el('small', null, [q.target && 'Target: ' + q.target, q.acceptable_range && 'Range: ' + q.acceptable_range].filter(Boolean).join(' · ')));
+          const sel = select(T.results, cur ? cur.result : 'Not tested'); const mv = el('input'); mv.type = 'text'; mv.maxLength = 200; mv.value = cur && cur.measured_value ? cur.measured_value : '';
+          rw.append(nm, field('Result', sel, 'trRes' + i), field('Measured value', mv, 'trMv' + i)); body.appendChild(rw); f.res[q.id] = { sel, mv };
+        });
+        f.outcome = select(T.outcomes, x ? x.outcome : 'Needs another trial');
+        body.appendChild(field('Outcome', f.outcome, 'trOutcome'));
+        const hint = el('p', 'oxi-section-note', 'Preferred formula only records the outcome. It does not complete a stage, tick a checklist item or record an approval. If another trial was preferred, it is set back to "Needs another trial" with a note.'); hint.hidden = f.outcome.value !== 'Preferred formula'; body.appendChild(hint);
+        f.outcome.onchange = () => { hint.hidden = f.outcome.value !== 'Preferred formula'; };
+        if (T.can.prices) { f.cost = el('input'); f.cost.type = 'text'; f.cost.inputMode = 'decimal'; f.cost.value = x && x.rm_cost_per_kg != null ? String(x.rm_cost_per_kg) : ''; body.appendChild(field('Raw-material cost per kg (₹, optional)', f.cost, 'trCost', 'Up to two decimals.')); }
+        if (x) { f.reason = el('textarea'); f.reason.rows = 2; f.reason.maxLength = 1000; body.appendChild(field('Reason for the correction (required)', f.reason, 'trReason', 'The earlier values are kept in the correction history.')); }
+        return () => f;
+      }, x ? 'Save correction' : 'Save trial', async (f, err) => {
+        const payload = { trial_date: f.date.value, stage_no: Number(f.stage.value), formula_ref: f.formula.value, changed_variables: f.changed.value, batch_size_text: f.batch.value, observations: f.obs.value, outcome: f.outcome.value,
+          results: T.requirements.map(q => ({ requirement_id: q.id, result: f.res[q.id].sel.value, measured_value: f.res[q.id].mv.value })) };
+        if (f.cost) payload.rm_cost_per_kg = f.cost.value;
+        let r;
+        if (x) {
+          if (!f.reason.value.trim()) { err.textContent = 'Say why you are correcting this trial.'; err.hidden = false; f.reason.focus(); return false; }
+          payload.reason = f.reason.value; payload.version = x.version;
+          r = await api('/api/rd/projects/' + pid + '/trials/' + x.id, 'PATCH', payload);
+        } else r = await api('/api/rd/projects/' + pid + '/trials', 'POST', payload);
+        if (!r.success) { trialFail(r, err); return false; }
+        note(x ? 'Correction saved. The earlier values are kept in the history.' : 'Trial ' + r.label + ' recorded.', true);
+        await loadTrials();
+        // the lists were redrawn, so give focus back to the matching control in the new page content
+        lastFocus = x ? $('trialsview').querySelector('button[aria-label="Open trial ' + x.label + '"]') : $('trialsview').querySelector('.tr-head button');
+        return true;
+      });
+    }
+
     // ------------------------------------------------------------------ tabs and loading
-    const TABS = ['overview', 'list', 'board', 'timeline', 'activity'];
+    const BASE_TABS = ['overview', 'list', 'board', 'timeline', 'activity'];
+    let TABS = BASE_TABS.slice();                       // the Trials tab is added only for people who may see trials
     function setTab(name, focus) {
       document.querySelectorAll('[role=tab]').forEach(t => { const on = t.dataset.tab === name; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus(); });
       TABS.forEach(n => { $('panel-' + n).hidden = n !== name; });
@@ -1210,7 +1410,9 @@
       D = d; D.me_id = (() => { try { return JSON.parse(localStorage.getItem('oxicol_user')).id; } catch (e) { return null; } })();
       if (!meta) { meta = await api('/api/rd/meta'); if (!meta.success) { note(meta.error, false); return; } }
       if (D.can.edit && !people.length) { const p = await api('/api/rd/people?project=' + pid); if (p.success) people = p.people; }
+      TABS = D.can.trial_view ? BASE_TABS.concat('trials') : BASE_TABS.slice(); $('tab-trials').hidden = !D.can.trial_view;
       renderHeader(); renderOverview(); renderList(); renderBoard(); renderTimeline(); renderActivity();
+      if (D.can.trial_view) loadTrials();
       $('banner').hidden = true;
     }
 

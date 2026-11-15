@@ -441,7 +441,7 @@ async function detail(req, p, members, acc) {
     tasks: tasks.rows.map(x => withFlags(norm(x))), updates: updates.rows, approvals: approvals.rows.map(norm),
     members: mem.rows, lead, favourite: fav.rows[0] ? fav.rows[0].favourite : false,
     covering_ids: (await cover.coveredBy(pool, req.user.id)).map(c => c.user_id),       // people I am covering for today: I may do their tasks
-    can: { ...acc, create_task: acc.edit && !p.is_draft }
+    can: { ...acc, create_task: acc.edit && !p.is_draft, trial_view: req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_VIEW), trial_edit: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && can(req.access, KEYS.FIELD_RD_TECHNICAL) }
   };
   out.project.lead_name = lead ? lead.name : null;
   if (!acc.technical) { delete out.project.technical_approach; delete out.project.risks; out.confidential_hidden = true; }
@@ -1194,6 +1194,170 @@ router.post('/projects/:id/updates', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD
     await pool.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     res.status(201).json({ success: true });
   } catch (err) { console.error(err); fail(res, 500, 'Could not save'); }
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Lab trials: structured records of each trial (formula used, what changed, results against each performance requirement).
+// Rules: trials are never deleted (a correction needs a reason and keeps the old values); formula, what changed, observations and
+// measured values are confidential (field.rd_technical); cost per kg needs field.prices; marking a trial "Preferred formula" records
+// the outcome only (it completes no stage, ticks no item and records no approval); at most one trial per project is Preferred.
+// ---------------------------------------------------------------------------------------------------------------
+const TRIAL_COLS = ['trial_date', 'stage_no', 'formula_ref', 'changed_variables', 'batch_size_text', 'observations', 'outcome', 'rm_cost_per_kg', 'results'];
+const TRIAL_CONFIDENTIAL = new Set([...R.CONFIDENTIAL_TRIAL_FIELDS, 'results']);       // results carry measured values
+const trialOpen = (p) => !p.is_draft && !R.CLOSED_STATUSES.includes(p.status) && p.status !== R.HOLD_STATUS;
+const trialClosedMessage = (p) => (p.is_draft ? 'The request has not been submitted yet' : `The project is ${p.status}. Trials cannot be added or corrected on it.`);
+const needTrialView = (req, res, next) => ((req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_VIEW)) ? next() : fail(res, 403, `Your role ("${req.user.role}") is not allowed to see lab trials`));
+const needTrialEdit = (req, res, next) => ((req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) ? next() : fail(res, 403, `Your role ("${req.user.role}") is not allowed to record lab trials`));
+
+async function requirementRows(db, projectId) {
+  return (await db.query('SELECT id, position, parameter, target, acceptable_range FROM rd_requirements WHERE project_id = $1 ORDER BY position, id', [projectId])).rows;
+}
+/** One trial as the signed-in person may see it. Confidential text and cost are left out (not just blanked) when not allowed. */
+function shapeTrial(row, results, corrections, ctx) {
+  const t = {
+    id: row.id, trial_no: row.trial_no, label: R.trialLabel(row.trial_no), stage_no: row.stage_no, trial_date: ymd(row.trial_date),
+    recorded_by_name: row.recorded_by_name, batch_size_text: row.batch_size_text, outcome: row.outcome, version: row.version,
+    created_at: row.created_at, updated_at: row.updated_at,
+    results: results.map(r => ({ requirement_id: r.requirement_id, result: r.result, ...(ctx.technical ? { measured_value: r.measured_value } : {}) })),
+    summary: R.trialSummary(results, ctx.total),
+    corrections: corrections.map(c => {
+      const keys = Object.keys(c.new_values || {}).filter(k => ctx.prices || k !== 'rm_cost_per_kg').filter(k => ctx.technical || !TRIAL_CONFIDENTIAL.has(k));
+      const base = { id: c.id, at: c.created_at, by: c.corrected_by_name, fields: keys };
+      if (!ctx.technical) return base;
+      const strip = (o) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => ctx.prices || k !== 'rm_cost_per_kg'));
+      return { ...base, reason: c.reason, old: strip(c.old_values), new: strip(c.new_values) };
+    })
+  };
+  if (ctx.technical) { t.formula_ref = row.formula_ref; t.changed_variables = row.changed_variables; t.observations = row.observations; }
+  if (ctx.prices) t.rm_cost_per_kg = row.rm_cost_per_kg == null ? null : Number(row.rm_cost_per_kg);
+  return t;
+}
+async function loadTrials(db, projectId, ctx, onlyId) {
+  const rows = (await db.query(`SELECT * FROM rd_trials WHERE project_id = $1${onlyId ? ' AND id = $2' : ''} ORDER BY trial_no`, onlyId ? [projectId, onlyId] : [projectId])).rows;
+  if (!rows.length) return [];
+  const ids = rows.map(r => r.id);
+  const [res, cor] = await Promise.all([
+    db.query('SELECT trial_id, requirement_id, result, measured_value FROM rd_trial_results WHERE trial_id = ANY($1) ORDER BY requirement_id', [ids]),
+    db.query('SELECT id, trial_id, corrected_by_name, reason, old_values, new_values, created_at FROM rd_trial_corrections WHERE trial_id = ANY($1) ORDER BY id', [ids])
+  ]);
+  return rows.map(r => shapeTrial(r, res.rows.filter(x => x.trial_id === r.id), cor.rows.filter(x => x.trial_id === r.id), ctx));
+}
+const trialCtx = (req, total) => ({ technical: can(req.access, KEYS.FIELD_RD_TECHNICAL), prices: can(req.access, KEYS.FIELD_PRICES), total });
+
+router.get('/projects/:id/trials', needTrialView, async (req, res) => {
+  try {
+    const o = await open(req, res); if (!o) return;
+    const reqs = await requirementRows(pool, o.p.id);
+    const ctx = trialCtx(req, reqs.length);
+    res.json({
+      success: true, today: today(), project_status: o.p.status, requirements: reqs, outcomes: R.TRIAL_OUTCOMES, results: R.TRIAL_RESULTS,
+      trials: o.p.is_draft ? [] : await loadTrials(pool, o.p.id, ctx),
+      can: { add: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && ctx.technical && trialOpen(o.p), technical: ctx.technical, prices: ctx.prices, open: trialOpen(o.p), closed_reason: trialOpen(o.p) ? null : trialClosedMessage(o.p) }
+    });
+  } catch (err) { console.error('rd trials list failed:', err); fail(res, 500, 'Could not load the trials'); }
+});
+
+/** Makes a trial the only Preferred one: any earlier Preferred trial goes back to "Needs another trial" through a correction row. */
+async function supersedePreferred(client, req, projectId, exceptId, newLabel) {
+  const prev = (await client.query("SELECT id, trial_no, version FROM rd_trials WHERE project_id = $1 AND outcome = 'Preferred formula' AND id <> COALESCE($2, 0) FOR UPDATE", [projectId, exceptId || null])).rows;
+  for (const x of prev) {
+    await client.query("UPDATE rd_trials SET outcome = 'Needs another trial', version = version + 1, updated_at = NOW() WHERE id = $1", [x.id]);
+    await client.query('INSERT INTO rd_trial_corrections (trial_id, corrected_by, corrected_by_name, reason, old_values, new_values) VALUES ($1,$2,$3,$4,$5,$6)',
+      [x.id, req.user.id, req.user.name, `${newLabel} was marked as the preferred formula, so ${R.trialLabel(x.trial_no)} is no longer preferred`, JSON.stringify({ outcome: 'Preferred formula' }), JSON.stringify({ outcome: 'Needs another trial' })]);
+    await audit(client, req, { action: 'rd.trial_correct', entity: 'rd_trial', id: x.id, summary: `${R.trialLabel(x.trial_no)} no longer preferred (${newLabel} is now preferred)`, before: { outcome: 'Preferred formula' }, after: { outcome: 'Needs another trial' } });
+  }
+  return prev.length;
+}
+
+router.post('/projects/:id/trials', needTrialEdit, async (req, res) => {
+  const b = req.body || {};
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    req.params.id = String(idOf(req.params.id) || 0);
+    const o = await open(req, res, { db: client, lock: true });
+    if (!o) { await client.query('ROLLBACK'); return; }       // locking the project row also serialises trial numbering
+    if (!trialOpen(o.p)) { await client.query('ROLLBACK'); return conflict(res, trialClosedMessage(o.p)); }
+    const technical = can(req.access, KEYS.FIELD_RD_TECHNICAL), prices = can(req.access, KEYS.FIELD_PRICES);
+    if (!technical) { await client.query('ROLLBACK'); return fail(res, 403, 'Recording a trial needs R&D technical access (the formula and observations are confidential)'); }
+    if (b.rm_cost_per_kg != null && String(b.rm_cost_per_kg).trim() !== '' && !prices) { await client.query('ROLLBACK'); return fail(res, 403, 'Recording the cost needs access to prices'); }
+    const reqs = await requirementRows(client, o.p.id);
+    const { errors, clean } = R.validateTrial(b, { requirementIds: reqs.map(r => r.id), today: today() });
+    if (errors.length) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: errors[0].message, errors }); }
+    const next = (await client.query('SELECT COALESCE(MAX(trial_no), 0) + 1 AS n FROM rd_trials WHERE project_id = $1', [o.p.id])).rows[0].n;
+    if (clean.outcome === 'Preferred formula') await supersedePreferred(client, req, o.p.id, null, R.trialLabel(next));      // before the insert: only one Preferred at a time
+    const ins = await client.query(
+      `INSERT INTO rd_trials (project_id, trial_no, stage_no, trial_date, recorded_by, recorded_by_name, formula_ref, changed_variables, batch_size_text, observations, outcome, rm_cost_per_kg)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [o.p.id, next, clean.stage_no, clean.trial_date, req.user.id, req.user.name, clean.formula_ref, clean.changed_variables || '', clean.batch_size_text || '', clean.observations || '', clean.outcome, prices ? (clean.rm_cost_per_kg == null ? null : clean.rm_cost_per_kg) : null]);
+    const given = new Map((clean.results || []).map(r => [r.requirement_id, r]));
+    for (const r of reqs) {
+      const g = given.get(r.id) || { result: 'Not tested', measured_value: '' };
+      await client.query('INSERT INTO rd_trial_results (trial_id, requirement_id, result, measured_value) VALUES ($1,$2,$3,$4)', [ins.rows[0].id, r.id, g.result, g.measured_value]);
+    }
+    await addUpdate(client, o.p.id, 'system', req, `Lab trial ${R.trialLabel(next)} recorded (${clean.outcome})`);
+    // the audit trail records that a trial exists and its non-confidential facts, never the formula, observations, measured values or cost
+    await audit(client, req, { action: 'rd.trial_add', entity: 'rd_trial', id: ins.rows[0].id, summary: `${o.p.project_number}: trial ${R.trialLabel(next)} recorded`, after: { trial_no: next, stage_no: clean.stage_no, trial_date: clean.trial_date, outcome: clean.outcome } });
+    await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, id: ins.rows[0].id, trial_no: next, label: R.trialLabel(next) });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('rd trial add failed:', err); fail(res, 500, 'Could not record the trial');
+  } finally { client.release(); }
+});
+
+router.patch('/projects/:id/trials/:trialId', needTrialEdit, async (req, res) => {
+  const b = req.body || {};
+  const trialId = idOf(req.params.trialId);
+  if (!trialId) return fail(res, 400, 'Invalid trial id');
+  const reason = String(b.reason || '').trim();
+  if (reason.length < 5) return fail(res, 400, 'Say why you are correcting this trial (at least 5 characters)');
+  if (reason.length > 1000) return fail(res, 400, 'The reason is too long (1000 characters at most)');
+  if (!Number.isInteger(Number(b.version))) return fail(res, 400, 'Send the version you are correcting');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    req.params.id = String(idOf(req.params.id) || 0);
+    const o = await open(req, res, { db: client, lock: true });
+    if (!o) { await client.query('ROLLBACK'); return; }
+    const tr = (await client.query('SELECT * FROM rd_trials WHERE id = $1 AND project_id = $2 FOR UPDATE', [trialId, o.p.id])).rows[0];
+    if (!tr) { await client.query('ROLLBACK'); return fail(res, 404, 'Trial not found'); }
+    if (!trialOpen(o.p)) { await client.query('ROLLBACK'); return conflict(res, trialClosedMessage(o.p)); }
+    const technical = can(req.access, KEYS.FIELD_RD_TECHNICAL), prices = can(req.access, KEYS.FIELD_PRICES);
+    if (!technical) { await client.query('ROLLBACK'); return fail(res, 403, 'Correcting a trial needs R&D technical access'); }
+    if ('rm_cost_per_kg' in b && !prices) { await client.query('ROLLBACK'); return fail(res, 403, 'Correcting the cost needs access to prices'); }
+    if (Number(b.version) !== tr.version) { await client.query('ROLLBACK'); return conflict(res, 'Someone else changed this trial since you opened it. Reload to see their changes, then apply yours again.', { current_version: tr.version }); }
+    const reqs = await requirementRows(client, o.p.id);
+    const fields = {}; TRIAL_COLS.forEach(k => { if (k in b) fields[k] = b[k]; });
+    const { errors, clean } = R.validateTrial(fields, { requirementIds: reqs.map(r => r.id), today: today(), partial: true });
+    if (errors.length) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: errors[0].message, errors }); }
+    // the values as stored now, in the same shape as the corrected ones, so only real changes are recorded
+    const curRes = (await client.query('SELECT requirement_id, result, measured_value FROM rd_trial_results WHERE trial_id = $1 ORDER BY requirement_id', [tr.id])).rows;
+    const before = { trial_date: ymd(tr.trial_date), stage_no: tr.stage_no, formula_ref: tr.formula_ref, changed_variables: tr.changed_variables, batch_size_text: tr.batch_size_text, observations: tr.observations, outcome: tr.outcome, rm_cost_per_kg: tr.rm_cost_per_kg == null ? null : Number(tr.rm_cost_per_kg), results: curRes };
+    if (clean.results) { const given = new Map(clean.results.map(r => [r.requirement_id, r])); clean.results = reqs.map(r => ({ requirement_id: r.id, ...(given.get(r.id) || { result: 'Not tested', measured_value: '' }) })).sort((x, y) => x.requirement_id - y.requirement_id); }
+    const d = R.diffTrial(before, clean, TRIAL_COLS);
+    if (!d.fields.length) { await client.query('ROLLBACK'); return fail(res, 400, 'Nothing was changed'); }
+    if (d.fields.includes('outcome') && clean.outcome === 'Preferred formula') await supersedePreferred(client, req, o.p.id, tr.id, R.trialLabel(tr.trial_no));      // before the update: only one Preferred at a time
+    const set = [], vals = [];
+    for (const k of d.fields) if (k !== 'results') { vals.push(clean[k] == null ? null : clean[k]); set.push(`${k} = $${vals.length}`); }
+    vals.push(tr.id, tr.version);
+    const upd = await client.query(`UPDATE rd_trials SET ${set.concat(['version = version + 1', 'updated_at = NOW()']).join(', ')} WHERE id = $${vals.length - 1} AND version = $${vals.length} RETURNING version`, vals);
+    if (!upd.rowCount) { await client.query('ROLLBACK'); return conflict(res, 'Someone else changed this trial at the same moment. Reload and try again.'); }
+    if (d.fields.includes('results')) for (const r of clean.results) await client.query('UPDATE rd_trial_results SET result = $3, measured_value = $4 WHERE trial_id = $1 AND requirement_id = $2', [tr.id, r.requirement_id, r.result, r.measured_value]);
+    await client.query('INSERT INTO rd_trial_corrections (trial_id, corrected_by, corrected_by_name, reason, old_values, new_values) VALUES ($1,$2,$3,$4,$5,$6)', [tr.id, req.user.id, req.user.name, reason, JSON.stringify(d.old), JSON.stringify(d.new)]);
+    await addUpdate(client, o.p.id, 'system', req, `Lab trial ${R.trialLabel(tr.trial_no)} corrected`);
+    // field NAMES only, plus the non-confidential values: never the text of the formula, observations, measured values or cost
+    const safe = ['trial_date', 'stage_no', 'outcome'];
+    await audit(client, req, { action: 'rd.trial_correct', entity: 'rd_trial', id: tr.id, summary: `${o.p.project_number}: trial ${R.trialLabel(tr.trial_no)} corrected (${d.fields.join(', ')})`,
+      before: Object.fromEntries(safe.filter(k => d.fields.includes(k)).map(k => [k, d.old[k]])), after: Object.fromEntries(safe.filter(k => d.fields.includes(k)).map(k => [k, d.new[k]])), reason });
+    await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
+    await client.query('COMMIT');
+    res.json({ success: true, version: upd.rows[0].version, fields: d.fields });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('rd trial correct failed:', err); fail(res, 500, 'Could not correct the trial');
+  } finally { client.release(); }
 });
 
 module.exports = router;

@@ -916,7 +916,7 @@ function addLink(tr, text, href) {
   function decorate() {
     document.querySelectorAll('table').forEach(table => {
       const heads = table.querySelectorAll('thead th');
-      if (!heads.length || table.style.width === 'auto') return;
+      if (!heads.length || table.style.width === 'auto' || table.classList.contains('oxi-nocards')) return;      // oxi-nocards: a grid that must stay a grid on a phone
       table.classList.add('oxi-rowcards');
       if (isForm) table.classList.add('oxi-formcards');
       table.querySelectorAll('tbody tr').forEach(tr => {
