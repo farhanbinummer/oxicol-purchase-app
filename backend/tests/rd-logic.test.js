@@ -180,3 +180,27 @@ test('result forms: answers are checked against the form, ranges are flagged not
   const c = R.validateAnswers(cl, { items: { weigh_resin: true }, note: 'fine' });
   assert.equal(c.error, undefined); assert.equal(R.summarise(cl, c.data), '[x] Weigh resin\n[ ] Optional step\nNote: fine');
 });
+
+// ---- lab trials (pure logic, no database) ----
+test('trials: validateTrial lists every problem and cleans what is valid', () => {
+  const reqs = [1, 2, 3];
+  const bad = R.validateTrial({}, { requirementIds: reqs, today: '2026-11-16' });
+  assert.deepEqual(bad.errors.map(e => e.field).sort(), ['formula_ref', 'outcome', 'stage_no', 'trial_date']);
+  const ok = R.validateTrial({ trial_date: '2026-11-16', stage_no: '3', formula_ref: '  F-12 v2 ', outcome: 'Rejected', rm_cost_per_kg: '45.5', results: [{ requirement_id: 1, result: 'Pass', measured_value: ' 92 KU ' }, { requirement_id: 2 }] }, { requirementIds: reqs, today: '2026-11-16' });
+  assert.deepEqual(ok.errors, []);
+  assert.equal(ok.clean.stage_no, 3); assert.equal(ok.clean.formula_ref, 'F-12 v2'); assert.equal(ok.clean.rm_cost_per_kg, 45.5);
+  assert.deepEqual(ok.clean.results, [{ requirement_id: 1, result: 'Pass', measured_value: '92 KU' }, { requirement_id: 2, result: 'Not tested', measured_value: '' }]);
+  assert.ok(R.validateTrial({ trial_date: '2026-11-17' }, { today: '2026-11-16', partial: true }).errors.some(e => /future/.test(e.message)), 'not in the future');
+  assert.equal(R.validateTrial({ trial_date: '2026-11-16' }, { today: '2026-11-16', partial: true }).errors.length, 0, 'partial checks only what was sent');
+  assert.ok(R.validateTrial({ results: [{ requirement_id: 9, result: 'Pass' }] }, { requirementIds: reqs, partial: true }).errors.length === 1);
+  assert.ok(R.validateTrial({ results: [{ requirement_id: 1, result: 'Pass' }, { requirement_id: 1, result: 'Fail' }] }, { requirementIds: reqs, partial: true }).errors.length === 1);
+});
+
+test('trials: cost parsing, summary and diff', () => {
+  assert.deepEqual(R.parseTrialCost(''), { value: null }); assert.deepEqual(R.parseTrialCost(null), { value: null }); assert.equal(R.parseTrialCost('12.50').value, 12.5);
+  for (const bad of ['-1', '1.234', 'abc', '1e5', '99999999']) assert.ok(R.parseTrialCost(bad).error, bad);
+  assert.deepEqual(R.trialSummary([{ result: 'Pass' }, { result: 'Pass' }, { result: 'Fail' }, { result: 'Not tested' }], 5), { pass: 2, fail: 1, tested: 3, not_tested: 2, total: 5 });
+  assert.equal(R.trialLabel(7), 'T7');
+  const d = R.diffTrial({ a: 'x', b: null, c: [1] }, { a: 'x', b: 'y', c: [1] }, ['a', 'b', 'c', 'z']);
+  assert.deepEqual(d, { fields: ['b'], old: { b: null }, new: { b: 'y' } });
+});

@@ -69,7 +69,9 @@ const KEYS = {
   RD_APPROVE_MGMT: 'rd.approve_mgmt', // record the Management decision
   RD_QC_SIGNOFF: 'rd.qc_signoff',     // record QC sign-off
   RD_HANDOVER_ACK: 'rd.handover_ack', // record Production's acknowledgement of a handover
-  FIELD_RD_TECHNICAL: 'field.rd_technical' // technical approach, risks and lab notes (confidential)
+  RD_TRIAL_VIEW: 'rd.trial_view',     // see the lab trials recorded on a project
+  RD_TRIAL_EDIT: 'rd.trial_edit',     // record lab trials and correct them
+  FIELD_RD_TECHNICAL: 'field.rd_technical' // technical approach, risks, lab notes and trial content (confidential)
 };
 
 const CATALOG = [
@@ -128,7 +130,9 @@ const CATALOG = [
   { key: KEYS.RD_APPROVE_MGMT, module: 'R&D Projects', action: 'Record the Management decision' },
   { key: KEYS.RD_QC_SIGNOFF, module: 'R&D Projects', action: 'Record QC sign-off on a project' },
   { key: KEYS.RD_HANDOVER_ACK, module: 'R&D Projects', action: "Record Production's handover acknowledgement" },
-  { key: KEYS.FIELD_RD_TECHNICAL, module: 'Restricted fields', action: 'See confidential R&D content (technical approach, risks, lab notes)' }
+  { key: KEYS.RD_TRIAL_VIEW, module: 'R&D Projects', action: 'See the lab trials recorded on a project' },
+  { key: KEYS.RD_TRIAL_EDIT, module: 'R&D Projects', action: 'Record lab trials and correct them' },
+  { key: KEYS.FIELD_RD_TECHNICAL, module: 'Restricted fields', action: 'See confidential R&D content (technical approach, risks, lab notes, trial formulas and observations)' }
 ];
 
 // What each key lets a person DO, in the vocabulary the access matrix uses: view, create, edit, submit, approve,
@@ -149,6 +153,7 @@ const KINDS = {
   'field.prices': 'field', 'field.supplier_bank': 'field',
   'rd.view': 'view', 'rd.view_all': 'view', 'rd.create': 'create', 'rd.edit': 'edit', 'rd.stage': 'edit',
   'rd.approve_head': 'approve', 'rd.approve_mgmt': 'approve', 'rd.qc_signoff': 'approve', 'rd.handover_ack': 'approve',
+  'rd.trial_view': 'view', 'rd.trial_edit': 'edit',
   'field.rd_technical': 'field'
 };
 CATALOG.forEach(c => { c.kind = KINDS[c.key] || 'view'; });
@@ -195,10 +200,10 @@ const DEFAULTS = {
 };
 
 const RD_DEFAULTS = {
-  rd: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_EDIT, KEYS.RD_STAGE, KEYS.FIELD_RD_TECHNICAL, KEYS.CATALOG_VIEW],
+  rd: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_EDIT, KEYS.RD_STAGE, KEYS.RD_TRIAL_VIEW, KEYS.RD_TRIAL_EDIT, KEYS.FIELD_RD_TECHNICAL, KEYS.CATALOG_VIEW],
   // a trainee sees only projects they are on and their own tasks: no edit, no stage completion, no confidential lab content
   rd_trainee: [KEYS.RD_VIEW],
-  manager: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_CREATE, KEYS.KPI_VIEW_ALL],
+  manager: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_CREATE, KEYS.RD_TRIAL_VIEW, KEYS.KPI_VIEW_ALL],
   branch: [KEYS.RD_VIEW],
   production: [KEYS.RD_VIEW], purchase: [KEYS.RD_VIEW], qc: [KEYS.RD_VIEW], store: [KEYS.RD_VIEW], accounts: [KEYS.RD_VIEW]
 };

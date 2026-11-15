@@ -94,20 +94,37 @@ Ticking a checklist item records **what was found**, not only that it was done.
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.
 
-| Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | field.rd_technical | Approval keys |
-|---|---|---|---|---|---|---|---|
-| R&D | yes | yes | - | yes | yes | yes | - |
-| Manager | yes | yes | yes | - | - | - | - |
-| Branch / requester | yes (own) | - | - | - | - | - | - |
-| Production | yes (own) | - | - | - | - | - | - |
-| Purchase | yes (own) | - | - | - | - | - | - |
-| QC | yes (own) | - | - | - | - | - | - |
-| Stores | yes (own) | - | - | - | - | - | - |
-| Accounts | yes (own) | - | - | - | - | - | - |
+| Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | rd.trial_view | rd.trial_edit | field.rd_technical | Approval keys |
+|---|---|---|---|---|---|---|---|---|---|
+| R&D | yes | yes | - | yes | yes | yes | yes | yes | - |
+| Manager | yes | yes | yes | - | - | yes | - | - | - |
+| Branch / requester | yes (own) | - | - | - | - | - | - | - | - |
+| Production | yes (own) | - | - | - | - | - | - | - | - |
+| Purchase | yes (own) | - | - | - | - | - | - | - | - |
+| QC | yes (own) | - | - | - | - | - | - | - | - |
+| Stores | yes (own) | - | - | - | - | - | - | - | - |
+| Accounts | yes (own) | - | - | - | - | - | - | - | - |
 
 "own" means projects the person requested, leads or is a team member of. **Approval keys** (`rd.approve_head`, `rd.approve_mgmt`, `rd.qc_signoff`, `rd.handover_ack`) are granted to **no role** by default: see the decisions below. Workspace choice is presentation only; choosing a workspace never grants a permission.
 
 The global search does not index R&D projects, so no R&D text can appear in search results, counts or notifications for people who may not open the project.
+
+## Lab trials (structured trial records)
+
+Stage 2 (First Lab Batch) and stage 3 (Lab Trials & Optimisation) used to have only free-text lab notes and tick boxes. Each trial can now be recorded as data. Migration `020_rd_trials` adds `rd_trials`, `rd_trial_results` and the append-only `rd_trial_corrections`.
+
+**What a trial holds:** trial number (T1, T2, ... per project, allocated inside the insert transaction while the project row is locked, so simultaneous saves cannot duplicate; unique on project and number), stage (2 or 3), date (not in the future), who recorded it (taken from the signed-in user, never typed), formula or version used, what changed from the previous trial, batch size, observations, an outcome (Rejected, Needs another trial, Preferred formula), an optional raw-material cost per kg, and one result (Pass, Fail, Not tested) with a measured value for each of the project's performance requirements. Requirements left out count as "Not tested".
+
+**Rules the server enforces**
+* **Trials are never deleted.** A correction needs a reason (at least 5 characters) and the current version; it edits the trial in one transaction and writes a row to `rd_trial_corrections` holding the old and new values. A stale version answers the usual "someone else changed this" message (HTTP 409). A correction that changes nothing is refused.
+* **Confidential content** (formula, what changed, observations, measured values) needs `field.rd_technical`: without it the server omits it from every response (including the old values in correction history, and the reasons), and refuses writes. Because the formula is required, recording or correcting a trial needs `field.rd_technical`. The audit trail and the activity feed never contain this text: they record that a trial was added or corrected, which fields changed, and the non-confidential facts (stage, date, outcome).
+* **Cost per kg** needs `field.prices`: without it the value is omitted from responses and writes to it are refused. R&D does not hold `field.prices` by default, so an administrator (or a role with that key) enters costs unless it is granted.
+* **Who:** `rd.trial_view` lets a person see trials; `rd.trial_edit` lets them add and correct. Both also require being able to open the project (a project you cannot open answers "not found"). Defaults: `rd.trial_edit` to R&D only; `rd.trial_view` to R&D and Manager (every role that held `rd.view_all` when the migration ran). Administrators hold every key. Existing grants are never changed.
+* **Closed or paused projects:** no trial can be added or corrected on a project that is On Hold, Rejected, Completed or still a draft. Existing trials can still be read.
+* **Preferred formula** only records the outcome. It completes no stage, ticks no checklist item and records no approval. At most one trial per project is Preferred (also enforced by a unique index): marking a trial preferred sets the earlier one back to "Needs another trial" through a correction row stating why, in the same transaction.
+* **Not built:** photos or files (the app has no file storage; the page says "Attachments not available yet"), publishing a formula to a production recipe, and any change to how stages are completed or approvals work.
+
+**On the page:** a "Trials" tab (only for people with `rd.trial_view`) with an "Add trial" button (only for people who may add), a bar chart of how many requirements passed in each trial, a grid of requirements against trials (Pass, Fail and Not tested shown with a symbol and a word as well as colour), a table of trials, and a dialog to open a trial and see its correction history. The chart and grid have text alternatives.
 
 ## Existing project OXRD011026 "Under chassis coating"
 
