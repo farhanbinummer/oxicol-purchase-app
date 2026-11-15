@@ -17,7 +17,11 @@ const { pool } = require('./database');
 
 // NOTIFY_TEST_MODE=1 (used only by the automated tests) records what WOULD be sent instead of sending anything.
 const testMode = () => process.env.NOTIFY_TEST_MODE === '1';
-const emailOn = () => testMode() || !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+// Email goes out through Brevo's web API when BREVO_API_KEY and BREVO_FROM are set (works on hosts that block SMTP, such as
+// Render's free plan), otherwise through SMTP.
+const brevoOn = () => !!(process.env.BREVO_API_KEY && process.env.BREVO_FROM);
+const smtpOn = () => !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const emailOn = () => testMode() || brevoOn() || smtpOn();
 const whatsappOn = () => !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID);
 
 let transporter = null;
@@ -58,6 +62,16 @@ async function recipients(roles, branch) {
 }
 
 async function sendEmail(to, subject, text) {
+  if (brevoOn()) {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ sender: { email: process.env.BREVO_FROM, name: process.env.BREVO_FROM_NAME || 'Oxicol' }, to: [{ email: to }], subject, textContent: text }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!res.ok) throw new Error('Brevo ' + res.status + ' ' + (await res.text()).slice(0, 200));
+    return;
+  }
   await mailer().sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text });
 }
 

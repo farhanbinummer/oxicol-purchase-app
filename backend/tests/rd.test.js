@@ -874,3 +874,18 @@ test('notices: morning message lists what is due and is empty when nothing is', 
   assert.match(m.text, /Good morning Asha/); assert.match(m.text, /1 task overdue/); assert.match(m.text, /Due today/);
   assert.equal(compose('X', { overdue: [], today: [], tomorrow: [], sent_back: [], review: [] }, '2026-01-05'), null);
 });
+
+test('notices: email uses the Brevo web API when its settings are present', async () => {
+  const saved = { ...process.env }; const realFetch = global.fetch; let seen;
+  process.env.BREVO_API_KEY = 'k'; process.env.BREVO_FROM = 'from@example.com'; delete process.env.NOTIFY_TEST_MODE;
+  global.fetch = async (url, init) => { seen = { url, init }; return { ok: true, text: async () => '' }; };
+  try {
+    delete require.cache[require.resolve('../notify')];
+    const n = require('../notify');
+    const out = await n.deliver({ id: uid.admin, name: 'A', email: 'a@example.com' }, { kind: 'test', subject: 'S', text: 'T' });
+    assert.deepEqual(out, ['email']);
+    assert.equal(seen.url, 'https://api.brevo.com/v3/smtp/email');
+    assert.equal(JSON.parse(seen.init.body).to[0].email, 'a@example.com');
+    assert.equal(seen.init.headers['api-key'], 'k');
+  } finally { global.fetch = realFetch; Object.keys(process.env).forEach(k => { if (!(k in saved)) delete process.env[k]; }); Object.assign(process.env, saved); delete require.cache[require.resolve('../notify')]; await pool.query("DELETE FROM notice_log WHERE kind = 'test' AND user_id = $1", [uid.admin]); }
+});
