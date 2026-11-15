@@ -47,10 +47,12 @@
     // a task is finished only with "Complete task", which asks for the result; the status boxes never set Done directly
     const TASK_OPEN_STATUS = TASK_STATUS.filter(x => ['todo', 'in_progress', 'blocked'].includes(x[0]));
     const TASK_MOVE = TASK_STATUS.filter(x => x[0] !== 'in_review');        // 'In review' is reached only by handing the work in
-    const canFinish = (tk) => D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id);
+    const byName = (tk) => (tk.completed_by_name || '-') + (tk.on_behalf_name ? ' (covering for ' + tk.on_behalf_name + ')' : '');
+    const covers = (tk) => !!tk.assignee_id && (D.covering_ids || []).includes(tk.assignee_id);
+    const canFinish = (tk) => D.can.edit || (tk.assignee_id && D.me_id === tk.assignee_id) || covers(tk);
     // the person who did the work cannot review it; reviewers are R&D people with edit rights
-    const canReview = (tk) => D.can.edit && tk.status === 'in_review' && D.me_id !== tk.assignee_id;
-    const submitsForReview = (tk) => tk.requires_review && tk.assignee_id === D.me_id;
+    const canReview = (tk) => D.can.edit && tk.status === 'in_review' && D.me_id !== tk.assignee_id && D.me_id !== tk.completed_by;
+    const submitsForReview = (tk) => tk.requires_review && (tk.assignee_id === D.me_id || covers(tk));
     let closeTaskPanel = null;
     const APPROVAL_ROWS = ['rd_head', 'management', 'qc_signoff', 'customer', 'handover_ack'];
     const DECISION_TEXT = { approved: 'Approved', rejected: 'Rejected', returned: 'Returned for more information', submitted: 'Submitted' };
@@ -736,7 +738,7 @@
       D.stages.filter(s => s.overdue).forEach(s => items.push({ sev: 'bad', icon: 'clock', tag: 'Overdue', title: 'Stage ' + s.no + ': ' + s.name, detail: plural(s.delay, 'day') + ' overdue (planned ' + dmy(s.planned) + ')', act: D.can.edit ? { label: 'Edit dates', run: () => stageEditDialog(s) } : null }));
       D.stages.filter(s => s.review_flag).forEach(s => items.push({ sev: 'warn', icon: 'alert', tag: 'Needs review', title: 'Stage ' + s.no + ': ' + s.name, detail: s.review_flag, act: null }));
       if (!D.lead && D.next_step && !D.next_step.owner) items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: 'No project lead assigned', detail: 'Stages without a named owner have nobody accountable.', act: D.can.edit ? { label: 'Assign owner', run: focusLead } : null });
-      D.tasks.filter(t => t.status === 'in_review').forEach(t => items.push({ sev: 'warn', icon: 'check', tag: 'To review', title: t.title, detail: (t.completed_by_name || t.assignee_name || 'Someone') + ' handed in work' + (t.checklist_label ? ' for "' + t.checklist_label + '"' : ''), act: canReview(t) ? { label: 'Review', task: t } : null }));
+      D.tasks.filter(t => t.status === 'in_review').forEach(t => items.push({ sev: 'warn', icon: 'check', tag: 'To review', title: t.title, detail: (t.completed_by_name ? byName(t) : (t.assignee_name || 'Someone')) + ' handed in work' + (t.checklist_label ? ' for "' + t.checklist_label + '"' : ''), act: canReview(t) ? { label: 'Review', task: t } : null }));
       D.tasks.filter(t => t.status === 'blocked').forEach(t => items.push({ sev: 'warn', icon: 'stop', tag: 'Blocked', title: t.title, detail: 'Task is blocked' + (t.assignee_name ? ' - ' + t.assignee_name : ''), act: { label: 'Open task', task: t } }));
       D.tasks.filter(isLate).forEach(t => items.push({ sev: 'bad', icon: 'tasks', tag: 'Overdue', title: t.title, detail: plural(daysBetween(t.due_date, D.today), 'day') + ' overdue' + ' - ' + (t.assignee_name || 'Unclaimed'), act: { label: 'Open task', task: t } }));
       D.tasks.filter(t => isOpen(t) && !t.assignee_id).forEach(t => items.push({ sev: 'warn', icon: 'userplus', tag: 'No owner', title: t.title, detail: 'Nobody has claimed this task' + (t.team ? ' (' + t.team + ' team)' : ''), act: D.can.edit ? { label: 'Assign owner', task: t } : null }));
@@ -791,7 +793,7 @@
           const c3 = el('td', null, tk.due_date ? dmy(tk.due_date) : '-'); if (late) { c3.className = 'oxi-late'; c3.appendChild(el('div', 'oxi-flag', 'Overdue')); }
           const c4 = el('td'); c4.appendChild(prioBadge(tk.priority));
           const c5 = el('td');
-          if (tk.status === 'done') { c5.appendChild(el('span', 'badge badge-good', 'Done')); const sm = el('small', null, tk.completed_by_name ? 'by ' + tk.completed_by_name : ''); sm.style.display = 'block'; c5.appendChild(sm); }
+          if (tk.status === 'done') { c5.appendChild(el('span', 'badge badge-good', 'Done')); const sm = el('small', null, tk.completed_by_name ? 'by ' + byName(tk) : ''); sm.style.display = 'block'; c5.appendChild(sm); }
           else if (tk.status === 'cancelled') c5.appendChild(el('span', 'badge badge-neutral', 'Cancelled'));
           else if (tk.status === 'in_review') {
             c5.appendChild(el('span', 'badge badge-warn', 'In review'));
@@ -980,7 +982,7 @@
     }
     function resultBlock(tk) {
       const b = oxiResultView(tk);
-      b.appendChild(el('div', 'oxi-ci-meta', (tk.status === 'in_review' ? 'Handed in by ' : 'Completed by ') + (tk.completed_by_name || '-') + (tk.completed_at ? ' on ' + dmy(String(tk.completed_at).slice(0, 10)) : '')));
+      b.appendChild(el('div', 'oxi-ci-meta', (tk.status === 'in_review' ? 'Handed in by ' : 'Completed by ') + byName(tk) + (tk.completed_at ? ' on ' + dmy(String(tk.completed_at).slice(0, 10)) : '')));
       if (tk.reviewed_by_name) b.appendChild(el('div', 'oxi-ci-meta', 'Accepted by ' + tk.reviewed_by_name + (tk.reviewed_at ? ' on ' + dmy(String(tk.reviewed_at).slice(0, 10)) : '') + (tk.review_note ? ': ' + tk.review_note : '')));
       return b;
     }
@@ -997,7 +999,7 @@
       bg.addEventListener('mousedown', (e) => { if (e.target === bg) close(); });
       const head = el('div', 'oxi-sidehead'); const h = el('h2', null, tk.title); h.id = 'tpT';
       const x = el('button', 'oxi-btn-secondary', 'Close'); x.type = 'button'; x.onclick = close; head.append(h, x);
-      const canAll = D.can.edit, canStatus = canAll || (tk.assignee_id && D.me_id === tk.assignee_id);
+      const canAll = D.can.edit, canStatus = canAll || (tk.assignee_id && D.me_id === tk.assignee_id) || covers(tk);
       const desc = el('p', null, tk.description || 'No description.');
       if (['done', 'in_review', 'cancelled'].includes(tk.status)) {          // locked: shown with its result and who did and checked it
         const facts = el('p', 'oxi-section-note', 'Responsible: ' + (tk.assignee_name || '-') + ' - due ' + (tk.due_date ? dmy(tk.due_date) : '-') + ' - assigned by ' + (tk.assigned_by_name || '-') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : ''));
@@ -1102,12 +1104,12 @@
           card.append(t, meta2, who);
           if (tk.stage_no) card.appendChild(el('div', 'meta', 'Stage ' + tk.stage_no));
           if (tk.status === 'done') {
-            card.appendChild(el('div', 'meta', 'Completed by ' + (tk.completed_by_name || '-')));
+            card.appendChild(el('div', 'meta', 'Completed by ' + byName(tk)));
             if (tk.result) { const rs = el('div', 'oxi-result'); rs.style.margin = '6px 0 0'; rs.appendChild(el('p', null, tk.result.length > 120 ? tk.result.slice(0, 117) + '...' : tk.result)); card.appendChild(rs); }
             if (D.can.edit) { const rb = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Reopen'); rb.type = 'button'; rb.setAttribute('aria-label', 'Reopen task: ' + tk.title); rb.onclick = () => reopenTaskDialog(tk); card.appendChild(rb); }
           }
           if (tk.status === 'in_review') {
-            card.appendChild(el('div', 'meta', 'Handed in by ' + (tk.completed_by_name || '-')));
+            card.appendChild(el('div', 'meta', 'Handed in by ' + byName(tk)));
             if (canReview(tk)) { const rv = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Review'); rv.type = 'button'; rv.setAttribute('aria-label', 'Review: ' + tk.title); rv.onclick = () => taskPanel(tk, rv); card.appendChild(rv); }
           }
           if (canMove(tk)) { const sel = select(TASK_MOVE, tk.status); sel.className = 'inline'; sel.setAttribute('aria-label', 'Move to: ' + tk.title); sel.onchange = () => move(tk, sel.value, card); card.appendChild(sel); }

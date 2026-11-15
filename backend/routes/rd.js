@@ -21,8 +21,18 @@ const { can } = require('../access');
 const R = require('../rd-logic');
 const { visibleClause } = require('../rd-visibility');
 const { notifyUsers, notifyRole } = require('../notify');
+const cover = require('./rd-cover');
 
 // Notices by email and WhatsApp (when switched on; each person may turn them off). Never allowed to fail the action that caused them.
+/** Notices for whoever a task is assigned to also reach the person covering for them today ("You are covering for ..."). */
+async function tellWithCover(ids, kind, subject, text, path, exceptId) {
+  try {
+    const list = (ids || []).filter(x => x && x !== exceptId);
+    notifyUsers(list, { kind, subject, text, path });
+    const covers = (await cover.coversOf(pool, list)).filter(c => c.cover_user_id !== exceptId && !list.includes(c.cover_user_id));
+    for (const c of covers) notifyUsers([c.cover_user_id], { kind, subject, text: `You are covering for ${c.absent_name}. ${text}`, path });
+  } catch (e) { console.error('notice failed:', e.message); }
+}
 const tell = (ids, kind, subject, text, path, exceptId) => { try { notifyUsers((ids || []).filter(x => x && x !== exceptId), { kind, subject, text, path }); } catch (e) { console.error('notice failed:', e.message); } };
 /** The people who check a task's work: whoever assigned it and the owner (or lead) of the stage it belongs to. */
 async function reviewersOf(task) {
@@ -32,6 +42,7 @@ async function reviewersOf(task) {
 }
 const announceRequest = (req, id, number, title) => { try { notifyRole('rd', req.user.id, { kind: 'request', subject: `New R&D request ${number}`, text: `"${title}" was submitted by ${req.user.name} and is waiting to be assessed.`, path: `project.html?id=${id}` }); } catch (e) { console.error('notice failed:', e.message); } };
 const router = express.Router();
+router.use('/cover', cover.router);
 
 // ---------------------------------------------------------------------------------------------------------------
 // helpers
@@ -117,6 +128,7 @@ async function open(req, res, opts) {
   if (!p) { fail(res, 404, 'Project not found'); return null; }
   const members = await memberIds(opts && opts.db || pool, id);
   const acc = abilities(req, p, members);
+  if (!acc.visible && opts && opts.coverVisible && !p.is_draft) acc.visible = true;     // covering the task's owner: may open the project, but gets no edit rights
   if (!acc.visible) { fail(res, 404, 'Project not found'); return null; }
   return { p, members, acc };
 }
@@ -305,8 +317,16 @@ router.get('/my-day', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), asyn
       pool.query(`SELECT ${cols} ${from} WHERE t.status = 'in_review' AND t.assignee_id IS NOT NULL AND t.assignee_id <> $1 AND ${reviewer} AND ${live} ORDER BY t.completed_at`, params)
     ]);
     const rows = (r) => r.rows.map(x => withFlags(norm(x)));
+    // tasks of people I am covering for today (while they are away), and my own upcoming absences
+    const covered = await cover.coveredBy(pool, req.user.id);
+    const covering = [];
+    for (const c of covered) {
+      const q = await pool.query(`SELECT ${cols} ${from} WHERE t.assignee_id = $1 AND t.status NOT IN ('done','cancelled','in_review') AND p.is_draft = FALSE AND NOT (p.status = ANY($2)) ORDER BY t.due_date NULLS LAST, t.id LIMIT 100`, [c.user_id, ['Completed', 'Rejected']]);
+      covering.push({ ...c, tasks: rows(q) });
+    }
+    const away = await pool.query(`SELECT a.id, a.from_date::text AS from_date, a.to_date::text AS to_date, cu.name AS cover_name FROM rd_absences a JOIN users cu ON cu.id = a.cover_user_id WHERE a.user_id = $1 AND a.ended_at IS NULL AND a.to_date >= $2 ORDER BY a.from_date`, [req.user.id, today()]);
     res.json({
-      success: true, today: today(), mine: rows(mine), done_by_me: rows(doneByMe), assigned: rows(assigned), assigned_done: rows(assignedDone), submitted: rows(submitted), to_review: rows(toReview),
+      success: true, today: today(), covering, my_absences: away.rows, mine: rows(mine), done_by_me: rows(doneByMe), assigned: rows(assigned), assigned_done: rows(assignedDone), submitted: rows(submitted), to_review: rows(toReview),
       stages: rows(stages).map(x => ({ ...x, stage_name: R.STAGES[x.stage_no - 1].name }))
     });
   } catch (err) { console.error('rd my-day failed:', err); fail(res, 500, 'Could not load your day'); }
@@ -369,7 +389,7 @@ async function detail(req, p, members, acc) {
     pool.query('SELECT * FROM rd_requirements WHERE project_id = $1 ORDER BY position', [p.id]),
     pool.query('SELECT s.*, ou.name AS owner_name, cu.name AS completed_by_name FROM rd_stages s LEFT JOIN users ou ON ou.id = s.owner_user_id LEFT JOIN users cu ON cu.id = s.completed_by WHERE s.project_id = $1 ORDER BY s.stage_no', [p.id]),
     pool.query('SELECT c.*, u.name AS done_by_name FROM rd_checklist_items c JOIN rd_stages s ON s.id = c.stage_id LEFT JOIN users u ON u.id = c.done_by WHERE s.project_id = $1 ORDER BY c.stage_id, c.position', [p.id]),
-    pool.query('SELECT t.*, au.name AS assignee_name, cb.name AS completed_by_name, cr.name AS assigned_by_name, rb.name AS reviewed_by_name, ci.label AS checklist_label FROM rd_tasks t LEFT JOIN users au ON au.id = t.assignee_id LEFT JOIN users cb ON cb.id = t.completed_by LEFT JOIN users cr ON cr.id = t.created_by LEFT JOIN users rb ON rb.id = t.reviewed_by LEFT JOIN rd_checklist_items ci ON ci.id = t.checklist_item_id WHERE t.project_id = $1 ORDER BY (t.status = \'done\'), t.due_date NULLS LAST, t.id', [p.id]),
+    pool.query('SELECT t.*, au.name AS assignee_name, cb.name AS completed_by_name, cr.name AS assigned_by_name, rb.name AS reviewed_by_name, ob.name AS on_behalf_name, ci.label AS checklist_label FROM rd_tasks t LEFT JOIN users au ON au.id = t.assignee_id LEFT JOIN users cb ON cb.id = t.completed_by LEFT JOIN users cr ON cr.id = t.created_by LEFT JOIN users rb ON rb.id = t.reviewed_by LEFT JOIN users ob ON ob.id = t.on_behalf_of LEFT JOIN rd_checklist_items ci ON ci.id = t.checklist_item_id WHERE t.project_id = $1 ORDER BY (t.status = \'done\'), t.due_date NULLS LAST, t.id', [p.id]),
     pool.query(`SELECT id, task_id, kind, author_name, body, at FROM rd_updates WHERE project_id = $1 AND ($2 OR kind <> 'lab_note') ORDER BY at DESC, id DESC LIMIT 100`, [p.id, acc.technical]),
     pool.query('SELECT a.*, u.name AS decided_by_name FROM rd_approvals a LEFT JOIN users u ON u.id = a.decided_by WHERE a.project_id = $1 ORDER BY a.at, a.id', [p.id]),
     pool.query('SELECT u.id, u.name FROM rd_project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY u.name', [p.id]),
@@ -420,6 +440,7 @@ async function detail(req, p, members, acc) {
     next_step: cur && { stage: cur.no, name: cur.name, owner: cur.owner, due: cur.planned, overdue: cur.overdue, checklist: cur.checklist, missing: cur.missing },
     tasks: tasks.rows.map(x => withFlags(norm(x))), updates: updates.rows, approvals: approvals.rows.map(norm),
     members: mem.rows, lead, favourite: fav.rows[0] ? fav.rows[0].favourite : false,
+    covering_ids: (await cover.coveredBy(pool, req.user.id)).map(c => c.user_id),       // people I am covering for today: I may do their tasks
     can: { ...acc, create_task: acc.edit && !p.is_draft }
   };
   out.project.lead_name = lead ? lead.name : null;
@@ -941,7 +962,7 @@ router.post('/projects/:id/tasks', needPerm(KEYS.RD_EDIT), async (req, res) => {
     await audit(client, req, { action: 'rd.task_add', entity: 'rd_task', id: r.rows[0].id, summary: `${o.p.project_number}: task "${t.title}" added` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
-    tell([t.assignee_id], 'task_assigned', `New task: ${t.title}`, `${req.user.name} assigned you a task in ${o.p.project_number}: "${t.title}", due ${R.dmy(t.due_date)}.${schema ? ` When you hand it in you will fill in a "${schema.name}" ${schema.kind === 'checklist' ? 'checklist' : 'form'}.` : ''}`, 'my-day.html', req.user.id);
+    tellWithCover([t.assignee_id], 'task_assigned', `New task: ${t.title}`, `${req.user.name} assigned you a task in ${o.p.project_number}: "${t.title}", due ${R.dmy(t.due_date)}.${schema ? ` When you hand it in you will fill in a "${schema.name}" ${schema.kind === 'checklist' ? 'checklist' : 'form'}.` : ''}`, 'my-day.html', req.user.id);
     res.status(201).json({ success: true, id: r.rows[0].id });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -960,13 +981,14 @@ router.patch('/tasks/:id', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDIT]), a
     const task = norm(tr.rows[0]);
     if (!task) { await client.query('ROLLBACK'); return fail(res, 404, 'Task not found'); }
     req.params.id = String(task.project_id);
-    const o = await open(req, res, { db: client });
+    const covering = await cover.isCovering(client, req.user.id, task.assignee_id);
+    const o = await open(req, res, { db: client, coverVisible: covering });
     if (!o) { await client.query('ROLLBACK'); return; }
     const t = readTask(b);
     delete t.checklist_item_id; delete t.requires_review;       // set when the task is created
     const keys = Object.keys(t);
     // the person responsible may update the status of their own task; everything else needs edit rights on the project
-    const own = task.assignee_id === req.user.id && keys.every(k => k === 'status');
+    const own = (task.assignee_id === req.user.id || covering) && keys.every(k => k === 'status');
     if (!(o.acc.edit || own)) { await client.query('ROLLBACK'); return fail(res, 403, 'You may not change this task'); }
     // a task is finished only by "Complete task", which records the result; a finished task changes only by being reopened
     if (['done', 'in_review', 'cancelled'].includes(t.status)) { await client.query('ROLLBACK'); return fail(res, 400, 'Use "Complete task" (which records the result), the review buttons, or "Cancel task" for that'); }
@@ -1006,11 +1028,12 @@ router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_E
     const task = norm((await client.query('SELECT * FROM rd_tasks WHERE id = $1 FOR UPDATE', [taskId])).rows[0]);
     if (!task) { await client.query('ROLLBACK'); return fail(res, 404, 'Task not found'); }
     req.params.id = String(task.project_id);
-    const o = await open(req, res, { db: client });
+    const covering = await cover.isCovering(client, req.user.id, task.assignee_id);
+    const o = await open(req, res, { db: client, coverVisible: covering });
     if (!o) { await client.query('ROLLBACK'); return; }
     if (o.p.is_draft || ['Completed', 'Rejected'].includes(o.p.status)) { await client.query('ROLLBACK'); return conflict(res, `The project is ${o.p.status}. Tasks cannot be completed on it.`); }
-    // the person responsible completes their own task; otherwise it needs edit rights on the project
-    if (!(o.acc.edit || task.assignee_id === req.user.id)) { await client.query('ROLLBACK'); return fail(res, 403, 'Only the person responsible, or R&D with edit rights, can complete this task'); }
+    // the person responsible completes their own task; the person covering for them while they are away may too; otherwise it needs edit rights on the project
+    if (!(o.acc.edit || task.assignee_id === req.user.id || covering)) { await client.query('ROLLBACK'); return fail(res, 403, 'Only the person responsible, or R&D with edit rights, can complete this task'); }
     if (task.status === 'done') { await client.query('ROLLBACK'); return conflict(res, 'This task is already completed.'); }
     if (task.status === 'in_review') { await client.query('ROLLBACK'); return conflict(res, 'This task is already waiting for review.'); }
     if (task.status === 'cancelled') { await client.query('ROLLBACK'); return conflict(res, 'This task was cancelled.'); }
@@ -1027,15 +1050,17 @@ router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_E
       if (text.length > R.MAX_RESULT_LENGTH) { await client.query('ROLLBACK'); return fail(res, 400, `The result is too long (at most ${R.MAX_RESULT_LENGTH} characters)`); }
     }
     // a task that needs review is handed in by the person doing it; someone else with edit rights (the owner) can close it directly
-    const submit = task.requires_review && task.assignee_id === req.user.id;
-    await client.query(`UPDATE rd_tasks SET status = $4, completed_at = NOW(), completed_by = $1, result = $2, result_data = $5::jsonb, review_note = NULL, version = version + 1 WHERE id = $3`, [req.user.id, text, taskId, submit ? 'in_review' : 'done', answers ? JSON.stringify(answers) : null]);
-    await client.query(`INSERT INTO rd_task_history (task_id, action, result, actor_id) VALUES ($1,$4,$2,$3)`, [taskId, text, req.user.id, submit ? 'submitted' : 'completed']);
-    await addUpdate(client, o.p.id, 'system', req, submit ? `Task "${task.title}" submitted for review` : `Task "${task.title}" completed`, taskId);
+    const submit = task.requires_review && (task.assignee_id === req.user.id || covering);
+    const behalf = covering ? task.assignee_id : null;       // covering: recorded as done on behalf of the absent person
+    await client.query(`UPDATE rd_tasks SET status = $4, completed_at = NOW(), completed_by = $1, on_behalf_of = $6, result = $2, result_data = $5::jsonb, review_note = NULL, version = version + 1 WHERE id = $3`, [req.user.id, text, taskId, submit ? 'in_review' : 'done', answers ? JSON.stringify(answers) : null, behalf]);
+    await client.query(`INSERT INTO rd_task_history (task_id, action, result, actor_id, on_behalf_of) VALUES ($1,$4,$2,$3,$5)`, [taskId, text, req.user.id, submit ? 'submitted' : 'completed', behalf]);
+    await addUpdate(client, o.p.id, 'system', req, (submit ? `Task "${task.title}" submitted for review` : `Task "${task.title}" completed`) + (behalf ? ` on behalf of the person responsible (away)` : ''), taskId);
     await audit(client, req, { action: submit ? 'rd.task_submit' : 'rd.task_complete', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" ${submit ? 'submitted for review' : 'completed'} with a result` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
     if (submit) reviewersOf(task).then(ids => tell(ids, 'task_review', `Work to review: ${task.title}`, `${req.user.name} handed in "${task.title}" (${o.p.project_number}) for you to check.`, 'my-day.html#sReview', req.user.id)).catch(e => console.error('notice failed:', e.message));
     else tell([task.created_by], 'task_done', `Task done: ${task.title}`, `${req.user.name} completed "${task.title}" (${o.p.project_number}).`, `project.html?id=${o.p.id}#list`, req.user.id);
+    if (behalf) tell([behalf], 'task_done', `Done for you: ${task.title}`, `${req.user.name} covered for you and ${submit ? 'handed in' : 'completed'} "${task.title}" (${o.p.project_number}) while you were away.`, 'my-day.html', req.user.id);
     res.json({ success: true, version: task.version + 1, task_status: submit ? 'in_review' : 'done' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1067,7 +1092,7 @@ router.post('/tasks/:id/reopen', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     await audit(client, req, { action: 'rd.task_reopen', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" reopened` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
-    tell([task.assignee_id], 'task_reopened', `Task reopened: ${task.title}`, `${req.user.name} reopened "${task.title}" (${o.p.project_number}): ${reason}`, 'my-day.html', req.user.id);
+    tellWithCover([task.assignee_id], 'task_reopened', `Task reopened: ${task.title}`, `${req.user.name} reopened "${task.title}" (${o.p.project_number}): ${reason}`, 'my-day.html', req.user.id);
     res.json({ success: true, version: task.version + 1 });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1098,7 +1123,7 @@ router.post('/tasks/:id/accept', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     const c = await reviewContext(req, res, client, { needInReview: true });
     if (!c) { await client.query('ROLLBACK'); return; }
     const { task, o, taskId } = c;
-    if (task.assignee_id === req.user.id) { await client.query('ROLLBACK'); return fail(res, 403, 'Someone else has to review your work'); }
+    if (task.assignee_id === req.user.id || task.completed_by === req.user.id) { await client.query('ROLLBACK'); return fail(res, 403, 'Someone else has to review your work'); }
     await client.query(`UPDATE rd_tasks SET status = 'done', reviewed_by = $1, reviewed_at = NOW(), review_note = $2, version = version + 1 WHERE id = $3`, [req.user.id, note || null, taskId]);
     await client.query(`INSERT INTO rd_task_history (task_id, action, result, reason, actor_id) VALUES ($1,'accepted',$2,$3,$4)`, [taskId, task.result, note || null, req.user.id]);
     await addUpdate(client, o.p.id, 'system', req, `Task "${task.title}" accepted`, taskId);
@@ -1120,14 +1145,14 @@ router.post('/tasks/:id/send-back', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_
     const c = await reviewContext(req, res, client, { needInReview: true });
     if (!c) { await client.query('ROLLBACK'); return; }
     const { task, o, taskId } = c;
-    if (task.assignee_id === req.user.id) { await client.query('ROLLBACK'); return fail(res, 403, 'Someone else has to review your work'); }
+    if (task.assignee_id === req.user.id || task.completed_by === req.user.id) { await client.query('ROLLBACK'); return fail(res, 403, 'Someone else has to review your work'); }
     await client.query(`INSERT INTO rd_task_history (task_id, action, result, reason, actor_id) VALUES ($1,'sent_back',$2,$3,$4)`, [taskId, task.result, note, req.user.id]);
     await client.query(`UPDATE rd_tasks SET status = 'in_progress', result = NULL, result_data = NULL, completed_at = NULL, completed_by = NULL, review_note = $1, version = version + 1 WHERE id = $2`, [note, taskId]);
     await addUpdate(client, o.p.id, 'system', req, `Task "${task.title}" sent back: ${note}`, taskId);
     await audit(client, req, { action: 'rd.task_send_back', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" sent back` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
-    tell([task.assignee_id], 'task_sent_back', `Sent back: ${task.title}`, `${req.user.name} sent "${task.title}" (${o.p.project_number}) back for changes: ${note}`, 'my-day.html', req.user.id);
+    tellWithCover([task.assignee_id], 'task_sent_back', `Sent back: ${task.title}`, `${req.user.name} sent "${task.title}" (${o.p.project_number}) back for changes: ${note}`, 'my-day.html', req.user.id);
     res.json({ success: true });
   } catch (err) { await client.query('ROLLBACK').catch(() => {}); console.error('rd task send-back failed:', err); fail(res, 500, 'Could not send the task back'); } finally { client.release(); }
 });
@@ -1149,7 +1174,7 @@ router.post('/tasks/:id/cancel', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDI
     await audit(client, req, { action: 'rd.task_cancel', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" cancelled` });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
-    tell([task.assignee_id], 'task_cancelled', `Task cancelled: ${task.title}`, `${req.user.name} cancelled "${task.title}" (${o.p.project_number}): ${reason}`, 'my-day.html', req.user.id);
+    tellWithCover([task.assignee_id], 'task_cancelled', `Task cancelled: ${task.title}`, `${req.user.name} cancelled "${task.title}" (${o.p.project_number}): ${reason}`, 'my-day.html', req.user.id);
     res.json({ success: true });
   } catch (err) { await client.query('ROLLBACK').catch(() => {}); console.error('rd task cancel failed:', err); fail(res, 500, 'Could not cancel the task'); } finally { client.release(); }
 });

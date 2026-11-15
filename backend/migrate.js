@@ -533,6 +533,31 @@ const STEPS = [
       await db.query('CREATE INDEX IF NOT EXISTS idx_notice_log_user ON notice_log(user_id, kind)');
       await db.query('CREATE TABLE IF NOT EXISTS job_runs (name VARCHAR(40) PRIMARY KEY, last_run DATE NOT NULL)');
     }
+  },
+  {
+    // Cover while someone is away: a dated window in which another person may do the absent person's tasks. The task stays the
+    // absent person's; what the cover does is recorded "on behalf of" them. Additive only.
+    name: '019_rd_cover',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS rd_absences (
+          id            SERIAL PRIMARY KEY,
+          user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          cover_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          from_date     DATE NOT NULL,
+          to_date       DATE NOT NULL,
+          reason        VARCHAR(200),
+          created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          ended_at      TIMESTAMPTZ,
+          CHECK (from_date <= to_date),
+          CHECK (user_id <> cover_user_id)
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_absences_user ON rd_absences(user_id, to_date)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_absences_cover ON rd_absences(cover_user_id, to_date)');
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS on_behalf_of INTEGER REFERENCES users(id) ON DELETE SET NULL');
+      await db.query('ALTER TABLE rd_task_history ADD COLUMN IF NOT EXISTS on_behalf_of INTEGER REFERENCES users(id) ON DELETE SET NULL');
+    }
   }
 ];
 

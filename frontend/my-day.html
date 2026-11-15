@@ -171,6 +171,7 @@
       if (d.to_review.length) bits.unshift(plural(d.to_review.length, 'piece') + ' of work waiting for your review');
       hero.appendChild(el('p', null, (d.mine.length || d.to_review.length ? 'You have ' + bits.join(', ') + '.' : 'You have no open tasks.') + ' Today is ' + new Date(today + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) + '.'));
       box.appendChild(hero);
+      (d.my_absences || []).forEach(a => { const n = el('p', 'oxi-section-note'); n.textContent = (a.from_date <= today ? 'You are away until ' : 'You will be away ' + dmy(a.from_date) + ' to ') + dmy(a.to_date) + '. ' + a.cover_name + ' is covering your tasks.'; box.appendChild(n); });
 
       const sum = el('div', 'md-sum');
       const tile = (n, label, cls, target) => { const b = el('button', 'md-tile ' + (cls || '')); b.type = 'button'; b.append(el('b', null, String(n)), el('span', null, label)); b.setAttribute('aria-label', label + ': ' + n); b.onclick = () => { const e = $(target); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; sum.appendChild(b); };
@@ -181,12 +182,17 @@
       if (blocked) box.appendChild(el('p', 'oxi-section-note', plural(blocked, 'of your tasks') + ' blocked: tell the person who assigned it what you are waiting for.'));
 
       const build = (t) => taskRow(t, today, { actions: true });
-      if (!d.mine.length && !d.stages.length && !d.to_review.length) { const c = el('div', 'oxi-card2 md-allclear'); c.append(el('strong', null, 'All clear'), el('p', 'oxi-section-note', 'Nothing is waiting for you. New work appears here as soon as it is assigned.')); box.appendChild(c); }
+      if (!d.mine.length && !d.stages.length && !d.to_review.length && !(d.covering || []).some(c => c.tasks.length)) { const c = el('div', 'oxi-card2 md-allclear'); c.append(el('strong', null, 'All clear'), el('p', 'oxi-section-note', 'Nothing is waiting for you. New work appears here as soon as it is assigned.')); box.appendChild(c); }
       const rev = section('sReview', 'To review', d.to_review, 'bad', (t) => taskRow(t, today, { review: true, assignee: true }));
       if (rev) { rev.appendChild(el('p', 'oxi-section-note', 'Work handed in by people you assigned it to. Accept it, or send it back with what needs to change.')); box.appendChild(rev); }
       [section('sOver', 'Overdue', bucket.overdue, 'bad', build), section('sToday', 'Today', bucket.today, '', build, d.mine.length ? 'Nothing is due today.' : null),
        section('sTomorrow', 'Tomorrow', bucket.tomorrow, '', build), section('sWeek', 'This week and later', bucket.week.concat(bucket.later), '', build)].forEach(s => s && box.appendChild(s));
 
+      (d.covering || []).forEach((c, i) => {
+        const sec = section('sCover' + i, 'Covering for ' + c.name, c.tasks, '', (t) => taskRow(t, today, { actions: true }), c.name + ' has no open tasks right now.');
+        sec.insertBefore(el('p', 'oxi-section-note', c.name + ' is away until ' + dmy(c.to_date) + (c.reason ? ' (' + c.reason + ')' : '') + '. You can do their open tasks; each one is recorded as done on their behalf. You cannot review work you did for them.'), sec.children[1]);
+        box.appendChild(sec);
+      });
       const stages = section('sStages', 'Stages you own', d.stages, '', (x) => {
         const li = el('li'); const row = el('div', 'md-task'); const main = el('div', 'md-main'); const a = el('a', null, 'Stage ' + x.stage_no + ': ' + x.stage_name); a.href = 'project.html?id=' + x.project_id; const st = el('strong'); st.appendChild(a); main.appendChild(st);
         const sub = el('div', 'sub'); sub.appendChild(el('span', null, x.project_number + ' ' + x.project_title));
@@ -204,6 +210,55 @@
       const seen = new Set(); const finished = fin.filter(t => seen.has(t.id) ? false : (seen.add(t.id), true));
       const recent = section('sDone', 'Finished in the last 7 days', finished, '', (t) => taskRow(t, today, { done: true, who: true }));
       if (recent) box.appendChild(recent);
+      coverCard(box);
+    }
+
+    // ---- being away: who covers, and ending it early ----
+    async function coverCard(box) {
+      const c = await api('/api/rd/cover');
+      if (!c.success) return;
+      const card = el('section', 'oxi-card2 md-sec'); card.id = 'sAway';
+      card.appendChild(el('h2', null, 'Going to be away?'));
+      card.appendChild(el('p', 'oxi-section-note', 'Choose who covers your tasks while you are away. They will see your open tasks in their My Day and get your notices for those dates, and anything they do is recorded as done on your behalf.'));
+      const rows = c.can_manage ? c.all : c.mine.concat(c.covering);
+      if (rows.length) {
+        const ul = el('ul', 'md-list');
+        rows.forEach(a => {
+          const li = el('li'); const r = el('div', 'md-task'); const m = el('div', 'md-main');
+          m.appendChild(el('strong', null, a.user_name + ' is away ' + dmy(a.from_date) + ' to ' + dmy(a.to_date)));
+          m.appendChild(el('div', 'sub', 'Covered by ' + a.cover_name + (a.reason ? ' · ' + a.reason : '')));
+          r.appendChild(m);
+          const b = el('button', 'oxi-btn-secondary', 'End early'); b.type = 'button'; b.setAttribute('aria-label', 'End cover for ' + a.user_name);
+          b.onclick = async () => { if (!confirm('End this cover now?')) return; const x = await api('/api/rd/cover/' + a.id + '/end', 'POST', {}); if (!x.success) { note(x.error || 'Could not end it.', false); return; } note('Cover ended.', true); load(); };
+          r.appendChild(b); li.appendChild(r); ul.appendChild(li);
+        });
+        card.appendChild(ul);
+      }
+      const btn = el('button', null, 'I will be away'); btn.type = 'button'; btn.style.marginTop = '10px'; btn.onclick = () => coverDialog(c);
+      card.appendChild(btn); box.appendChild(card);
+    }
+    function coverDialog(c) {
+      const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'cvT');
+      const f = el('form'); f.method = 'dialog'; const h = el('h3', null, 'Record an absence'); h.id = 'cvT'; f.appendChild(h);
+      const field = (label, input) => { const p = el('p'); const l = el('label', null, label); l.appendChild(el('br')); l.appendChild(input); p.appendChild(l); f.appendChild(p); return input; };
+      const opts = (sel, list, ph) => { sel.appendChild(Object.assign(el('option', null, ph), { value: '' })); list.forEach(p => sel.appendChild(Object.assign(el('option', null, p.name), { value: p.id }))); return sel; };
+      let who = null;
+      if (c.can_manage) who = field('Who is away (leave as "Me" for yourself)', opts(el('select'), c.people, 'Me'));
+      const cv = field('Who will cover', opts(el('select'), c.people, 'Choose a person'));
+      const from = field('First day away', Object.assign(el('input'), { type: 'date', value: c.today, min: c.today }));
+      const to = field('Last day away', Object.assign(el('input'), { type: 'date', min: c.today }));
+      const why = field('Reason (optional)', Object.assign(el('input'), { type: 'text', maxLength: 200, placeholder: 'e.g. Annual leave' }));
+      const msg = el('div', 'oxi-errtext'); msg.setAttribute('role', 'alert'); f.appendChild(msg);
+      const row = el('div', 'row'); const cancel = el('button', 'oxi-btn-secondary', 'Cancel'); cancel.type = 'button'; cancel.onclick = () => { dlg.close(); dlg.remove(); };
+      const save = el('button', null, 'Save'); save.type = 'submit'; row.append(cancel, save); f.appendChild(row); dlg.appendChild(f); document.body.appendChild(dlg); dlg.showModal();
+      f.onsubmit = async (e) => {
+        e.preventDefault(); msg.textContent = '';
+        if (!cv.value) { msg.textContent = 'Choose who will cover.'; return; } if (!from.value || !to.value) { msg.textContent = 'Give the first and last day away.'; return; }
+        save.disabled = true;
+        const r = await api('/api/rd/cover', 'POST', { user_id: who && who.value ? Number(who.value) : null, cover_user_id: Number(cv.value), from_date: from.value, to_date: to.value, reason: why.value });
+        if (!r.success) { save.disabled = false; msg.textContent = r.error || 'Could not save.'; return; }
+        dlg.close(); dlg.remove(); note('Saved. The cover person has been told.', true); load();
+      };
     }
 
     async function load() {
