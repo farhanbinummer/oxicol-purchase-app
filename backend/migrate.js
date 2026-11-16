@@ -638,6 +638,15 @@ const STEPS = [
         )`);
       await db.query('CREATE INDEX IF NOT EXISTS idx_rd_trial_attachments_trial ON rd_trial_attachments(trial_id, id)');
     }
+  },
+  {
+    // A task can be marked "produces a lab trial"; recording a trial against it links the two (and completes it by the usual rules).
+    name: '022_rd_task_trial_link',
+    async run(db) {
+      await db.query('ALTER TABLE rd_tasks ADD COLUMN IF NOT EXISTS expects_trial BOOLEAN NOT NULL DEFAULT FALSE');
+      await db.query('ALTER TABLE rd_trials ADD COLUMN IF NOT EXISTS task_id INTEGER REFERENCES rd_tasks(id) ON DELETE SET NULL');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_rd_trials_task ON rd_trials(task_id)');
+    }
   }
 ];
 

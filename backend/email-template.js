@@ -14,10 +14,12 @@ const KINDS = {
   request: { color: '#0891b2', soft: '#cffafe', emoji: '🚀', head: 'A new R&D request has arrived!', cheer: 'New ideas keep us growing. Let us make it happen!' },
   stage: { color: '#7c3aed', soft: '#ede9fe', emoji: '🏁', head: 'A project stage is complete!', cheer: 'Another milestone reached. Congratulations, team!' },
   project: { color: '#16a34a', soft: '#dcfce7', emoji: '🏆', head: 'A project is complete!', cheer: 'What a result. Thank you to everyone who made it happen!' },
+  trial_added: { color: '#7c3aed', soft: '#ede9fe', emoji: '🧪', head: 'A new lab trial is on record!', cheer: 'Every trial brings the right formula closer. Great work, team!' },
+  trial_preferred: { color: '#16a34a', soft: '#dcfce7', emoji: '⭐', head: 'A preferred formula has been chosen!', cheer: 'What a milestone. Thank you to everyone in the lab!' },
   morning: { color: '#ea580c', soft: '#ffedd5', emoji: '☀️', head: 'Good morning! Here is your plan for the day', cheer: 'Take it one task at a time. You will do wonderfully today!' }
 };
 const DEFAULT_KIND = { color: '#0f766e', soft: '#ccfbf1', emoji: '👋', head: 'A quick note from Oxicol', cheer: 'Thank you for all you do!' };
-const SECTION_COLORS = { 'Sent back to you': '#d97706', 'Covering for a colleague who is away': '#7c3aed', 'Waiting for your review': '#4f46e5', 'Overdue': '#dc2626', 'Due today': '#ea580c', 'Due tomorrow': '#0f766e' };
+const SECTION_COLORS = { 'Sent back to you': '#d97706', 'Covering for a colleague who is away': '#7c3aed', 'Lab trials to record': '#7c3aed', 'Waiting for your review': '#4f46e5', 'Overdue': '#dc2626', 'Due today': '#ea580c', 'Due tomorrow': '#0f766e' };
 
 /** Turns the plain text of a notice into HTML paragraphs; lines starting with "  - " become list items, "Title:" lines become headings. */
 function bodyHtml(text, color) {

@@ -299,3 +299,52 @@ test('trials: the Overview summary and the soft stage warning', async () => {
   // the warning is only a warning: completing the stage is not blocked by it (checked at the rule level: the route has no trial condition)
   const src = require('fs').readFileSync(path.join(__dirname, '..', 'routes', 'rd.js'), 'utf8'); assert.ok(/no lab trial was recorded/.test(src) && !/missing\.push\([^)]*trial/i.test(src));
 });
+
+// ---------------------------------------------------------------- task link, notices
+const mkTask = (token, pid, over) => api(token, 'POST', `/api/rd/projects/${pid}/tasks`, { title: 'Run trial', assignee_id: uid.lead, due_date: R.addDays(today, 3), stage_no: 3, ...(over || {}) });
+const getTask = async (pid, id) => (await api(tok.admin, 'GET', '/api/rd/projects/' + pid)).tasks.find(t => t.id === id);
+
+test('trials: a task that "produces a lab trial" is linked to the trial and completed by the usual rules', async () => {
+  const pid = await newProject(); const { requirements } = await list(tok.lead, pid);
+  const flagged = await mkTask(tok.admin, pid, { title: 'Run trial 1', expects_trial: true }); assert.equal(flagged.status, 201, JSON.stringify(flagged));
+  const plain = await mkTask(tok.admin, pid, { title: 'Not a trial task' }); const others = await mkTask(tok.admin, pid, { title: 'Someone else\'s', expects_trial: true, assignee_id: uid.admin });
+  assert.equal((await getTask(pid, flagged.id)).expects_trial, true); assert.equal((await getTask(pid, plain.id)).expects_trial, false);
+  // the dialog's list holds only the person's own open trial tasks
+  const l = await list(tok.lead, pid); assert.deepEqual(l.open_trial_tasks.map(t => t.id), [flagged.id]);
+  // wrong choices are refused
+  const body = (task_id) => trialBody(requirements, { task_id });
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(plain.id))).status, 400, 'not a trial task');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(others.id))).status, 403, 'assigned to someone else');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(99999999))).status, 400, 'unknown');
+  assert.equal((await list(tok.lead, pid)).trials.length, 0, 'a refused trial leaves nothing behind');
+  // recording the trial completes the task, with a plain non-confidential result, and links the two
+  const ok = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(flagged.id)); assert.equal(ok.status, 201, JSON.stringify(ok)); assert.deepEqual(ok.task, { id: flagged.id, status: 'done' });
+  const t = await getTask(pid, flagged.id); assert.equal(t.status, 'done'); assert.match(t.result, /^Lab trial T1 recorded: Needs another trial, \d+ of \d+ requirements pass\.$/); assert.ok(!t.result.includes(SECRET)); assert.equal(t.completed_by, uid.lead);
+  assert.equal((await list(tok.lead, pid)).trials[0].task.title, 'Run trial 1');
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(flagged.id))).status, 409, 'a finished task cannot be used again');
+  // a task that must be reviewed is handed in, not closed
+  const rv = await mkTask(tok.admin, pid, { title: 'Checked trial', expects_trial: true, requires_review: true });
+  const r2 = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(rv.id)); assert.deepEqual(r2.task, { id: rv.id, status: 'in_review' }); assert.equal((await getTask(pid, rv.id)).status, 'in_review');
+  // a task that asks for its own result form is only linked: it stays open
+  const fm = await mkTask(tok.admin, pid, { title: 'Form trial', expects_trial: true, result_schema: { kind: 'form', name: 'Viscosity', fields: [{ label: 'Viscosity', type: 'number', required: true }] } });
+  assert.equal(fm.status, 201, JSON.stringify(fm)); const r3 = await api(tok.lead, 'POST', `/api/rd/projects/${pid}/trials`, body(fm.id)); assert.deepEqual(r3.task, { id: fm.id, status: 'open' }); assert.equal((await getTask(pid, fm.id)).status, 'todo');
+  // the flag is set when the task is created; it cannot be switched on later by an edit
+  assert.equal((await api(tok.admin, 'PATCH', '/api/rd/tasks/' + plain.id, { version: (await getTask(pid, plain.id)).version, expects_trial: true })).status < 500, true);
+  assert.equal((await getTask(pid, plain.id)).expects_trial, false);
+});
+
+test('trials: the project\'s people are told about a trial or a preferred formula, without any confidential text', async () => {
+  const pid = await newProject(); const { requirements } = await list(tok.lead, pid);
+  await pool.query('UPDATE rd_projects SET lead_user_id = $1 WHERE id = $2', [uid.lead, pid]);
+  await pool.query('UPDATE users SET email = $1 WHERE id = $2', [`${TAG}_lead@example.invalid`, uid.lead]);
+  await pool.query('DELETE FROM notice_log WHERE user_id = $1', [uid.lead]);
+  const a = await api(tok.admin, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements)); assert.equal(a.status, 201);
+  const b = await api(tok.admin, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements, { outcome: 'Preferred formula' })); assert.equal(b.status, 201);
+  let rows = []; for (let i = 0; i < 20 && rows.length < 2; i++) { await new Promise(r => setTimeout(r, 150)); rows = (await pool.query("SELECT kind, subject, body FROM notice_log WHERE user_id = $1 ORDER BY id", [uid.lead])).rows; }
+  assert.deepEqual(rows.map(r => r.kind), ['trial_added', 'trial_preferred']);
+  assert.match(rows[0].body, /recorded lab trial T1/); assert.match(rows[1].body, /preferred formula/); assert.match(rows[1].body, /does not complete a stage/);
+  assert.ok(!JSON.stringify(rows).includes(SECRET), 'a notice never carries the formula, observations or values');
+  // the person who recorded it is not told about their own action
+  const own = await pool.query('SELECT 1 FROM notice_log WHERE user_id = $1', [uid.admin]); assert.equal(own.rowCount, 0);
+  await pool.query('UPDATE users SET email = NULL WHERE id = $1', [uid.lead]);
+});

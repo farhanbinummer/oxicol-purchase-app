@@ -370,6 +370,10 @@
       const eyebrow = el('div', 'oxi-eyebrow', 'Next step - Stage ' + n.stage + ' of ' + D.stages.length);
       const h = el('h2', null, n.name); h.id = 'nsT'; c.append(eyebrow, h);
 
+      if (n.stage >= 4 && D.trials_summary && D.trials_summary.preferred) {         // later stages work with the formula chosen in the lab
+        const pf = D.trials_summary.preferred; const pb = el('p', 'tr-pref'); pb.textContent = '★ Preferred formula from the lab: ' + pf.label + (pf.formula_ref ? ' (' + pf.formula_ref + ')' : '') + '. ';
+        const pl = el('a', null, 'See the trial'); pl.href = '#trials'; pl.onclick = (e) => { e.preventDefault(); setTab('trials', true); }; pb.appendChild(pl); c.appendChild(pb);
+      }
       // owner and planned date
       const facts = el('div', 'oxi-facts');
       const own = el('div', 'oxi-fact'); own.appendChild(el('small', null, 'Owner'));
@@ -961,10 +965,10 @@
       dialog('Assign part of stage ' + stageNo, (body) => {
         f = {
           title: el('input'), desc: el('textarea'), who: select(personOptions(), '', 'Choose a person'), due: dateInput(''), prio: select(meta.lists.priorities, 'Medium'),
-          item: select(stage.checklist.map(c => [c.id, c.label]), itemId || '', 'Not tied to one item'), rev: el('input'),
+          item: select(stage.checklist.map(c => [c.id, c.label]), itemId || '', 'Not tied to one item'), rev: el('input'), trial: el('input'),
           form: select([['text', 'Free text: they write what they found']].concat(tpls.map(t => ['tpl:' + t.id, t.name + ' (' + t.description + ')'])).concat([['checklist', 'A checklist of steps to tick'], ['custom', 'A custom form: I choose the fields']]), 'text')
         };
-        f.title.type = 'text'; f.title.maxLength = 250; f.desc.rows = 3; f.desc.maxLength = 4000; f.rev.type = 'checkbox';
+        f.title.type = 'text'; f.title.maxLength = 250; f.desc.rows = 3; f.desc.maxLength = 4000; f.rev.type = 'checkbox'; f.trial.type = 'checkbox';
         const builder = el('div');
         function renderRows() {
           builder.innerHTML = ''; const box = el('div', 'oxi-fbuild');
@@ -1004,6 +1008,7 @@
           field('What should they bring back?', f.form, 'awF', 'They get exactly this form when they hand the work in.'), builder, field('Priority', f.prio, 'awP'));
         const w = el('div'); const l = el('label'); l.append(f.rev, document.createTextNode(' Someone else checks this work before it counts as done')); w.appendChild(l);
         const h = el('div', 'oxi-section-note', 'Always on for a trainee.'); h.style.margin = '2px 0 0'; w.appendChild(h); body.appendChild(w);
+        if (D.can.trial_view && (stage.no === 2 || stage.no === 3)) { const tw = el('div'); const tl = el('label'); tl.append(f.trial, document.createTextNode(' This task produces a lab trial')); tw.appendChild(tl); const th = el('div', 'oxi-section-note', 'The person records the trial on the Trials tab and chooses this task; that completes it (or hands it in for review).'); th.style.margin = '2px 0 0'; tw.appendChild(th); body.appendChild(tw); }
         return () => {
           let schema = null;
           if (mode === 'checklist') schema = { kind: 'checklist', name: 'Checklist', items: steps.value.split('\n').map(x => x.trim()).filter(Boolean) };
@@ -1017,7 +1022,7 @@
               return o;
             }) };
           }
-          return { title: f.title.value, description: f.desc.value, assignee_id: f.who.value, due_date: f.due.value, priority: f.prio.value, checklist_item_id: f.item.value || null, requires_review: f.rev.checked, result_schema: schema };
+          return { title: f.title.value, description: f.desc.value, assignee_id: f.who.value, due_date: f.due.value, priority: f.prio.value, checklist_item_id: f.item.value || null, requires_review: f.rev.checked, expects_trial: f.trial.checked, result_schema: schema };
         };
       }, 'Assign', async (a, errBox) => {
         const need = !a.title.trim() ? 'Say what they should do.' : !a.assignee_id ? 'Choose who is responsible.' : !a.due_date ? 'Give a due date.' : '';
@@ -1084,7 +1089,7 @@
       const who = select(personOptions(), tk.assignee_id || '', tk.assignee_id ? null : 'Unclaimed'); who.disabled = !canAll;
       const form = el('form'); form.noValidate = true;
       form.append(field('Status', status, 'tpS'), field('Priority', prio, 'tpP'), field('Due date', due, 'tpD'), field('Accountable person', who, 'tpW'));
-      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : '') + (tk.result_schema ? ' - to bring back: ' + tk.result_schema.name : '') + (tk.requires_review ? ' - checked by someone else before it counts as done' : '') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
+      const info = el('p', 'oxi-section-note', 'Stage: ' + (tk.stage_no ? tk.stage_no + '. ' + D.stages[tk.stage_no - 1].name : 'not linked') + (tk.checklist_label ? ' - for "' + tk.checklist_label + '"' : '') + (tk.result_schema ? ' - to bring back: ' + tk.result_schema.name : '') + (tk.requires_review ? ' - checked by someone else before it counts as done' : '') + (tk.expects_trial ? ' - produces a lab trial (record it on the Trials tab)' : '') + (tk.assignee_name ? '' : (tk.team ? ' · Unclaimed (' + tk.team + ' team)' : '')));
       const err = el('div', 'oxi-errtext'); err.hidden = true; err.setAttribute('role', 'alert');
       const save = el('button', null, 'Save changes'); save.type = 'submit'; save.disabled = !canStatus;
       const fin = el('button', 'oxi-btn-secondary', submitsForReview(tk) ? 'Submit for review' : 'Complete task'); fin.type = 'button'; fin.disabled = !canFinish(tk); fin.onclick = () => completeTaskDialog(tk);
@@ -1442,6 +1447,7 @@
         const row = (k, v) => { if (v == null || v === '') return; dl.appendChild(el('dt', null, k)); const dd = el('dd'); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; dl.appendChild(dd); };
         row('Stage', x.stage_no + ': ' + STAGE_NAMES[x.stage_no]); row('Date', dmy(x.trial_date)); row('Recorded by', x.recorded_by_name);
         row('Outcome', Object.assign(el('span', OUT_BADGE[x.outcome] || 'badge', x.outcome)));
+        if (x.task) row('Task', x.task.title || 'A task');
         if (T.can.technical) { row('Formula or version', x.formula_ref); row('What changed', x.changed_variables || 'Nothing recorded'); } else row('Formula, what changed, observations', 'Confidential: not shown to you');
         row('Batch size', x.batch_size_text); if (T.can.technical) row('Observations', x.observations);
         if (T.can.technical) (x.extra_fields || []).forEach(f => row(f.label, f.value || '-'));
@@ -1474,6 +1480,10 @@
         body.appendChild(field('What changed from the previous trial', f.changed, 'trChanged', 'For example "solvent 40% to 35%". Leave empty for the first trial.'));
         f.batch = el('input'); f.batch.type = 'text'; f.batch.maxLength = 100; f.batch.value = x ? (x.batch_size_text || '') : ''; body.appendChild(field('Batch size', f.batch, 'trBatch'));
         f.obs = el('textarea'); f.obs.rows = 3; f.obs.maxLength = 3000; f.obs.value = x ? (x.observations || '') : ''; body.appendChild(field('Observations', f.obs, 'trObs', 'For example viscosity, solids, appearance.'));
+        if (!x && (T.open_trial_tasks || []).length) {
+          f.task = select(T.open_trial_tasks.map(t => [t.id, t.title + (t.due_date ? ' (due ' + dmy(t.due_date) + ')' : '')]), '', 'Not for a task');
+          body.appendChild(field('This trial is the work of task', f.task, 'trTask', 'Choosing a task completes it when you save (or hands it in for review, where that is required).'));
+        }
         body.appendChild(el('h4', null, 'Extra fields'));
         body.appendChild(el('p', 'oxi-section-note', 'Add anything else worth recording for this trial, for example "Pot life" or "Colour match". Names are copied from the last trial so you do not retype them: change a value, rename or remove a field as needed.'));
         const prevTrial = T.trials.length ? T.trials[T.trials.length - 1] : null;
@@ -1502,6 +1512,7 @@
         const payload = { trial_date: f.date.value, stage_no: Number(f.stage.value), formula_ref: f.formula.value, changed_variables: f.changed.value, batch_size_text: f.batch.value, observations: f.obs.value, extra_fields: f.extra.read(), outcome: f.outcome.value,
           results: T.requirements.map(q => ({ requirement_id: q.id, result: f.res[q.id].sel.value, measured_value: f.res[q.id].mv.value })) };
         if (f.cost) payload.rm_cost_per_kg = f.cost.value;
+        if (f.task && f.task.value) payload.task_id = Number(f.task.value);
         let r;
         if (x) {
           if (!f.reason.value.trim()) { err.textContent = 'Say why you are correcting this trial.'; err.hidden = false; f.reason.focus(); return false; }
@@ -1512,7 +1523,8 @@
         let bad = [];
         if (!x && f.files && f.files.files.length) { for (const file of [...f.files.files]) { try { await uploadTrialFile(r.id, file); } catch (e) { bad.push(e.message); } } }
         if (bad.length) note('Trial ' + r.label + ' recorded, but some files could not be added: ' + bad.join(' ') + ' Open the trial to add them again.', false);
-        else note(x ? 'Correction saved. The earlier values are kept in the history.' : 'Trial ' + r.label + ' recorded.', true);
+        else note(x ? 'Correction saved. The earlier values are kept in the history.' : 'Trial ' + r.label + ' recorded.' + (r.task ? (r.task.status === 'in_review' ? ' The task was handed in for review.' : r.task.status === 'done' ? ' The task was completed.' : ' It is linked to the task.') : ''), true);
+        if (!x && r.task) load(true);
         await loadTrials();
         // the lists were redrawn, so give focus back to the matching control in the new page content
         lastFocus = x ? $('trialsview').querySelector('button[aria-label="Open trial ' + x.label + '"]') : $('trialsview').querySelector('.tr-head button');
