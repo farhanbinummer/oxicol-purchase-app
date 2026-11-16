@@ -954,3 +954,10 @@ test('cover: the morning message tells the cover what is due on the absent perso
   const m = compose('Asha Nair', d, '2026-01-05');
   assert.match(m.text, /to cover for Roshan P/); assert.match(m.text, /Covering for a colleague who is away/);
 });
+
+test('cover/notices: the morning message lists lab projects that need a trial', () => {
+  const { compose } = require('../digest');
+  const d = { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [], lab: [{ project_number: 'OXRD011026', n: 0, since: null, stage_no: 3 }, { project_number: 'OXRD021026', n: 2, since: 20, stage_no: 2 }] };
+  const m = compose('Asha Nair', d, '2026-01-05');
+  assert.match(m.text, /2 lab projects needing a trial/); assert.match(m.text, /Lab trials to record/); assert.match(m.text, /OXRD011026: no trial recorded yet/); assert.match(m.text, /OXRD021026: last trial 20 days ago/);
+});

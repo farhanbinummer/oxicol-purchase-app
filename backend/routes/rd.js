@@ -293,7 +293,7 @@ router.get('/my-day', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), asyn
     const vis = visibleClause(req.access, req.user.id, 'p', 0);                // $1 is the person, $2-$4 their visibility
     const params = [...vis.params, ['Completed', 'Rejected']];                  // $5: closed statuses are left out
     const live = `p.is_draft = FALSE AND NOT (p.status = ANY($5)) AND ${vis.clause}`;
-    const cols = `t.id, t.title, t.description, t.result_schema, t.result_data, t.status, t.priority, t.due_date, t.stage_no, t.project_id, t.completed_at, t.result, t.version, t.requires_review, t.review_note, t.checklist_item_id, ci.label AS checklist_label,
+    const cols = `t.id, t.title, t.description, t.result_schema, t.result_data, t.status, t.priority, t.due_date, t.stage_no, t.project_id, t.completed_at, t.result, t.version, t.requires_review, t.expects_trial, t.review_note, t.checklist_item_id, ci.label AS checklist_label,
                   p.project_number, p.title AS project_title, p.status AS project_status,
                   au.name AS assignee_name, cr.name AS assigned_by_name, cb.name AS completed_by_name`;
     const from = `FROM rd_tasks t JOIN rd_projects p ON p.id = t.project_id LEFT JOIN users au ON au.id = t.assignee_id
@@ -943,6 +943,7 @@ function readTask(b) {
   if ('status' in b) out.status = b.status;
   if ('checklist_item_id' in b) out.checklist_item_id = b.checklist_item_id == null || b.checklist_item_id === '' ? null : idOf(b.checklist_item_id);
   if ('requires_review' in b) out.requires_review = bool(b.requires_review) === true;
+  if ('expects_trial' in b) out.expects_trial = bool(b.expects_trial) === true;
   if ('due_date' in b) out.due_date = b.due_date || null;
   if ('assignee_id' in b) out.assignee_id = b.assignee_id == null || b.assignee_id === '' ? null : idOf(b.assignee_id);
   if ('team' in b) out.team = str(b.team);
@@ -980,9 +981,9 @@ router.post('/projects/:id/tasks', needPerm(KEYS.RD_EDIT), async (req, res) => {
     const trainee = (await client.query("SELECT 1 FROM user_roles ur WHERE ur.user_id = $1 AND ur.role = 'rd_trainee' AND NOT EXISTS (SELECT 1 FROM user_roles x WHERE x.user_id = $1 AND x.role IN ('rd','admin'))", [t.assignee_id])).rowCount > 0;
     const review = trainee || t.requires_review === true;
     const r = await client.query(
-      `INSERT INTO rd_tasks (project_id, stage_no, checklist_item_id, title, description, priority, assignee_id, team, due_date, requires_review, created_by, result_schema)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING id`,
-      [o.p.id, t.stage_no || null, t.checklist_item_id || null, t.title, t.description || '', t.priority, t.assignee_id || null, t.assignee_id ? null : (t.team || null), t.due_date || null, review, req.user.id, schema ? JSON.stringify(schema) : null]);
+      `INSERT INTO rd_tasks (project_id, stage_no, checklist_item_id, title, description, priority, assignee_id, team, due_date, requires_review, created_by, result_schema, expects_trial)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13) RETURNING id`,
+      [o.p.id, t.stage_no || null, t.checklist_item_id || null, t.title, t.description || '', t.priority, t.assignee_id || null, t.assignee_id ? null : (t.team || null), t.due_date || null, review, req.user.id, schema ? JSON.stringify(schema) : null, t.expects_trial === true]);
     // the person doing the work must be able to open the project, so they join its team
     await client.query('INSERT INTO rd_project_members (project_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [o.p.id, t.assignee_id]);
     await addUpdate(client, o.p.id, 'system', req, `Task added: ${t.title}`, r.rows[0].id);
@@ -1012,7 +1013,7 @@ router.patch('/tasks/:id', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDIT]), a
     const o = await open(req, res, { db: client, coverVisible: covering });
     if (!o) { await client.query('ROLLBACK'); return; }
     const t = readTask(b);
-    delete t.checklist_item_id; delete t.requires_review;       // set when the task is created
+    delete t.checklist_item_id; delete t.requires_review; delete t.expects_trial;       // set when the task is created
     const keys = Object.keys(t);
     // the person responsible may update the status of their own task; everything else needs edit rights on the project
     const own = (task.assignee_id === req.user.id || covering) && keys.every(k => k === 'status');
@@ -1043,6 +1044,30 @@ router.patch('/tasks/:id', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDIT]), a
     console.error('rd task failed:', err); fail(res, 500, 'Could not save the task');
   } finally { client.release(); }
 });
+
+/**
+ * Completes (or hands in for review) a task inside the caller's transaction: status, history, feed and audit. Shared by "Complete task"
+ * and by recording a lab trial that is linked to a task. The caller has already checked who may do this and has the task row locked.
+ */
+async function completeTaskRows(client, req, o, task, text, answers, covering) {
+  const taskId = task.id;
+  // a task that needs review is handed in by the person doing it; someone else with edit rights (the owner) can close it directly
+  const submit = task.requires_review && (task.assignee_id === req.user.id || covering);
+  const behalf = covering ? task.assignee_id : null;       // covering: recorded as done on behalf of the absent person
+  await client.query(`UPDATE rd_tasks SET status = $4, completed_at = NOW(), completed_by = $1, on_behalf_of = $6, result = $2, result_data = $5::jsonb, review_note = NULL, version = version + 1 WHERE id = $3`, [req.user.id, text, taskId, submit ? 'in_review' : 'done', answers ? JSON.stringify(answers) : null, behalf]);
+  await client.query(`INSERT INTO rd_task_history (task_id, action, result, actor_id, on_behalf_of) VALUES ($1,$4,$2,$3,$5)`, [taskId, text, req.user.id, submit ? 'submitted' : 'completed', behalf]);
+  await addUpdate(client, o.p.id, 'system', req, (submit ? `Task "${task.title}" submitted for review` : `Task "${task.title}" completed`) + (behalf ? ` on behalf of the person responsible (away)` : ''), taskId);
+  await audit(client, req, { action: submit ? 'rd.task_submit' : 'rd.task_complete', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" ${submit ? 'submitted for review' : 'completed'} with a result` });
+  await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
+  return { submit, behalf };
+}
+
+/** The notices that follow a completed task (after the transaction has committed). */
+function afterTaskCompleted(req, o, task, submit, behalf) {
+  if (submit) reviewersOf(task).then(ids => tell(ids, 'task_review', `Work to review: ${task.title}`, `${req.user.name} handed in "${task.title}" (${o.p.project_number}) for you to check.`, 'my-day.html#sReview', req.user.id)).catch(e => console.error('notice failed:', e.message));
+  else tell([task.created_by], 'task_done', `Task done: ${task.title}`, `${req.user.name} completed "${task.title}" (${o.p.project_number}).`, `project.html?id=${o.p.id}#list`, req.user.id);
+  if (behalf) tell([behalf], 'task_done', `Done for you: ${task.title}`, `${req.user.name} covered for you and ${submit ? 'handed in' : 'completed'} "${task.title}" (${o.p.project_number}) while you were away.`, 'my-day.html', req.user.id);
+}
 
 /** Completes a task. The result (what was done or found) is required, so a task is never closed with nothing on record. */
 router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_EDIT]), async (req, res) => {
@@ -1076,18 +1101,9 @@ router.post('/tasks/:id/complete', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_E
       if (text.length < R.MIN_TASK_RESULT_LENGTH) { await client.query('ROLLBACK'); return fail(res, 400, `Write what was done or found (at least ${R.MIN_TASK_RESULT_LENGTH} characters)`); }
       if (text.length > R.MAX_RESULT_LENGTH) { await client.query('ROLLBACK'); return fail(res, 400, `The result is too long (at most ${R.MAX_RESULT_LENGTH} characters)`); }
     }
-    // a task that needs review is handed in by the person doing it; someone else with edit rights (the owner) can close it directly
-    const submit = task.requires_review && (task.assignee_id === req.user.id || covering);
-    const behalf = covering ? task.assignee_id : null;       // covering: recorded as done on behalf of the absent person
-    await client.query(`UPDATE rd_tasks SET status = $4, completed_at = NOW(), completed_by = $1, on_behalf_of = $6, result = $2, result_data = $5::jsonb, review_note = NULL, version = version + 1 WHERE id = $3`, [req.user.id, text, taskId, submit ? 'in_review' : 'done', answers ? JSON.stringify(answers) : null, behalf]);
-    await client.query(`INSERT INTO rd_task_history (task_id, action, result, actor_id, on_behalf_of) VALUES ($1,$4,$2,$3,$5)`, [taskId, text, req.user.id, submit ? 'submitted' : 'completed', behalf]);
-    await addUpdate(client, o.p.id, 'system', req, (submit ? `Task "${task.title}" submitted for review` : `Task "${task.title}" completed`) + (behalf ? ` on behalf of the person responsible (away)` : ''), taskId);
-    await audit(client, req, { action: submit ? 'rd.task_submit' : 'rd.task_complete', entity: 'rd_task', id: taskId, summary: `${o.p.project_number}: task "${task.title}" ${submit ? 'submitted for review' : 'completed'} with a result` });
-    await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
+    const { submit } = await completeTaskRows(client, req, o, task, text, answers, covering);
     await client.query('COMMIT');
-    if (submit) reviewersOf(task).then(ids => tell(ids, 'task_review', `Work to review: ${task.title}`, `${req.user.name} handed in "${task.title}" (${o.p.project_number}) for you to check.`, 'my-day.html#sReview', req.user.id)).catch(e => console.error('notice failed:', e.message));
-    else tell([task.created_by], 'task_done', `Task done: ${task.title}`, `${req.user.name} completed "${task.title}" (${o.p.project_number}).`, `project.html?id=${o.p.id}#list`, req.user.id);
-    if (behalf) tell([behalf], 'task_done', `Done for you: ${task.title}`, `${req.user.name} covered for you and ${submit ? 'handed in' : 'completed'} "${task.title}" (${o.p.project_number}) while you were away.`, 'my-day.html', req.user.id);
+    afterTaskCompleted(req, o, task, submit, task.assignee_id !== req.user.id && covering ? task.assignee_id : null);
     res.json({ success: true, version: task.version + 1, task_status: submit ? 'in_review' : 'done' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1247,6 +1263,7 @@ function shapeTrial(row, results, corrections, ctx, files) {
     created_at: row.created_at, updated_at: row.updated_at,
     results: results.map(r => ({ requirement_id: r.requirement_id, result: r.result, ...(ctx.technical ? { measured_value: r.measured_value } : {}) })),
     summary: R.trialSummary(results, ctx.total), attachment_count: (files || []).length,
+    task: row.task_id ? { id: row.task_id, title: row.task_title || null } : null,
     corrections: corrections.map(c => {
       const keys = Object.keys(c.new_values || {}).filter(k => ctx.prices || k !== 'rm_cost_per_kg').filter(k => ctx.technical || !TRIAL_CONFIDENTIAL.has(k));
       const base = { id: c.id, at: c.created_at, by: c.corrected_by_name, fields: keys };
@@ -1266,6 +1283,9 @@ async function loadTrials(db, projectId, ctx, onlyId) {
   const rows = (await db.query(`SELECT * FROM rd_trials WHERE project_id = $1${onlyId ? ' AND id = $2' : ''} ORDER BY trial_no`, onlyId ? [projectId, onlyId] : [projectId])).rows;
   if (!rows.length) return [];
   const ids = rows.map(r => r.id);
+  const taskIds = rows.map(r => r.task_id).filter(Boolean);
+  const titles = taskIds.length ? new Map((await db.query('SELECT id, title FROM rd_tasks WHERE id = ANY($1)', [taskIds])).rows.map(t => [t.id, t.title])) : new Map();
+  rows.forEach(r => { if (r.task_id) r.task_title = titles.get(r.task_id); });
   const [res, cor, fil] = await Promise.all([
     db.query('SELECT trial_id, requirement_id, result, measured_value FROM rd_trial_results WHERE trial_id = ANY($1) ORDER BY requirement_id', [ids]),
     db.query('SELECT id, trial_id, corrected_by_name, reason, old_values, new_values, created_at FROM rd_trial_corrections WHERE trial_id = ANY($1) ORDER BY id', [ids]),
@@ -1275,6 +1295,12 @@ async function loadTrials(db, projectId, ctx, onlyId) {
 }
 const trialCtx = (req, total) => ({ technical: can(req.access, KEYS.FIELD_RD_TECHNICAL), prices: can(req.access, KEYS.FIELD_PRICES), total });
 
+/** The lab-trial tasks this person may record a trial for on a project: their own, and those of people they are covering for today. */
+async function myTrialTasks(db, userId, projectId) {
+  const covered = (await cover.coveredBy(db, userId)).map(c => c.user_id);
+  return (await db.query(`SELECT t.id, t.title, t.stage_no, t.due_date::text AS due_date FROM rd_tasks t WHERE t.project_id = $1 AND t.expects_trial AND t.status IN ('todo','in_progress','blocked') AND (t.assignee_id = $2 OR t.assignee_id = ANY($3)) ORDER BY t.due_date NULLS LAST, t.id`, [projectId, userId, covered])).rows;
+}
+
 router.get('/projects/:id/trials', needTrialView, async (req, res) => {
   try {
     const o = await open(req, res); if (!o) return;
@@ -1283,6 +1309,7 @@ router.get('/projects/:id/trials', needTrialView, async (req, res) => {
     res.json({
       success: true, today: today(), project_status: o.p.status, requirements: reqs, outcomes: R.TRIAL_OUTCOMES, results: R.TRIAL_RESULTS, limits: { max_extra_fields: R.MAX_EXTRA_FIELDS, attach_max_bytes: R.ATTACH_MAX_BYTES, attach_max_per_trial: R.ATTACH_MAX_PER_TRIAL },
       trials: o.p.is_draft ? [] : await loadTrials(pool, o.p.id, ctx),
+      open_trial_tasks: (trialOpen(o.p) && ctx.technical && (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT))) ? await myTrialTasks(pool, req.user.id, o.p.id) : [],
       can: { add: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && ctx.technical && trialOpen(o.p), technical: ctx.technical, prices: ctx.prices, open: trialOpen(o.p), closed_reason: trialOpen(o.p) ? null : trialClosedMessage(o.p) }
     });
   } catch (err) { console.error('rd trials list failed:', err); fail(res, 500, 'Could not load the trials'); }
@@ -1315,23 +1342,46 @@ router.post('/projects/:id/trials', needTrialEdit, async (req, res) => {
     const reqs = await requirementRows(client, o.p.id);
     const { errors, clean } = R.validateTrial(b, { requirementIds: reqs.map(r => r.id), today: today() });
     if (errors.length) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, error: errors[0].message, errors }); }
+    // optional: this trial is the work of one of the person's "produces a lab trial" tasks
+    let link = null;
+    if (b.task_id != null && b.task_id !== '') {
+      const tid = idOf(b.task_id);
+      const tk = tid ? norm((await client.query('SELECT * FROM rd_tasks WHERE id = $1 AND project_id = $2 FOR UPDATE', [tid, o.p.id])).rows[0]) : null;
+      if (!tk || !tk.expects_trial) { await client.query('ROLLBACK'); return fail(res, 400, 'Choose one of your lab trial tasks on this project'); }
+      if (!['todo', 'in_progress', 'blocked'].includes(tk.status)) { await client.query('ROLLBACK'); return conflict(res, 'That task is not open any more'); }
+      const covering = await cover.isCovering(client, req.user.id, tk.assignee_id);
+      if (tk.assignee_id !== req.user.id && !covering) { await client.query('ROLLBACK'); return fail(res, 403, 'That task is assigned to someone else'); }
+      link = { tk, covering };
+    }
     const next = (await client.query('SELECT COALESCE(MAX(trial_no), 0) + 1 AS n FROM rd_trials WHERE project_id = $1', [o.p.id])).rows[0].n;
     if (clean.outcome === 'Preferred formula') await supersedePreferred(client, req, o.p.id, null, R.trialLabel(next));      // before the insert: only one Preferred at a time
     const ins = await client.query(
-      `INSERT INTO rd_trials (project_id, trial_no, stage_no, trial_date, recorded_by, recorded_by_name, formula_ref, changed_variables, batch_size_text, observations, outcome, rm_cost_per_kg, extra_fields)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING id`,
-      [o.p.id, next, clean.stage_no, clean.trial_date, req.user.id, req.user.name, clean.formula_ref, clean.changed_variables || '', clean.batch_size_text || '', clean.observations || '', clean.outcome, prices ? (clean.rm_cost_per_kg == null ? null : clean.rm_cost_per_kg) : null, JSON.stringify(clean.extra_fields || [])]);
+      `INSERT INTO rd_trials (project_id, trial_no, stage_no, trial_date, recorded_by, recorded_by_name, formula_ref, changed_variables, batch_size_text, observations, outcome, rm_cost_per_kg, extra_fields, task_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING id`,
+      [o.p.id, next, clean.stage_no, clean.trial_date, req.user.id, req.user.name, clean.formula_ref, clean.changed_variables || '', clean.batch_size_text || '', clean.observations || '', clean.outcome, prices ? (clean.rm_cost_per_kg == null ? null : clean.rm_cost_per_kg) : null, JSON.stringify(clean.extra_fields || []), link ? link.tk.id : null]);
     const given = new Map((clean.results || []).map(r => [r.requirement_id, r]));
     for (const r of reqs) {
       const g = given.get(r.id) || { result: 'Not tested', measured_value: '' };
       await client.query('INSERT INTO rd_trial_results (trial_id, requirement_id, result, measured_value) VALUES ($1,$2,$3,$4)', [ins.rows[0].id, r.id, g.result, g.measured_value]);
     }
+    // a linked task is completed by the usual rules (handed in for review where that applies); the result is a plain, non-confidential sentence
+    const passed = (clean.results || []).filter(r => r.result === 'Pass').length;
+    let taskDone = null;
+    if (link && !link.tk.result_schema) taskDone = await completeTaskRows(client, req, o, link.tk, `Lab trial ${R.trialLabel(next)} recorded: ${clean.outcome}, ${passed} of ${reqs.length} requirements pass.`, null, link.covering);
     await addUpdate(client, o.p.id, 'system', req, `Lab trial ${R.trialLabel(next)} recorded (${clean.outcome})`);
     // the audit trail records that a trial exists and its non-confidential facts, never the formula, observations, measured values or cost
     await audit(client, req, { action: 'rd.trial_add', entity: 'rd_trial', id: ins.rows[0].id, summary: `${o.p.project_number}: trial ${R.trialLabel(next)} recorded`, after: { trial_no: next, stage_no: clean.stage_no, trial_date: clean.trial_date, outcome: clean.outcome } });
     await client.query('UPDATE rd_projects SET updated_at = NOW() WHERE id = $1', [o.p.id]);
     await client.query('COMMIT');
-    res.status(201).json({ success: true, id: ins.rows[0].id, trial_no: next, label: R.trialLabel(next) });
+    if (taskDone) afterTaskCompleted(req, o, link.tk, taskDone.submit, taskDone.behalf);
+    // tell the people who follow the project (no formula, observations or values: a notice can be read by people without technical access)
+    try {
+      const stageOwner = (await pool.query('SELECT owner_user_id FROM rd_stages WHERE project_id = $1 AND stage_no = $2', [o.p.id, clean.stage_no])).rows[0];
+      const label = R.trialLabel(next), where = `${o.p.project_number} "${o.p.title}"`, path = `project.html?id=${o.p.id}#trials`;
+      if (clean.outcome === 'Preferred formula') tell([o.p.lead_user_id, o.p.requested_by_user, stageOwner && stageOwner.owner_user_id], 'trial_preferred', `Preferred formula chosen: ${o.p.project_number}`, `${req.user.name} marked lab trial ${label} as the preferred formula for ${where} (${passed} of ${reqs.length} requirements pass). This only records the outcome: it does not complete a stage or give an approval.`, path, req.user.id);
+      else tell([o.p.lead_user_id, stageOwner && stageOwner.owner_user_id], 'trial_added', `Lab trial ${label}: ${o.p.project_number}`, `${req.user.name} recorded lab trial ${label} on ${where}: ${passed} of ${reqs.length} requirements pass (${clean.outcome}).`, path, req.user.id);
+    } catch (e) { console.error('notice failed:', e.message); }
+    res.status(201).json({ success: true, id: ins.rows[0].id, trial_no: next, label: R.trialLabel(next), task: link ? { id: link.tk.id, status: taskDone ? (taskDone.submit ? 'in_review' : 'done') : 'open' } : null });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('rd trial add failed:', err); fail(res, 500, 'Could not record the trial');

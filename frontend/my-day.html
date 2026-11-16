@@ -127,6 +127,7 @@
       if (opts && opts.done) sub.appendChild(el('span', null, 'Completed ' + (t.completed_at ? dmy(String(t.completed_at).slice(0, 10)) : '') + (opts.who && t.completed_by_name ? ' by ' + t.completed_by_name : '')));
       else { sub.appendChild(el('span', w.cls, w.label)); if (t.status !== 'todo') sub.appendChild(el('span', null, STATUS[t.status])); }
       if (t.checklist_label) sub.appendChild(el('span', null, 'For: ' + t.checklist_label));
+      if (t.expects_trial && !(opts && (opts.done || opts.review || opts.submitted))) sub.appendChild(el('span', null, 'Produces a lab trial'));
       if (t.result_schema && !(opts && (opts.done || opts.review || opts.submitted))) sub.appendChild(el('span', null, 'To bring back: ' + t.result_schema.name));
       if (t.review_note && t.status === 'in_progress') sub.appendChild(el('span', 'late', 'Sent back: ' + t.review_note));
       if (opts && opts.assignee) sub.appendChild(el('span', null, 'Responsible: ' + (t.assignee_name || '-')));
@@ -139,7 +140,8 @@
         const act = el('div', 'md-act');
         if (t.status === 'todo') { const b = el('button', 'oxi-btn-secondary', 'Start'); b.type = 'button'; b.setAttribute('aria-label', 'Start: ' + t.title);
           b.onclick = async () => { b.disabled = true; const r = await api('/api/rd/tasks/' + t.id, 'PATCH', { version: t.version, status: 'in_progress' }); if (!r.success) { b.disabled = false; note(r.error || 'Could not start the task.', false); return; } load(); }; act.appendChild(b); }
-        const c = el('button', null, t.requires_review ? 'Submit for review' : 'Complete'); c.type = 'button'; c.setAttribute('aria-label', (t.requires_review ? 'Submit for review: ' : 'Complete: ') + t.title); c.onclick = () => completeDialog(t); act.appendChild(c);
+        if (t.expects_trial) { const rt = el('a', 'oxi-btn', 'Record trial'); rt.href = 'project.html?id=' + t.project_id + '#trials'; rt.setAttribute('aria-label', 'Record the lab trial for: ' + t.title); act.appendChild(rt); }
+        const c = el('button', t.expects_trial ? 'oxi-btn-secondary' : null, t.requires_review ? 'Submit for review' : 'Complete'); c.type = 'button'; c.setAttribute('aria-label', (t.requires_review ? 'Submit for review: ' : 'Complete: ') + t.title); c.onclick = () => completeDialog(t); act.appendChild(c);
         row.appendChild(act);
       }
       if (opts && opts.review) {

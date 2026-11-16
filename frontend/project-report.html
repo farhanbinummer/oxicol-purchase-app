@@ -22,6 +22,8 @@
     .rep-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0 0 var(--s4); }
     .rep-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 var(--s5); font-size: 14px; }
     .rep-kv dt { color: var(--text-2); } .rep-kv dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+    .rep-trials { margin: 0 0 var(--s5); } .rep-trials > h2 { margin: 0 0 var(--s2); font-size: 18px; } .rep-trials table { width: 100%; table-layout: auto; display: table; } .rep-trials td, .rep-trials th { overflow-wrap: anywhere; vertical-align: top; }
+    .rep-res { text-align: center; font-weight: 700; white-space: nowrap; } .rep-trial-note { margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--surface-2); font-size: 14px; overflow-wrap: anywhere; }
     @media print { .rep-actions { display: none !important; } .rep-sign { border-left: 3px solid #000; } }
   </style>
 </head>
@@ -114,6 +116,36 @@
       return sec;
     }
 
+
+    /** Lab trials: each trial's outcome and pass count, a requirement-by-trial grid (symbols and words, so it prints in black and white),
+        and, for people with technical access, the formula, what changed, observations and extra fields. Others get the structure only. */
+    async function trialsSection(D, stageNo) {
+      if (!D.can || !D.can.trial_view || D.project.is_draft) return null;
+      const T = await api('/api/rd/projects/' + pid + '/trials'); if (!T.success) return null;
+      const trials = T.trials.filter(t => !stageNo || t.stage_no === stageNo);
+      if (stageNo && ![2, 3].includes(stageNo)) return null;
+      const sec = el('section', 'rep-trials'); sec.setAttribute('aria-labelledby', 'repTrialsT'); const h = el('h2', null, stageNo ? 'Lab trials recorded for stage ' + stageNo : 'Lab trials'); h.id = 'repTrialsT'; sec.appendChild(h);
+      if (!trials.length) { sec.appendChild(el('p', 'rep-muted', 'No lab trial has been recorded' + (stageNo ? ' for this stage' : '') + '.')); return sec; }
+      const pref = T.trials.find(t => t.outcome === 'Preferred formula');
+      if (pref && !stageNo) sec.appendChild(el('p', 'rep-sign', '★ Preferred formula: ' + pref.label + (T.can.technical && pref.formula_ref ? ' (' + pref.formula_ref + ')' : '') + '. Recording a preferred formula does not complete a stage or give an approval.'));
+      if (!T.can.technical) sec.appendChild(el('p', 'rep-muted', 'Formulas, what changed, observations and measured values are confidential to R&D and are not shown for your role.'));
+      const t = el('table'); t.innerHTML = '<thead><tr><th scope="col">Trial</th><th scope="col">Date</th><th scope="col">Stage</th><th scope="col">Recorded by</th><th scope="col">Outcome</th><th scope="col">Passes</th></tr></thead>';
+      const tb = el('tbody'); trials.forEach(x => { const tr = el('tr'); [x.label, dmy(x.trial_date), String(x.stage_no), x.recorded_by_name, x.outcome, x.summary.pass + ' of ' + x.summary.total].forEach(v => tr.appendChild(el('td', null, v))); tb.appendChild(tr); }); t.appendChild(tb); sec.appendChild(t);
+      if (T.requirements.length) {
+        const g = el('table'); g.style.marginTop = '10px'; const hr = '<tr><th scope="col">Requirement</th>' + trials.map(x => '<th scope="col" class="rep-res">' + x.label + '</th>').join('') + '</tr>'; g.innerHTML = '<caption class="oxi-sr-only">Result of each trial against each requirement</caption><thead>' + hr + '</thead>';
+        const gb = el('tbody'); const SYM = { 'Pass': '✓ Pass', 'Fail': '✕ Fail', 'Not tested': '– Not tested' };
+        T.requirements.forEach(q => { const tr = el('tr'); const th = el('th', null, q.parameter || '(unnamed)'); th.scope = 'row'; tr.appendChild(th); trials.forEach(x => { const r = x.results.find(y => y.requirement_id === q.id); const res = r ? r.result : 'Not tested'; tr.appendChild(el('td', 'rep-res', SYM[res] + (T.can.technical && r && r.measured_value ? ' (' + r.measured_value + ')' : ''))); }); gb.appendChild(tr); });
+        g.appendChild(gb); sec.appendChild(g);
+      }
+      if (T.can.technical) trials.forEach(x => {
+        const parts = [x.formula_ref && 'Formula: ' + x.formula_ref, x.changed_variables && 'Changed: ' + x.changed_variables, x.batch_size_text && 'Batch: ' + x.batch_size_text, x.observations && 'Observations: ' + x.observations].concat((x.extra_fields || []).map(f => f.label + ': ' + (f.value || '-'))).filter(Boolean);
+        if (x.attachments && x.attachments.length) parts.push(x.attachments.length + ' photograph' + (x.attachments.length === 1 ? '' : 's') + ' or file' + (x.attachments.length === 1 ? '' : 's') + ' on file (' + x.attachments.map(a => a.file_name).join(', ') + ')');
+        if (x.corrections.length) parts.push('Corrected ' + x.corrections.length + ' time' + (x.corrections.length === 1 ? '' : 's') + ' (the earlier values are kept)');
+        if (parts.length) sec.appendChild(el('div', 'rep-trial-note', x.label + ' - ' + parts.join('. ') + '.'));
+      });
+      return sec;
+    }
+
     async function load() {
       if (!pid) { $('message').textContent = 'No project selected.'; $('message').className = 'error'; return; }
       const D = await api('/api/rd/projects/' + pid);
@@ -132,6 +164,7 @@
       box.appendChild(summary(D));
       if (D.confidential_hidden) box.appendChild(el('p', 'oxi-section-note', 'Results are confidential to R&D and are not shown for your role.'));
       (stage ? [stage] : D.stages).forEach(s => box.appendChild(stageSection(D, s)));
+      const tsec = await trialsSection(D, stage ? stage.no : null); if (tsec) box.appendChild(tsec);
     }
     load().catch(() => { $('message').textContent = 'Could not reach the server.'; $('message').className = 'error'; });
   </script>
