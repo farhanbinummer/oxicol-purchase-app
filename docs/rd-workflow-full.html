@@ -1,0 +1,132 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Oxicol R&D workflow</title>
+<style>html,body{margin:0;background:#fff;font-family:"Inter","Segoe UI",Arial,Helvetica,sans-serif}svg{display:block}</style></head>
+<body><div id="root"></div>
+<script>
+const W = 2400, out = [];
+const C = { mgr: '#2563eb', rd: '#0f766e', staff: '#b45309', appr: '#7c3aed', sys: '#475569', warn: '#c2410c', ok: '#15803d', bad: '#b91c1c' };
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const tint = (c) => c + '14';
+function txt(x, y, s, o = {}) { out.push(`<text x="${x}" y="${y}" font-size="${o.size || 16}" font-weight="${o.weight || 400}" fill="${o.color || '#1e293b'}" text-anchor="${o.anchor || 'start'}" ${o.italic ? 'font-style="italic"' : ''}>${esc(s)}</text>`); }
+function box(x, y, w, title, lines, color, o = {}) {
+  const lh = 21, padT = 14, th = title ? 28 : 0; const h = o.h || (padT * 2 + th + lines.length * lh + 2);
+  out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12" fill="${o.fill || tint(color)}" stroke="${color}" stroke-width="2.2" ${o.dashed ? 'stroke-dasharray="8 6"' : ''}/>`);
+  out.push(`<rect x="${x}" y="${y}" width="8" height="${h}" rx="4" fill="${color}"/>`);
+  if (title) txt(x + 22, y + padT + 17, title, { size: 18, weight: 700, color });
+  lines.forEach((l, i) => txt(x + 22, y + padT + th + 15 + i * lh, l, { size: 16 }));
+  return { x, y, w, h, cx: x + w / 2, cy: y + h / 2, r: x + w, b: y + h };
+}
+function dia(cx, cy, w, h, lines, color) {
+  out.push(`<polygon points="${cx},${cy - h / 2} ${cx + w / 2},${cy} ${cx},${cy + h / 2} ${cx - w / 2},${cy}" fill="${tint(color)}" stroke="${color}" stroke-width="2.4"/>`);
+  const n = lines.length; lines.forEach((l, i) => txt(cx, cy - ((n - 1) * 20) / 2 + i * 20 + 5, l, { size: 16, weight: i === 0 ? 700 : 400, anchor: 'middle', color: i === 0 ? color : '#1e293b' }));
+  return { x: cx - w / 2, y: cy - h / 2, w, h, cx, cy, r: cx + w / 2, b: cy + h / 2 };
+}
+function pill(x, y, s, color) { const w = s.length * 8.4 + 22; out.push(`<rect x="${x}" y="${y}" width="${w}" height="26" rx="13" fill="${color}"/>`); txt(x + w / 2, y + 18, s, { size: 14, weight: 700, color: '#fff', anchor: 'middle' }); return w; }
+function arrow(pts, o = {}) {
+  const col = o.color || '#334155', mk = o.color === C.ok ? 'aG' : o.color === C.bad ? 'aR' : 'aD';
+  out.push(`<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${col}" stroke-width="2.4" ${o.dashed ? 'stroke-dasharray="7 6"' : ''} marker-end="url(#${mk})"/>`);
+  if (o.rot) { out.push(`<text transform="translate(${o.rot[0]},${o.rot[1]}) rotate(-90)" font-size="14" font-weight="700" fill="${col}" text-anchor="middle">${esc(o.label)}</text>`); }
+  else if (o.label) { const a = o.at || 0.5, i = Math.min(pts.length - 2, Math.floor((pts.length - 1) * a)); const p = pts[i], q = pts[i + 1]; txt((p[0] + q[0]) / 2 + (o.dx || 0), (p[1] + q[1]) / 2 + (o.dy || -8), o.label, { size: 14, weight: 700, color: col, anchor: 'middle' }); }
+}
+function sec(x, y, w, s, color) { out.push(`<rect x="${x}" y="${y}" width="${w}" height="40" rx="8" fill="${color}"/>`); txt(x + 18, y + 27, s, { size: 20, weight: 700, color: '#fff' }); }
+const down = (a, b, o) => arrow([[a.cx, a.b], [b.cx, b.y]], o), right = (a, b, o) => arrow([[a.r, a.cy], [b.x, b.cy]], o);
+
+// ------------------------------------------------------------------ title and key
+txt(40, 52, 'Oxicol R&D Projects: how the work flows', { size: 38, weight: 800, color: '#0f172a' });
+txt(40, 84, 'As built today. Read each step left to right and top to bottom. Colours show who does the step.', { size: 18, color: '#475569' });
+let kx = 40; [['Manager', C.mgr], ['R&D lead / owner', C.rd], ['R&D staff / trainee', C.staff], ['Approver (QC, customer, production, management)', C.appr], ['Automatic (the system)', C.sys], ['Warning / rule', C.warn]].forEach(([s, c]) => { out.push(`<rect x="${kx}" y="108" width="20" height="20" rx="5" fill="${c}"/>`); txt(kx + 28, 124, s, { size: 16 }); kx += 28 + s.length * 8.2 + 34; });
+
+// ------------------------------------------------------------------ STEP 1
+sec(40, 150, 2320, '1   From request to an approved project', '#0f172a');
+const X1 = [40, 430, 820, 1210, 1600, 1990], Y1 = 206, H1 = 176;
+const b1 = box(X1[0], Y1, 330, 'Raise the request', ['Only a Manager (or admin)', 'can raise a request.', 'Save a draft, or Submit.', 'Title, type, department,', 'priority, requirements table.'], C.mgr, { h: H1 });
+const b2 = box(X1[1], Y1, 330, 'On submit (automatic)', ['Project number OXRDmmNNyy', '8 stages + checklists created', 'Status: Received', 'Requester taken from the login'], C.sys, { h: H1 });
+const b3 = box(X1[2], Y1, 330, 'R&D team is told', ['Bell notice, and email or', 'WhatsApp when switched on.', 'Each person can switch', 'notices off in My Account.'], C.sys, { h: H1 });
+const b4 = box(X1[3], Y1, 330, 'Assess the request', ['Name a project lead and team', 'Estimate trial days, feasibility', 'Technical approach and risks', '(confidential to R&D)', 'Status: Under Review'], C.rd, { h: H1 });
+const b5 = box(X1[4], Y1, 330, 'Plan the dates', ['Auto-plan the stage dates', '(preview first, then apply)', 'Name an owner per stage', '(default: the project lead)', 'Conflicts with launch shown'], C.rd, { h: H1 });
+const b6 = box(X1[5], Y1, 330, 'Approve to start', ['R&D Head decision recorded', '(a record, not a stage gate)', 'Approved / Rejected / Returned', 'Status: Approved', 'On Hold can pause any time'], C.appr, { h: H1 });
+[[b1, b2], [b2, b3], [b3, b4], [b4, b5], [b5, b6]].forEach(([a, b]) => right(a, b));
+
+// ------------------------------------------------------------------ STEP 2
+sec(40, 420, 2320, '2   The eight stages: one at a time, in order. Each stage must be finished before the next becomes current.', '#0f172a');
+const sx = (i) => 54 + i * 290, SY = 476, SH = 150, SW = 262;
+const ST = [
+  ['Stage 1', 'Literature / raw-material', 'sourcing', '7 days'], ['Stage 2', 'First lab batch', 'Record trial T1', '5 days'], ['Stage 3', 'Lab trials & optimisation', 'Record trials, pick the formula', '21 days (from estimate)'],
+  ['Stage 4', 'Internal testing /', 'QC approval', '14 days'], ['Stage 5', 'Sample to requester /', 'customer', '3 days'], ['Stage 6', 'Customer approval', 'Written evidence', '14 days'],
+  ['Stage 7', 'Plant trial / scale-up', '', '7 days'], ['Stage 8', 'Handover to production', 'Production acknowledges', '5 days']];
+const sb = ST.map((s, i) => { const lab = i === 1 || i === 2; const b = box(sx(i), SY, SW, s[0], [s[1], s[2], s[3]].filter(Boolean), lab ? C.staff : C.rd, { h: SH }); if (lab) pill(sx(i) + 22, SY + SH + 8, 'LAB TRIALS', C.staff); return b; });
+for (let i = 0; i < 7; i++) right(sb[i], sb[i + 1]);
+[[3, 'QC sign-off needed'], [5, 'Customer evidence needed'], [7, 'Production acknowledges']].forEach(([i, s]) => { const g = box(sx(i), SY + SH + 44, SW, 'GATE', [s, 'recorded by the person', 'allowed to give it'], C.appr, { h: 112 }); arrow([[sb[i].cx, sb[i].b + 4], [g.cx, g.y]], { color: C.appr, dashed: true }); });
+const done = box(1810, 814, 540, 'Mark the project Completed', ['Only after all 8 stages are complete.', 'Status: Completed. The record stays, nothing is deleted.'], C.ok, { h: 96 });
+arrow([[sb[7].cx, 670 + 112], [sb[7].cx, done.y]], { color: C.ok });
+box(54, 814, 1100, 'Went back?  Reopen a finished stage', ['A reason is required and the first completion stays in the history.', 'Later stages are flagged "needs review" (never cleared), and the project cannot be completed until they are reviewed.'], C.warn, { h: 96, dashed: true });
+
+// ------------------------------------------------------------------ INSIDE EVERY STAGE
+sec(40, 950, 2320, '3   Inside every stage: what has to be true before "Mark stage done"', '#0f172a');
+const Y3 = 1006, H3 = 176, XW = 340;
+const i1 = box(40, Y3, XW, 'Tick checklist items', ['Each tick records who and when.', 'Lab items need a written result', '(confidential to R&D).', 'Results can be corrected until', 'the stage is complete.'], C.rd, { h: H3 });
+const i2 = box(420, Y3, XW, 'Hand out work (optional)', ['The stage owner assigns tasks', 'to staff or a trainee, with a', 'due date and what to bring back.', 'Big stage? Split it between people.'], C.rd, { h: H3 });
+const i3 = box(800, Y3, XW, 'Work is done and checked', ['Result or form is filled in.', 'Someone other than the doer', 'checks it (always for a trainee).', 'See the task flow below.'], C.staff, { h: H3 });
+const i4 = box(1180, Y3, XW, 'Approvals (stages 4, 6, 8)', ['QC sign-off, customer evidence,', 'production acknowledgement.', 'Recorded under the signed-in', 'name of the person allowed to.'], C.appr, { h: H3 });
+const d3 = dia(1770, Y3 + H3 / 2, 300, 176, ['Complete?', 'Checklist done', 'No open tasks', 'Approval recorded'], C.warn);
+const fin = box(2010, Y3, 350, 'Mark stage done', ['Date not in the future and', 'not before the stage before.', 'Must be confirmed. A 30-second', 'guard stops double clicks.'], C.ok, { h: H3 });
+[[i1, i2], [i2, i3], [i3, i4]].forEach(([a, b]) => right(a, b)); arrow([[i4.r, i4.cy], [d3.x, d3.cy]]); arrow([[d3.r, d3.cy], [fin.x, fin.cy]], { label: 'yes', color: C.ok });
+arrow([[d3.cx, d3.b], [d3.cx, d3.b + 28], [i1.cx, d3.b + 28], [i1.cx, i1.b]], { label: 'not yet: the page lists what is missing, finish it first', color: C.bad, dashed: true, at: 0.5, dy: 22 });
+txt(2010, Y3 + H3 + 30, 'Then: next stage becomes current,', { size: 15, color: '#475569' }); txt(2010, Y3 + H3 + 50, 'lead and requester are told.', { size: 15, color: '#475569' });
+box(420, Y3 + H3 + 76, 1180, 'Stages 2 and 3 (soft warning, never a block)', ['If no lab trial is recorded for the stage, a warning shows in "Attention needed" and in the complete dialog. If completed anyway, the history says so.'], C.warn, { h: 70, dashed: true });
+
+// ------------------------------------------------------------------ columns
+const Y4 = 1420; sec(40, Y4 - 56, 2320, '4   Three flows that run inside the stages', '#0f172a');
+// ---- tasks
+const TX = 40, TW = 740; sec(TX, Y4, TW, 'TASKS: from assignment to done', C.staff);
+const t1 = box(TX, Y4 + 56, TW, 'Owner assigns a task', ['Person · due date · stage · checklist item.', 'What to bring back: free text, a ready-made form, a checklist, or a form of their own.', '[ ] Someone else checks this work   (always on for a trainee)', '[ ] This task produces a lab trial   (stages 2 and 3)'], C.rd);
+const t2 = box(TX, t1.b + 34, TW, 'To do  >  In progress  >  (Blocked: say what you are waiting for)', ['Shows in My Day under Overdue, Today, Tomorrow, Later. "Start" is optional.'], C.staff);
+const t3 = box(TX, t2.b + 34, TW, 'Complete: write the result or fill the form', ['Numbers outside the expected range are flagged, never blocked.', 'No empty completions: a result is always on record.'], C.staff);
+down(t1, t2); down(t2, t3);
+const dd = dia(TX + TW / 2, t3.b + 130, 320, 130, ['Needs review?'], C.warn); arrow([[t3.cx, t3.b], [dd.cx, dd.y]]);
+const rv = box(TX + 440, dd.cy + 100, 300, 'In review', ['Checked by the assigner or', 'the stage owner. Never by', 'the person who did the work.'], C.appr);
+const dn = box(TX + 20, dd.cy + 100, 290, 'Done and locked', ['Result stays on record.', 'Changes only by reopening.'], C.ok, { h: rv.h });
+arrow([[dd.x, dd.cy], [dn.cx, dd.cy], [dn.cx, dn.y]], { label: 'no', dy: -8, at: 0.2 }); arrow([[dd.r, dd.cy], [rv.cx, dd.cy], [rv.cx, rv.y]], { label: 'yes', dy: -8, at: 0.8 });
+arrow([[rv.x, rv.cy + 20], [dn.r, rv.cy + 20]], { color: C.ok, label: 'Accept', dy: -8 });
+arrow([[rv.r, rv.cy], [TX + TW + 12, rv.cy], [TX + TW + 12, t2.cy], [t2.r, t2.cy]], { color: C.bad, dashed: true, label: 'Send back with a note', rot: [TX + TW + 28, (rv.cy + t2.cy) / 2] });
+const t6 = box(TX, dn.b + 34, TW, 'Afterwards and around it', ['Reopen needs a reason (the old result is kept). Cancel needs a reason.', 'Notices: assigned, handed in, sent back, accepted, reopened, cancelled.', 'Every step is written in the task history with who and when.'], C.warn, { dashed: true });
+arrow([[dn.cx, dn.b], [dn.cx, t6.y]], { dashed: true });
+
+// ---- lab trials
+const LX = 830, LW = 740; sec(LX, Y4, LW, 'LAB TRIALS (stages 2 and 3): Trials tab', C.staff);
+const l1 = box(LX, Y4 + 56, LW, 'Record a trial', ['Only R&D people with technical access. Numbered T1, T2, T3 ... per project.', 'Date (not in the future) · stage 2 or 3 · formula used · what changed · batch size.', 'Optional: "This trial is the work of task ..." (that task is then completed).'], C.rd);
+const l2 = box(LX, l1.b + 30, LW, 'Results and evidence', ['Pass / Fail / Not tested for every performance requirement, plus the measured value.', 'Observations · cost per kg (needs price access) · "Add a field" for anything else.', 'Photographs or PDFs of the results (5 MB each, 10 per trial).'], C.rd);
+down(l1, l2);
+const ld = dia(LX + LW / 2, l2.b + 100, 300, 120, ['Outcome?'], C.warn); arrow([[l2.cx, l2.b], [ld.cx, ld.y]]);
+const o1 = box(LX, ld.cy + 90, 230, 'Rejected', ['This formula is dropped.'], C.bad, { h: 118 }), o2 = box(LX + 255, ld.cy + 90, 230, 'Needs another trial', ['Change something, then', 'record the next trial', '(back to "Record a trial").'], C.warn, { h: 118 }), o3 = box(LX + 510, ld.cy + 90, 230, 'Preferred formula', ['Only one at a time; the', 'earlier one is set back', 'with a note.'], C.ok, { h: 118 });
+arrow([[ld.x, ld.cy], [o1.cx, ld.cy], [o1.cx, o1.y]]); arrow([[ld.cx, ld.b], [o2.cx, o2.y]]); arrow([[ld.r, ld.cy], [o3.cx, ld.cy], [o3.cx, o3.y]]);
+const l4 = box(LX, o1.b + 32, LW, 'On save (automatic)', ['Linked task completes (or is handed in for review). The lead and stage owner are told;', 'for a preferred formula also the requester. Notices carry no formula or values.', 'History line + audit entry say a trial was recorded, never what it contained.'], C.sys);
+arrow([[o2.cx, o2.b], [o2.cx, l4.y]]);
+const l5 = box(LX, l4.b + 28, LW, 'Mistakes', ['Trials are never deleted. "Correct" needs a reason and keeps the old values visible', 'to people with access. Two people editing at once: the second is told to reload.'], C.warn, { dashed: true });
+const l6 = box(LX, l5.b + 28, LW, 'Where a trial shows up', ['Trials tab: chart and requirement grid · project Overview card · R&D to-do list', 'Morning message when a lab stage has no trial for 14 days · printed report (Lab trials)', 'Stage 4 onward: "Preferred formula from the lab" on the next-step card.', 'A preferred formula never completes a stage or gives an approval.'], C.ok);
+
+// ---- cover and notices
+const VX = 1620, VW = 740; sec(VX, Y4, VW, 'COVER WHEN SOMEONE IS AWAY', C.rd);
+const v1 = box(VX, Y4 + 56, VW, 'Someone will be away', ['My Day: "I will be away". First and last day (up to 90 days) and a reason.', 'Managers and R&D editors can record it for someone else.'], C.staff);
+const v2 = box(VX, v1.b + 28, VW, 'Pick a cover', ['Must be in the R&D team, not away themselves, no overlapping absence. They are told.'], C.rd);
+const v3 = box(VX, v2.b + 28, VW, 'While the dates are active', ['The cover sees the absent person\'s open tasks in My Day ("Covering for ..."),', 'gets their notices and morning-message items, and may start and complete them.'], C.rd);
+const v4 = box(VX, v3.b + 28, VW, 'Recorded "on behalf of"', ['The task stays the absent person\'s. The history says who did it for whom and the absent', 'person is told. The cover can never review work they did for someone.'], C.warn);
+const v5 = box(VX, v4.b + 28, VW, 'It ends', ['After the last day, by itself, or "End early" (the person, the cover, or R&D management).'], C.ok);
+down(v1, v2); down(v2, v3); down(v3, v4); down(v4, v5);
+sec(VX, v5.b + 36, VW, 'NOTICES AND THE MORNING MESSAGE', C.sys);
+const n1 = box(VX, v5.b + 92, VW, 'Something happens', ['Task assigned / handed in / sent back / accepted · new request · stage or project done', 'Trial recorded · preferred formula chosen · cover set'], C.sys);
+const n2 = box(VX, n1.b + 28, VW, 'Who hears about it', ['In the app: bell and My Day. Email (Brevo) and WhatsApp when switched on.', 'Never the person who did the action. Each person can turn email notices off.'], C.sys);
+const n3 = box(VX, n2.b + 28, VW, 'Every weekday about 8:00', ['A GitHub timer calls the app: one colourful email per person, once a day,', 'none on Sunday: sent back · to review · overdue · due today / tomorrow ·', 'covering · lab trials to record.'], C.sys);
+down(n1, n2); down(n2, n3);
+
+// ------------------------------------------------------------------ bottom panels
+const colBottom = Math.max(t6.b, l6.b, n3.b); const Y5 = colBottom + 70; sec(40, Y5 - 56, 2320, '5   Who can do what, where to look, and the safety rules', '#0f172a');
+const p1 = box(40, Y5, 740, 'Who can do what (default grants)', ['Manager: raise requests; see every project and trial results (not formulas).', 'R&D: edit projects, complete stages, record trials, see confidential content.', 'Trainee: sees only own projects and tasks; work is always checked by someone else.', 'QC, Production, Purchase, Stores, Accounts: see projects they are on.', 'Approvals (QC, customer, handover): nobody by default; an administrator grants them.', 'Prices (cost per kg): only people with price access. Administrator: everything.'], C.mgr);
+const p2 = box(830, Y5, 740, 'Where to look', ['My Day: what to do today and tomorrow, covering, review queue.', 'R&D dashboard: current stages, tasks, requests, lab trials to record.', 'Project page: Overview · List · Board · Timeline · Activity · Trials.', 'My / Team Performance: on time, right first time. No scores, no ranking.', 'Project report: a printable record per stage and for the whole project.', 'My Account: notices on or off, password.'], C.rd);
+const p3 = box(1620, Y5, 740, 'Safety rules built in', ['The audit history is append-only: who, what, when. Secrets never go in it.', 'Version checks stop two people overwriting each other.', 'Nothing is silently deleted: reopen, correct, cancel and remove all need a reason.', 'Confidential lab text stays out of notices, feeds and the audit trail.', 'Nobody reviews their own work, including work done for someone else.', 'All dates are India time. Tests run automatically before anything goes live.'], C.warn);
+const H = Math.max(p1.b, p2.b, p3.b) + 50;
+document.getElementById('root').innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>
+<marker id="aD" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1,1 L11,6 L1,11 z" fill="#334155"/></marker>
+<marker id="aG" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1,1 L11,6 L1,11 z" fill="${C.ok}"/></marker>
+<marker id="aR" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1,1 L11,6 L1,11 z" fill="${C.bad}"/></marker></defs>
+<rect width="${W}" height="${H}" fill="#ffffff"/>${out.join('')}</svg>`;
+</script></body></html>

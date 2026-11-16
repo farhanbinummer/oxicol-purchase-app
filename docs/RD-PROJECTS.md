@@ -2,6 +2,8 @@
 
 Part of the existing Oxicol application: same sign-in, same database, same permissions, same front end. Nothing here runs as a separate site.
 
+The full workflow as one picture: [docs/rd-workflow-full.png](rd-workflow-full.png) (source: `rd-workflow-full.html`).
+
 ## What is built (stages 1 to 5 of the plan)
 
 | Stage | What | Where |
