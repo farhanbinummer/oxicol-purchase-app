@@ -4,8 +4,21 @@
 name: Morning digest
 on:
   schedule:
-    - cron: '30 2 * * 1-6'   # 08:00 India time, Monday to Saturday
+    # Several early attempts, Monday to Saturday (India time 07:00, 07:30, 08:00, 08:30, 09:00, 10:00). GitHub's free timer is often
+    # hours late, so the first attempt that really runs inside the app's morning window (06:00 to 11:00) sends the message; later ones
+    # find it already sent. A run that GitHub starts after 11:00 is skipped by the app on purpose.
+    - cron: '30 1 * * 1-6'
+    - cron: '0 2 * * 1-6'
+    - cron: '30 2 * * 1-6'
+    - cron: '0 3 * * 1-6'
+    - cron: '30 3 * * 1-6'
+    - cron: '30 4 * * 1-6'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Send even outside the morning window (for testing; still only once a day, never on a day it was already sent)'
+        type: boolean
+        default: false
 jobs:
   digest:
     runs-on: ubuntu-latest
@@ -14,7 +27,8 @@ jobs:
         env:
           APP_URL: ${{ secrets.APP_URL }}
           JOBS_TOKEN: ${{ secrets.JOBS_TOKEN }}
+          FORCE: ${{ inputs.force }}
         run: |
           if [ -z "$APP_URL" ] || [ -z "$JOBS_TOKEN" ]; then echo "APP_URL / JOBS_TOKEN secrets not set; nothing to do."; exit 0; fi
           # The free Render site may be asleep: allow time to wake up and retry.
-          curl -sS --retry 5 --retry-delay 30 --retry-all-errors --max-time 120 -X POST -H "Authorization: Bearer $JOBS_TOKEN" "$APP_URL/api/jobs/morning-digest"
+          curl -sS --retry 5 --retry-delay 30 --retry-all-errors --max-time 120 -X POST -H "Authorization: Bearer $JOBS_TOKEN" "$APP_URL/api/jobs/morning-digest$([ "$FORCE" = "true" ] && echo "?force=1")"
