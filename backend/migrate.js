@@ -658,6 +658,39 @@ const STEPS = [
         await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
       }
     }
+  },
+  {
+    // "Away and cover", made complete: the kind of absence, a handover note, and the cover's own answer (confirm or decline). Absences that
+    // already exist are treated as confirmed so nothing changes for them. Additive only.
+    name: '024_rd_away_and_cover',
+    async run(db) {
+      await db.query("ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'Leave'");
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS handover_note TEXT');
+      await db.query("ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS cover_status VARCHAR(10) NOT NULL DEFAULT 'pending'");
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS cover_responded_at TIMESTAMPTZ');
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS cover_decline_reason TEXT');
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()');
+      await db.query("UPDATE rd_absences SET cover_status = 'accepted', cover_responded_at = created_at WHERE cover_status = 'pending' AND cover_responded_at IS NULL");
+      await db.query("ALTER TABLE rd_absences DROP CONSTRAINT IF EXISTS rd_absences_kind_check");
+      await db.query("ALTER TABLE rd_absences ADD CONSTRAINT rd_absences_kind_check CHECK (kind IN ('Leave', 'Travel', 'Training', 'Sick', 'Other'))");
+      await db.query("ALTER TABLE rd_absences DROP CONSTRAINT IF EXISTS rd_absences_cover_status_check");
+      await db.query("ALTER TABLE rd_absences ADD CONSTRAINT rd_absences_cover_status_check CHECK (cover_status IN ('pending', 'accepted', 'declined'))");
+    }
+  },
+  {
+    // Authorisation: an absence is approved (or refused) by someone with authority, and the cover only takes over once the absence is
+    // approved AND the cover has confirmed. Absences that already exist are treated as approved. The Manager holds rd.cover_approve.
+    name: '025_rd_cover_approval',
+    async run(db) {
+      await db.query("ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS approval_status VARCHAR(10) NOT NULL DEFAULT 'pending'");
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ');
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS approval_reason TEXT');
+      await db.query("UPDATE rd_absences SET approval_status = 'approved', approved_at = created_at WHERE approval_status = 'pending' AND approved_at IS NULL");
+      await db.query('ALTER TABLE rd_absences DROP CONSTRAINT IF EXISTS rd_absences_approval_status_check');
+      await db.query("ALTER TABLE rd_absences ADD CONSTRAINT rd_absences_approval_status_check CHECK (approval_status IN ('pending', 'approved', 'rejected'))");
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager', 'rd.cover_approve') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 
