@@ -244,6 +244,7 @@ const WORKSPACES = {
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Projects', items: [
         { label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW },
+        { label: 'Away & Cover', href: 'cover.html', icon: 'calendar', perm: KEYS.RD_VIEW },
         { label: 'My Performance', href: 'my-performance.html', icon: 'dashboard', perm: KEYS.RD_VIEW },
         { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW },
         { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html'] },
@@ -275,7 +276,7 @@ const WORKSPACES = {
 // wider permission, all of them).
 for (const [id, w] of Object.entries(WORKSPACES)) {
   if (id === 'rd') continue;
-  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW }, { label: 'My Performance', href: 'my-performance.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
+  w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'My Day', href: 'my-day.html', icon: 'history', perm: KEYS.RD_VIEW }, { label: 'Away & Cover', href: 'cover.html', icon: 'calendar', perm: KEYS.RD_VIEW }, { label: 'My Performance', href: 'my-performance.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
 }
 
 /** Workspaces a person is assigned: those that list any of the roles they hold. Switching never adds permissions. */

@@ -71,6 +71,7 @@ const KEYS = {
   RD_HANDOVER_ACK: 'rd.handover_ack', // record Production's acknowledgement of a handover
   RD_TRIAL_VIEW: 'rd.trial_view',     // see the lab trials recorded on a project
   RD_TRIAL_EDIT: 'rd.trial_edit',     // record lab trials and correct them
+  RD_COVER_APPROVE: 'rd.cover_approve', // approve or refuse an absence and its cover
   RD_TRIAL_COST: 'rd.trial_cost',     // enter or change the raw-material cost per kg of a lab trial (also needs field.prices)
   FIELD_RD_TECHNICAL: 'field.rd_technical' // technical approach, risks, lab notes and trial content (confidential)
 };
@@ -133,6 +134,7 @@ const CATALOG = [
   { key: KEYS.RD_HANDOVER_ACK, module: 'R&D Projects', action: "Record Production's handover acknowledgement" },
   { key: KEYS.RD_TRIAL_VIEW, module: 'R&D Projects', action: 'See the lab trials recorded on a project' },
   { key: KEYS.RD_TRIAL_EDIT, module: 'R&D Projects', action: 'Record lab trials and correct them' },
+  { key: KEYS.RD_COVER_APPROVE, module: 'R&D Projects', action: 'Approve or refuse an absence and its cover' },
   { key: KEYS.RD_TRIAL_COST, module: 'R&D Projects', action: 'Enter or change the cost per kg of a lab trial (needs price access too)' },
   { key: KEYS.FIELD_RD_TECHNICAL, module: 'Restricted fields', action: 'See confidential R&D content (technical approach, risks, lab notes, trial formulas and observations)' }
 ];
@@ -155,7 +157,7 @@ const KINDS = {
   'field.prices': 'field', 'field.supplier_bank': 'field',
   'rd.view': 'view', 'rd.view_all': 'view', 'rd.create': 'create', 'rd.edit': 'edit', 'rd.stage': 'edit',
   'rd.approve_head': 'approve', 'rd.approve_mgmt': 'approve', 'rd.qc_signoff': 'approve', 'rd.handover_ack': 'approve',
-  'rd.trial_view': 'view', 'rd.trial_edit': 'edit', 'rd.trial_cost': 'edit',
+  'rd.trial_view': 'view', 'rd.trial_edit': 'edit', 'rd.trial_cost': 'edit', 'rd.cover_approve': 'approve',
   'field.rd_technical': 'field'
 };
 CATALOG.forEach(c => { c.kind = KINDS[c.key] || 'view'; });
@@ -205,7 +207,7 @@ const RD_DEFAULTS = {
   rd: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_EDIT, KEYS.RD_STAGE, KEYS.RD_TRIAL_VIEW, KEYS.RD_TRIAL_EDIT, KEYS.FIELD_RD_TECHNICAL, KEYS.CATALOG_VIEW],
   // a trainee sees only projects they are on and their own tasks: no edit, no stage completion, no confidential lab content
   rd_trainee: [KEYS.RD_VIEW],
-  manager: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_CREATE, KEYS.RD_TRIAL_VIEW, KEYS.RD_TRIAL_COST, KEYS.KPI_VIEW_ALL],
+  manager: [KEYS.RD_VIEW, KEYS.RD_VIEW_ALL, KEYS.RD_CREATE, KEYS.RD_TRIAL_VIEW, KEYS.RD_TRIAL_COST, KEYS.RD_COVER_APPROVE, KEYS.KPI_VIEW_ALL],
   // QC may record lab trials on projects they are on. Recording a trial means writing its formula, so QC also holds technical access.
   qc: [KEYS.RD_VIEW, KEYS.RD_TRIAL_VIEW, KEYS.RD_TRIAL_EDIT, KEYS.FIELD_RD_TECHNICAL],
   branch: [KEYS.RD_VIEW],

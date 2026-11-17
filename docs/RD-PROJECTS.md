@@ -94,16 +94,16 @@ Ticking a checklist item records **what was found**, not only that it was done.
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.
 
-| Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | rd.trial_view | rd.trial_edit | rd.trial_cost | field.rd_technical | Approval keys |
-|---|---|---|---|---|---|---|---|---|---|---|
-| R&D | yes | yes | - | yes | yes | yes | yes | - | yes | - |
-| Manager | yes | yes | yes | - | - | yes | - | yes | - | - |
-| Branch / requester | yes (own) | - | - | - | - | - | - | - | - | - |
-| Production | yes (own) | - | - | - | - | - | - | - | - | - |
-| Purchase | yes (own) | - | - | - | - | - | - | - | - | - |
-| QC | yes (own) | - | - | - | - | yes | yes | - | yes | - |
-| Stores | yes (own) | - | - | - | - | - | - | - | - | - |
-| Accounts | yes (own) | - | - | - | - | - | - | - | - | - |
+| Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | rd.trial_view | rd.trial_edit | rd.trial_cost | rd.cover_approve | field.rd_technical | Approval keys |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| R&D | yes | yes | - | yes | yes | yes | yes | - | - | yes | - |
+| Manager | yes | yes | yes | - | - | yes | - | yes | yes | - | - |
+| Branch / requester | yes (own) | - | - | - | - | - | - | - | - | - | - |
+| Production | yes (own) | - | - | - | - | - | - | - | - | - | - |
+| Purchase | yes (own) | - | - | - | - | - | - | - | - | - | - |
+| QC | yes (own) | - | - | - | - | yes | yes | - | - | yes | - |
+| Stores | yes (own) | - | - | - | - | - | - | - | - | - | - |
+| Accounts | yes (own) | - | - | - | - | - | - | - | - | - | - |
 
 "own" means projects the person requested, leads or is a team member of. **Approval keys** (`rd.approve_head`, `rd.approve_mgmt`, `rd.qc_signoff`, `rd.handover_ack`) are granted to **no role** by default: see the decisions below. Workspace choice is presentation only; choosing a workspace never grants a permission.
 
@@ -165,11 +165,20 @@ The reported completion of all eight stages on the same day is **not imported**.
 8. Fields on the request form record what the requester states. The application does not certify regulatory or safety compliance.
 
 
-## Cover while someone is away
+## Away and cover (plan, confirm, approve, hand over)
 
-When a person is away, a task stays theirs but someone else can do it for them, and every action is recorded.
+The page **Away and cover** (menu entry for R&D) is where absences are planned, confirmed, approved and watched.
 
-- **Setting it up:** on **My Day**, press **I will be away**, choose who covers, the first and last day away (at most 90 days) and an optional reason. R&D managers and administrators can record it for someone else.
-- **What the cover can do:** while the dates are active, the cover sees the absent person's open tasks in their own My Day under "Covering for ...", can start and complete them (or hand them in for review), and gets the absent person's notices (tasks assigned, sent back, reopened, cancelled). The morning message lists them too. Anything done is recorded "on behalf of" the absent person, who is told.
-- **Safeguards:** the cover must be in the R&D team and not away themselves; absences cannot overlap; the person who did the work for someone can never accept or send it back (someone else reviews); it ends by itself after the last day, or earlier with **End early** (the person away, the cover, or R&D management).
-- **Numbers:** work done by a cover counts as the cover's completion, not the absent person's, in Team Performance.
+**The steps**
+1. **Plan:** the person chooses the kind (Leave, Travel, Training, Sick, Other), the first and last day (up to 90 days), who covers, a short reason and a **handover note**. While typing, the page shows **what will be waiting**: open tasks due by the last day (or with no date), stages they own and reviews waiting for them. Managers and R&D editors can plan for someone else.
+2. **The cover confirms or declines.** They are told, see the handover note, and answer. Declining needs a reason; the absence is then ended and the person is told to choose another cover.
+3. **A manager approves or refuses.** Anyone holding `rd.cover_approve` (the Manager, and administrators) sees a queue on the page and in the morning message. Refusing needs a reason. Nobody approves their own absence (an administrator, who has nobody above, may). Someone with authority who records another person's absence has approved it by doing so.
+4. **Only when the absence is approved AND the cover has confirmed does the cover take over,** from the first day. Until then the calendar shows it as waiting. A changed plan (dates or cover) is approved again (unless an approver made the change); a changed note does not need it.
+
+**What the cover gets while it is active:** the absent person's open tasks in My Day ("Covering for ..."), the **reviews** waiting for them and the **stages** they own, their notices and morning-message items, and the handover note. Everything the cover does is recorded "on behalf of" the absent person, who is told. The task stays theirs, and the cover can never review work they did for someone.
+
+**Around it:** assigning work to someone who is away shows a warning (and names the cover); the people list shows who is away; a **team calendar** shows the next six weeks; when an absence ends, a **"Welcome back"** card lists what was done for the person and what has arrived; it ends by itself after the last day, or earlier with "End early" (the person, the cover, whoever recorded it, or R&D management). Existing absences were treated as approved and confirmed when this was added.
+
+**Reminders:** the cover gets a notice and a line in the morning message until they answer; approvers get a notice and a morning-message line until they decide. Notices never include the handover note.
+
+**Numbers:** work done by a cover counts as the cover's completion, not the absent person's, in Team Performance.
