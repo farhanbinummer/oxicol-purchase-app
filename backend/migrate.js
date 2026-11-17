@@ -647,6 +647,17 @@ const STEPS = [
       await db.query('ALTER TABLE rd_trials ADD COLUMN IF NOT EXISTS task_id INTEGER REFERENCES rd_tasks(id) ON DELETE SET NULL');
       await db.query('CREATE INDEX IF NOT EXISTS idx_rd_trials_task ON rd_trials(task_id)');
     }
+  },
+  {
+    // Decisions on who handles lab trials: QC may record trials (so QC also gets technical access, because a trial's formula is
+    // technical content), and the new "cost per kg" key goes to the Manager, who can pass it on (an administrator grants it to
+    // another department, for example Accounts). R&D does not enter costs. Existing grants are never removed.
+    name: '023_rd_trial_cost_and_qc',
+    async run(db) {
+      for (const [role, key] of [['manager', 'rd.trial_cost'], ['qc', 'rd.trial_view'], ['qc', 'rd.trial_edit'], ['qc', 'field.rd_technical']]) {
+        await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, key]);
+      }
+    }
   }
 ];
 

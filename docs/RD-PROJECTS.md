@@ -94,16 +94,16 @@ Ticking a checklist item records **what was found**, not only that it was done.
 
 An administrator holds every key. A "-" means the key is not granted. Granted keys can be changed in Administration > Permissions.
 
-| Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | rd.trial_view | rd.trial_edit | field.rd_technical | Approval keys |
-|---|---|---|---|---|---|---|---|---|---|
-| R&D | yes | yes | - | yes | yes | yes | yes | yes | - |
-| Manager | yes | yes | yes | - | - | yes | - | - | - |
-| Branch / requester | yes (own) | - | - | - | - | - | - | - | - |
-| Production | yes (own) | - | - | - | - | - | - | - | - |
-| Purchase | yes (own) | - | - | - | - | - | - | - | - |
-| QC | yes (own) | - | - | - | - | - | - | - | - |
-| Stores | yes (own) | - | - | - | - | - | - | - | - |
-| Accounts | yes (own) | - | - | - | - | - | - | - | - |
+| Role | rd.view | rd.view_all | rd.create | rd.edit | rd.stage | rd.trial_view | rd.trial_edit | rd.trial_cost | field.rd_technical | Approval keys |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R&D | yes | yes | - | yes | yes | yes | yes | - | yes | - |
+| Manager | yes | yes | yes | - | - | yes | - | yes | - | - |
+| Branch / requester | yes (own) | - | - | - | - | - | - | - | - | - |
+| Production | yes (own) | - | - | - | - | - | - | - | - | - |
+| Purchase | yes (own) | - | - | - | - | - | - | - | - | - |
+| QC | yes (own) | - | - | - | - | yes | yes | - | yes | - |
+| Stores | yes (own) | - | - | - | - | - | - | - | - | - |
+| Accounts | yes (own) | - | - | - | - | - | - | - | - | - |
 
 "own" means projects the person requested, leads or is a team member of. **Approval keys** (`rd.approve_head`, `rd.approve_mgmt`, `rd.qc_signoff`, `rd.handover_ack`) are granted to **no role** by default: see the decisions below. Workspace choice is presentation only; choosing a workspace never grants a permission.
 
@@ -118,8 +118,8 @@ Stage 2 (First Lab Batch) and stage 3 (Lab Trials & Optimisation) used to have o
 **Rules the server enforces**
 * **Trials are never deleted.** A correction needs a reason (at least 5 characters) and the current version; it edits the trial in one transaction and writes a row to `rd_trial_corrections` holding the old and new values. A stale version answers the usual "someone else changed this" message (HTTP 409). A correction that changes nothing is refused.
 * **Confidential content** (formula, what changed, observations, measured values) needs `field.rd_technical`: without it the server omits it from every response (including the old values in correction history, and the reasons), and refuses writes. Because the formula is required, recording or correcting a trial needs `field.rd_technical`. The audit trail and the activity feed never contain this text: they record that a trial was added or corrected, which fields changed, and the non-confidential facts (stage, date, outcome).
-* **Cost per kg** needs `field.prices`: without it the value is omitted from responses and writes to it are refused. R&D does not hold `field.prices` by default, so an administrator (or a role with that key) enters costs unless it is granted.
-* **Who:** `rd.trial_view` lets a person see trials; `rd.trial_edit` lets them add and correct. Both also require being able to open the project (a project you cannot open answers "not found"). Defaults: `rd.trial_edit` to R&D only; `rd.trial_view` to R&D and Manager (every role that held `rd.view_all` when the migration ran). Administrators hold every key. Existing grants are never changed.
+* **Cost per kg** needs `field.prices`: without it the value is omitted from responses and writes to it are refused. **R&D does not enter costs.** The Manager holds the separate `rd.trial_cost` key and passes it to another department, for example Accounts: an administrator gives that department `rd.trial_view` and `rd.trial_cost` (Roles & Permissions) and puts its people on the project (assigning them a task does this). They then see each trial's structure and cost, can enter or change the cost per kg from the trial's detail (a change needs a reason, the earlier cost stays in the history), and never see a formula, observations or measured values, and cannot record trials. The audit trail records that a cost was set, never the amount.
+* **Who:** `rd.trial_view` lets a person see trials; `rd.trial_edit` lets them add and correct; `rd.trial_cost` lets them enter or change the cost per kg (and also needs price access). Both also require being able to open the project (a project you cannot open answers "not found"). Defaults: R&D and QC record and correct trials (QC also holds `field.rd_technical`, because a trial's formula is technical content, and QC only reaches projects it is a member of, never every project); R&D, QC and Manager see them; the Manager holds `rd.trial_cost`. Administrators hold every key. Migration 023 added the QC and Manager grants and never removes anything.
 * **Closed or paused projects:** no trial can be added or corrected on a project that is On Hold, Rejected, Completed or still a draft. Existing trials can still be read.
 * **Preferred formula** only records the outcome. It completes no stage, ticks no checklist item and records no approval. At most one trial per project is Preferred (also enforced by a unique index): marking a trial preferred sets the earlier one back to "Needs another trial" through a correction row stating why, in the same transaction.
 * **Extra fields ("Add a field"):** besides the fixed fields, a person can add up to 15 fields of their own to a trial (a name and a value, for example "Pot life: 4 h"). A new trial starts with the field names of the previous trial (empty values), so nothing is retyped; any field can be renamed or removed. They are confidential like observations, are corrected and kept in the correction history like every other field, and the audit trail never holds their names or values. The fixed fields other than date, stage, formula and outcome can simply be left empty.
