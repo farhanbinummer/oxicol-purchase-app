@@ -14,14 +14,14 @@ const KINDS = {
   request: { color: '#0891b2', soft: '#cffafe', emoji: '🚀', head: 'A new R&D request has arrived!', cheer: 'New ideas keep us growing. Let us make it happen!' },
   stage: { color: '#7c3aed', soft: '#ede9fe', emoji: '🏁', head: 'A project stage is complete!', cheer: 'Another milestone reached. Congratulations, team!' },
   project: { color: '#16a34a', soft: '#dcfce7', emoji: '🏆', head: 'A project is complete!', cheer: 'What a result. Thank you to everyone who made it happen!' },
-  cover_request: { color: '#0f766e', soft: '#ccfbf1', emoji: '🤝', head: 'A colleague is counting on you', cheer: 'Thank you for helping the team keep moving!' },
-  cover_response: { color: '#2563eb', soft: '#dbeafe', emoji: '📅', head: 'An update on cover while someone is away', cheer: 'Good planning keeps the work flowing. Thank you!' },
+  cover_request: { color: '#0f766e', soft: '#ccfbf1', emoji: '🤝', head: 'Can you cover for a colleague?', cheer: 'Thank you for helping the team.' },
+  cover_response: { color: '#2563eb', soft: '#dbeafe', emoji: '📅', head: 'News about an absence', cheer: 'Thank you for keeping the work moving.' },
   trial_added: { color: '#7c3aed', soft: '#ede9fe', emoji: '🧪', head: 'A new lab trial is on record!', cheer: 'Every trial brings the right formula closer. Great work, team!' },
   trial_preferred: { color: '#16a34a', soft: '#dcfce7', emoji: '⭐', head: 'A preferred formula has been chosen!', cheer: 'What a milestone. Thank you to everyone in the lab!' },
   morning: { color: '#ea580c', soft: '#ffedd5', emoji: '☀️', head: 'Good morning! Here is your plan for the day', cheer: 'Take it one task at a time. You will do wonderfully today!' }
 };
 const DEFAULT_KIND = { color: '#0f766e', soft: '#ccfbf1', emoji: '👋', head: 'A quick note from Oxicol', cheer: 'Thank you for all you do!' };
-const SECTION_COLORS = { 'Sent back to you': '#d97706', 'Covering for a colleague who is away': '#7c3aed', 'Lab trials to record': '#7c3aed', 'Please confirm you can cover (open Away and cover)': '#0f766e', 'Absences waiting for your approval (open Away and cover)': '#2563eb', 'Waiting for your review': '#4f46e5', 'Overdue': '#dc2626', 'Due today': '#ea580c', 'Due tomorrow': '#0f766e' };
+const SECTION_COLORS = { 'Sent back to you': '#d97706', 'Covering for a colleague who is away': '#7c3aed', 'Lab trials to record': '#7c3aed', 'Absences waiting for you (open Away and cover)': '#2563eb', 'Waiting for your review': '#4f46e5', 'Overdue': '#dc2626', 'Due today': '#ea580c', 'Due tomorrow': '#0f766e' };
 
 /** Turns the plain text of a notice into HTML paragraphs; lines starting with "  - " become list items, "Title:" lines become headings. */
 function bodyHtml(text, color) {

@@ -173,7 +173,7 @@
       if (d.to_review.length) bits.unshift(plural(d.to_review.length, 'piece') + ' of work waiting for your review');
       hero.appendChild(el('p', null, (d.mine.length || d.to_review.length ? 'You have ' + bits.join(', ') + '.' : 'You have no open tasks.') + ' Today is ' + new Date(today + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) + '.'));
       box.appendChild(hero);
-      (d.my_absences || []).forEach(a => { const n = el('p', 'oxi-section-note'); const st = a.approval_status === 'pending' ? 'It is waiting for approval.' : a.cover_status === 'pending' ? a.cover_name + ' has not confirmed yet.' : a.from_date <= today ? a.cover_name + ' is covering your work.' : a.cover_name + ' will cover your work.'; n.append(document.createTextNode((a.from_date <= today ? 'You are away until ' + dmy(a.to_date) : 'You will be away ' + dmy(a.from_date) + ' to ' + dmy(a.to_date)) + ' (' + a.kind + '). ' + st + ' '), Object.assign(el('a', null, 'Away and cover'), { href: 'cover.html' })); box.appendChild(n); });
+      (d.my_absences || []).forEach(a => { const n = el('p', 'oxi-section-note'); const st = a.approval_status === 'pending' ? 'It is waiting for the manager.' : !a.cover_name ? 'The manager has not chosen who will cover yet.' : a.from_date <= today ? a.cover_name + ' is covering your work.' : a.cover_name + ' will cover your work.'; n.append(document.createTextNode((a.from_date <= today ? 'You are away until ' + dmy(a.to_date) : 'You will be away ' + dmy(a.from_date) + ' to ' + dmy(a.to_date)) + ' (' + a.kind + '). ' + st + ' '), Object.assign(el('a', null, 'Away and cover'), { href: 'cover.html' })); box.appendChild(n); });
 
       const sum = el('div', 'md-sum');
       const tile = (n, label, cls, target) => { const b = el('button', 'md-tile ' + (cls || '')); b.type = 'button'; b.append(el('b', null, String(n)), el('span', null, label)); b.setAttribute('aria-label', label + ': ' + n); b.onclick = () => { const e = $(target); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; sum.appendChild(b); };
@@ -193,8 +193,8 @@
       (d.covering || []).forEach((c, i) => {
         const sec = section('sCover' + i, 'Covering for ' + c.name, c.tasks, '', (t) => taskRow(t, today, { actions: true }), c.name + ' has no open tasks right now.');
         sec.insertBefore(el('p', 'oxi-section-note', c.name + ' is away until ' + dmy(c.to_date) + ' (' + c.kind + (c.reason ? ', ' + c.reason : '') + '). You can do their open tasks; each one is recorded as done on their behalf. You cannot review work you did for them.'), sec.children[1]);
-        if (c.handover_note) { const hn = el('div', 'md-instr'); hn.style.maxHeight = 'none'; hn.append(el('b', null, 'Handover note from ' + c.name + ': '), document.createTextNode(c.handover_note)); sec.insertBefore(hn, sec.children[2]); }
-        if ((c.reviews || []).length) { const rv = el('div'); rv.appendChild(el('h3', null, 'Reviews waiting for ' + c.name + ' (' + c.reviews.length + ')')); const ul = el('ul', 'md-list'); c.reviews.forEach(t => ul.appendChild(taskRow(t, today, { review: true, assignee: true }))); rv.appendChild(ul); sec.appendChild(rv); }
+        if (c.handover_note) { const hn = el('div', 'md-instr'); hn.style.maxHeight = 'none'; hn.append(el('b', null, 'Notes from ' + c.name + ': '), document.createTextNode(c.handover_note)); sec.insertBefore(hn, sec.children[2]); }
+        if ((c.reviews || []).length) { const rv = el('div'); rv.appendChild(el('h3', null, 'Work waiting for ' + c.name + ' to check' + ' (' + c.reviews.length + ')')); const ul = el('ul', 'md-list'); c.reviews.forEach(t => ul.appendChild(taskRow(t, today, { review: true, assignee: true }))); rv.appendChild(ul); sec.appendChild(rv); }
         if ((c.stages || []).length) { const sg = el('div'); sg.appendChild(el('h3', null, 'Stages ' + c.name + ' owns (' + c.stages.length + ')')); const ul = el('ul'); c.stages.forEach(x => { const li = el('li'); const a = el('a', null, x.project_number + ': stage ' + x.stage_no + ' ' + x.stage_name); a.href = 'project.html?id=' + x.project_id; li.append(a, document.createTextNode(x.planned_date ? ', planned ' + dmy(String(x.planned_date).slice(0, 10)) : '')); ul.appendChild(li); }); sg.appendChild(ul); sec.appendChild(sg); }
         box.appendChild(sec);
       });
@@ -221,8 +221,8 @@
     // ---- being away: the form, the approval and the calendar are on their own page ----
     function coverCard(box) {
       const card = el('section', 'oxi-card2 md-sec'); card.id = 'sAway'; card.appendChild(el('h2', null, 'Going to be away?'));
-      card.appendChild(el('p', 'oxi-section-note', 'Plan the dates, choose who covers and leave a handover note. Your cover confirms, and a manager approves, before they take over your work.'));
-      const a = el('a', 'oxi-btn', 'Plan an absence'); a.href = 'cover.html'; card.appendChild(a); box.appendChild(card);
+      card.appendChild(el('p', 'oxi-section-note', 'Tell the manager when you will be away. The manager approves it and chooses who will cover. The person chosen is told, and does your work.'));
+      const a = el('a', 'oxi-btn', 'Tell the manager'); a.href = 'cover.html'; card.appendChild(a); box.appendChild(card);
     }
 
     async function load() {
