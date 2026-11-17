@@ -923,13 +923,14 @@ test('cover: an away person names a cover, who may then do their tasks (recorded
   assert.equal((await post(tok.trainee, { cover_user_id: uid.rd2, from_date: plus(1), to_date: plus(4) })).status, 409, 'overlapping absence');
   assert.equal((await post(tok.rd2, { cover_user_id: uid.trainee, from_date: today, to_date: plus(1) })).status, 409, 'the cover is away themselves');
 
-  // nothing moves until the cover has confirmed AND the absence is approved
+  // nothing moves until the manager has approved (and chosen the cover) AND the cover has said "I can cover"
   assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${t1.id}/complete`, { result: 'Too early: nobody has agreed yet.' })).status, 403, 'not yet approved or confirmed');
   assert.equal((await api(tok.manager, 'GET', '/api/rd/my-day')).covering.length, 0);
   assert.equal((await api(tok.trainee, 'POST', `/api/rd/cover/${set.id}/approve`, { approve: true })).status, 403, 'nobody approves their own absence, and a trainee cannot approve');
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/cover/${set.id}/respond`, { accept: true })).status, 409, 'the suggested person is not asked until the manager has decided');
+  assert.equal((await api(tok.admin, 'POST', `/api/rd/cover/${set.id}/approve`, { approve: true, cover_user_id: uid.manager })).success, true);
+  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${t1.id}/complete`, { result: 'Approved but the cover has not said yes yet.' })).status, 403, 'approved, still waiting for the cover');
   assert.equal((await api(tok.manager, 'POST', `/api/rd/cover/${set.id}/respond`, { accept: true })).success, true);
-  assert.equal((await api(tok.manager, 'POST', `/api/rd/tasks/${t1.id}/complete`, { result: 'Confirmed but not approved yet.' })).status, 403, 'confirmed, still waiting for approval');
-  assert.equal((await api(tok.admin, 'POST', `/api/rd/cover/${set.id}/approve`, { approve: true })).success, true);
   // My Day: the cover sees the task; the absent person sees their absence
   const mDay = await api(tok.manager, 'GET', '/api/rd/my-day');
   const cov = mDay.covering.find(c => c.user_id === uid.trainee);
@@ -989,88 +990,85 @@ test('notices: the morning message is only sent in the morning (India time), and
   } finally { if (saved === undefined) delete process.env.NOTIFY_TEST_MODE; else process.env.NOTIFY_TEST_MODE = saved; }
 });
 
-// ---- away and cover: approval, confirmation, handover, editing, reviews, warnings, welcome back ----
+// ---- away and cover: the person asks, the manager approves and chooses who covers, the cover says "I can cover" ----
 const cv = (token, method, url, body) => api(token, method, '/api/rd/cover' + url, body);
 const awayDays = (n) => R.addDays(R.todayIST(), n);
+/** The manager approves and chooses the cover; the cover says yes. */
+const settle = async (id, coverUid, coverTok) => { const a = await cv(tok.admin, 'POST', `/${id}/approve`, { approve: true, cover_user_id: coverUid }); assert.equal(a.success, true, JSON.stringify(a)); const b = await cv(coverTok, 'POST', `/${id}/respond`, { accept: true }); assert.equal(b.success, true, JSON.stringify(b)); };
 
-test('away and cover: it starts "waiting", needs the cover to confirm AND someone with authority to approve, and nobody approves their own', async () => {
-  const mk = await cv(tok.trainee, 'POST', '', { cover_user_id: uid.rd2, from_date: awayDays(1), to_date: awayDays(3), kind: 'Training', reason: 'Course', handover_note: 'Check batch 14 first. SECRET-HANDOVER' });
+test('away and cover: the person asks, the manager approves and chooses who covers, the chosen person says "I can cover"; nobody approves their own', async () => {
+  // the person may suggest someone, or nobody
+  const mk = await cv(tok.trainee, 'POST', '', { from_date: awayDays(1), to_date: awayDays(3), kind: 'Training', reason: 'Course', handover_note: 'Check batch 14 first. SECRET-HANDOVER' });
   assert.equal(mk.status, 201, JSON.stringify(mk)); assert.equal(mk.approval, 'pending');
-  const list = await cv(tok.trainee, 'GET', ''); const a = list.mine.find(x => x.id === mk.id);
-  assert.equal(a.status, 'waiting_approval'); assert.equal(a.kind, 'Training'); assert.match(a.handover_note, /SECRET-HANDOVER/);
-  // the handover note is for the person away, the cover, the person who recorded it and R&D management: not for anyone else
-  assert.ok(!JSON.stringify((await cv(tok.purchase, 'GET', ''))).includes('SECRET-HANDOVER'));
-  assert.match(JSON.stringify(await cv(tok.rd2, 'GET', '')), /SECRET-HANDOVER/, 'the cover reads it');
-  // approvers see it in their queue; the person away and the cover cannot approve
-  assert.ok((await cv(tok.admin, 'GET', '')).to_approve.some(x => x.id === mk.id), 'the administrator sees it to approve');
-  assert.ok((await cv(tok.manager, 'GET', '')).to_approve.some(x => x.id === mk.id), 'the manager sees it to approve');
-  assert.equal((await cv(tok.trainee, 'GET', '')).to_approve.length, 0);
-  assert.equal((await cv(tok.trainee, 'POST', `/${mk.id}/approve`, { approve: true })).status, 403, 'the person away cannot approve');
-  assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/approve`, { approve: true })).status, 403, 'nor can the cover');
-  // refusing needs a reason
+  const a = (await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === mk.id); assert.equal(a.status, 'waiting_approval'); assert.equal(a.cover_name, null); assert.match(a.handover_note, /SECRET-HANDOVER/);
+  assert.ok(!JSON.stringify(await cv(tok.purchase, 'GET', '')).includes('SECRET-HANDOVER'), 'the note is not for everyone');
+  // the manager and administrators see it to decide; the person and a stranger cannot
+  assert.ok((await cv(tok.admin, 'GET', '')).to_approve.some(x => x.id === mk.id)); assert.ok((await cv(tok.manager, 'GET', '')).to_approve.some(x => x.id === mk.id));
+  assert.equal((await cv(tok.trainee, 'POST', `/${mk.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).status, 403, 'the person cannot approve');
+  assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).status, 403, 'nor can a colleague');
+  // approving needs a cover; saying no needs a reason
+  assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: true })).status, 400, 'choose who covers first');
+  assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: true, cover_user_id: uid.trainee })).status, 400, 'not themselves');
   assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: false })).status, 400);
-  // the cover's answer
-  assert.equal((await cv(tok.trainee, 'POST', `/${mk.id}/respond`, { accept: true })).status, 403, 'only the cover can answer');
-  assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/respond`, { accept: false })).status, 400, 'declining needs a reason');
+  assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/respond`, { accept: true })).status, 403, 'nobody is asked before the manager has decided');
+  assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).success, true);
+  assert.equal((await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === mk.id).status, 'waiting', 'now waiting for the cover');
+  assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).status, 409, 'decided once');
+  assert.equal((await cv(tok.trainee, 'POST', `/${mk.id}/respond`, { accept: true })).status, 403, 'only the chosen person answers');
+  assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/respond`, { accept: false })).status, 400, '"I cannot cover" needs a reason');
   assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/respond`, { accept: true })).success, true);
-  assert.equal((await cv(tok.rd2, 'POST', `/${mk.id}/respond`, { accept: true })).status, 409, 'answered once');
-  assert.equal((await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === mk.id).status, 'waiting_approval');
-  assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: true })).success, true);
-  assert.equal((await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === mk.id).status, 'confirmed', 'approved and confirmed, waiting for the first day');
-  assert.equal((await cv(tok.manager, 'POST', `/${mk.id}/approve`, { approve: true })).status, 409, 'decided once');
+  assert.equal((await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === mk.id).status, 'confirmed');
   await cv(tok.trainee, 'POST', `/${mk.id}/end`, {});
-  // nobody approves their own absence; an administrator, who has no one above, may
-  const own = await cv(tok.manager, 'POST', '', { cover_user_id: uid.rd2, from_date: awayDays(5), to_date: awayDays(6) }); assert.equal(own.approval, 'pending', 'a manager\'s own absence still waits');
-  assert.equal((await cv(tok.manager, 'POST', `/${own.id}/approve`, { approve: true })).status, 403);
-  assert.equal((await cv(tok.admin, 'POST', `/${own.id}/approve`, { approve: true })).success, true);
+  // nobody approves their own absence; an administrator, who has no one above, may (and must choose the cover)
+  const own = await cv(tok.manager, 'POST', '', { from_date: awayDays(5), to_date: awayDays(6) }); assert.equal(own.approval, 'pending');
+  assert.equal((await cv(tok.manager, 'POST', `/${own.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).status, 403);
+  assert.equal((await cv(tok.admin, 'POST', `/${own.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).success, true);
   await cv(tok.manager, 'POST', `/${own.id}/end`, {});
-  // someone with authority recording another person's absence has approved it by doing so
+  // the manager recording someone's absence settles it on the spot, and must choose the cover
+  assert.equal((await cv(tok.manager, 'POST', '', { user_id: uid.trainee, from_date: awayDays(1), to_date: awayDays(2) })).status, 400, 'a cover is needed when the manager records it');
   const forOther = await cv(tok.manager, 'POST', '', { user_id: uid.trainee, cover_user_id: uid.rd2, from_date: awayDays(1), to_date: awayDays(2) }); assert.equal(forOther.approval, 'approved');
+  assert.equal((await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === forOther.id).status, 'waiting');
   await cv(tok.trainee, 'POST', `/${forOther.id}/end`, {});
 });
 
-test('away and cover: refusing or declining ends it and tells the person to choose again; the cover never takes over', async () => {
-  const a = await cv(tok.trainee, 'POST', '', { cover_user_id: uid.rd2, from_date: R.todayIST(), to_date: awayDays(2) });
-  const refuse = await cv(tok.admin, 'POST', `/${a.id}/approve`, { approve: false, reason: 'We need you on the audit that week' }); assert.equal(refuse.status, 'rejected');
-  let row = (await pool.query('SELECT approval_status, ended_at, approval_reason FROM rd_absences WHERE id = $1', [a.id])).rows[0]; assert.equal(row.approval_status, 'rejected'); assert.ok(row.ended_at); assert.match(row.approval_reason, /audit/);
-  assert.equal((await cv(tok.rd2, 'POST', `/${a.id}/respond`, { accept: true })).status, 404, 'a refused absence cannot be confirmed');
+test('away and cover: "no" from the manager ends it; "I cannot cover" leaves it approved with nobody chosen, so the manager chooses again', async () => {
+  const a = await cv(tok.trainee, 'POST', '', { cover_user_id: uid.rd2, from_date: R.todayIST(), to_date: awayDays(2) }); assert.equal(a.status, 201, JSON.stringify(a));
+  assert.equal((await cv(tok.admin, 'POST', `/${a.id}/approve`, { approve: false, reason: 'We need you on the audit that week' })).status, 'rejected');
+  const row = (await pool.query('SELECT approval_status, ended_at, approval_reason FROM rd_absences WHERE id = $1', [a.id])).rows[0]; assert.equal(row.approval_status, 'rejected'); assert.ok(row.ended_at); assert.match(row.approval_reason, /audit/);
   const b = await cv(tok.trainee, 'POST', '', { cover_user_id: uid.rd2, from_date: R.todayIST(), to_date: awayDays(2) });
-  const dec = await cv(tok.rd2, 'POST', `/${b.id}/respond`, { accept: false, reason: 'I am on site visits all week' }); assert.equal(dec.status, 'declined');
-  row = (await pool.query('SELECT cover_status, ended_at, cover_decline_reason FROM rd_absences WHERE id = $1', [b.id])).rows[0]; assert.equal(row.cover_status, 'declined'); assert.ok(row.ended_at);
-  assert.equal((await cv(tok.admin, 'GET', '')).to_approve.some(x => x.id === b.id), false, 'a declined request leaves the approvers\' queue');
-  assert.equal((await api(tok.rd2, 'GET', '/api/rd/my-day')).covering.length, 0);
-  // the person can plan again straight away
-  const again = await cv(tok.trainee, 'POST', '', { cover_user_id: uid.lead, from_date: R.todayIST(), to_date: awayDays(2) }); assert.equal(again.status, 201, JSON.stringify(again));
-  await cv(tok.trainee, 'POST', `/${again.id}/end`, {});
+  assert.equal((await cv(tok.admin, 'POST', `/${b.id}/approve`, { approve: true, cover_user_id: uid.rd2 })).success, true);
+  assert.equal((await cv(tok.rd2, 'POST', `/${b.id}/respond`, { accept: false, reason: 'I am on site visits all week' })).status, 'declined');
+  let me = (await cv(tok.trainee, 'GET', '')).mine.find(x => x.id === b.id); assert.equal(me.status, 'needs_cover'); assert.equal(me.cover_name, null);
+  assert.ok((await cv(tok.admin, 'GET', '')).to_approve.some(x => x.id === b.id && x.can_assign), 'the manager sees it needs a cover');
+  assert.equal((await api(tok.rd2, 'GET', '/api/rd/my-day')).covering.length, 0, 'nobody covers meanwhile');
+  assert.equal((await cv(tok.trainee, 'PATCH', `/${b.id}`, { cover_user_id: uid.lead })).status, 403, 'the person cannot choose it; the manager does');
+  assert.equal((await cv(tok.admin, 'PATCH', `/${b.id}`, { cover_user_id: uid.lead })).success, true);
+  me = (await cv(tok.lead, 'GET', '')).covering.find(x => x.id === b.id); assert.equal(me.can_respond, true, 'the new person is asked');
+  await cv(tok.trainee, 'POST', `/${b.id}/end`, {});
 });
 
-test('away and cover: changing an absence, the preview, and the warning when work is given to someone who is away', async () => {
+test('away and cover: changing it, the preview, and the warning when work is given to someone who is away', async () => {
   const p = await newProject(tok.kannur); await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.lead, members: [uid.rd2] });
-  const due = awayDays(2);
-  const mkTask = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Preview me', assignee_id: uid.rd2, due_date: due, stage_no: 1 }); assert.equal(mkTask.status, 201);
-  const pv = await cv(tok.rd2, 'GET', `/preview?to=${awayDays(3)}`); assert.ok(pv.tasks.some(t => t.title === 'Preview me'), 'open work due during the absence is listed');
-  assert.equal((await cv(tok.rd2, 'GET', `/preview?to=${awayDays(-9)}`)).tasks.some(t => t.title === 'Preview me'), false, 'work due later is not');
-  assert.equal((await cv(tok.rd2, 'GET', `/preview?to=${awayDays(3)}&user_id=${uid.lead}`)).success, true, 'R&D editors may look at a colleague\'s work when planning');
-  assert.equal((await cv(tok.kannur, 'GET', `/preview?to=${awayDays(3)}&user_id=${uid.rd2}`)).status, 403, 'only your own work, unless you manage');
-  // an absence that is approved and confirmed: assigning to the person warns, and names the cover
+  assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Preview me', assignee_id: uid.rd2, due_date: awayDays(2), stage_no: 1 })).status, 201);
+  assert.ok((await cv(tok.rd2, 'GET', `/preview?to=${awayDays(3)}`)).tasks.some(t => t.title === 'Preview me'), 'open work due during the absence is listed');
+  assert.equal((await cv(tok.rd2, 'GET', `/preview?to=${awayDays(-9)}`)).tasks.some(t => t.title === 'Preview me'), false);
+  assert.equal((await cv(tok.rd2, 'GET', `/preview?to=${awayDays(3)}&user_id=${uid.lead}`)).success, true, 'R&D editors may look at a colleague\'s work');
+  assert.equal((await cv(tok.kannur, 'GET', `/preview?to=${awayDays(3)}&user_id=${uid.rd2}`)).status, 403);
   const a = await cv(tok.admin, 'POST', '', { user_id: uid.rd2, cover_user_id: uid.lead, from_date: R.todayIST(), to_date: awayDays(4) }); assert.equal(a.approval, 'approved');
   let warn = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'While away', assignee_id: uid.rd2, due_date: awayDays(3), stage_no: 1 });
-  assert.equal(warn.assignee_away.covered, false, 'away, but the cover has not confirmed yet'); assert.equal(warn.assignee_away.cover_name, 'Test lead');
+  assert.equal(warn.assignee_away.covered, false, 'away, but the cover has not said yes yet'); assert.equal(warn.assignee_away.cover_name, 'Test lead');
   assert.equal((await cv(tok.lead, 'POST', `/${a.id}/respond`, { accept: true })).success, true);
   warn = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'While away 2', assignee_id: uid.rd2, due_date: awayDays(3), stage_no: 1 });
   assert.equal(warn.assignee_away.covered, true); assert.ok(warn.assignee_away.until);
   assert.ok((await api(tok.lead, 'GET', `/api/rd/people?project=${p.id}`)).people.find(x => x.id === uid.rd2).away, 'the people list says who is away');
-  // editing: nothing changed is refused; strangers cannot edit; the person away can; a changed cover asks the new cover again
-  assert.equal((await cv(tok.admin, 'PATCH', `/${a.id}`, {})).status, 400);
+  assert.equal((await cv(tok.admin, 'PATCH', `/${a.id}`, {})).status, 400, 'nothing changed');
   assert.equal((await cv(tok.kannur, 'PATCH', `/${a.id}`, { reason: 'x' })).status, 403);
   assert.equal((await cv(tok.rd2, 'PATCH', `/${a.id}`, { handover_note: 'Updated note' })).success, true);
   assert.equal((await cv(tok.rd2, 'GET', '')).mine.find(x => x.id === a.id).approval_status, 'approved', 'a changed note does not need approving again');
+  assert.equal((await cv(tok.rd2, 'PATCH', `/${a.id}`, { cover_user_id: uid.trainee })).status, 403, 'the person cannot change the cover the manager chose');
   assert.equal((await cv(tok.rd2, 'PATCH', `/${a.id}`, { to_date: awayDays(2) })).success, true);
-  assert.equal((await cv(tok.rd2, 'GET', '')).mine.find(x => x.id === a.id).approval_status, 'pending', 'changed dates need approving again');
+  assert.equal((await cv(tok.rd2, 'GET', '')).mine.find(x => x.id === a.id).approval_status, 'pending', 'changed dates go back to the manager');
   assert.equal((await cv(tok.rd2, 'PATCH', `/${a.id}`, { from_date: awayDays(1) })).status, 400, 'a started absence cannot move its first day');
-  assert.equal((await cv(tok.admin, 'PATCH', `/${a.id}`, { cover_user_id: uid.trainee })).success, true);
-  const ch = (await cv(tok.rd2, 'GET', '')).mine.find(x => x.id === a.id); assert.equal(ch.cover_name, 'Test trainee'); assert.equal(ch.status, 'waiting_approval');
-  assert.equal((await pool.query('SELECT cover_status FROM rd_absences WHERE id = $1', [a.id])).rows[0].cover_status, 'pending', 'the new cover has to confirm');
   await cv(tok.rd2, 'POST', `/${a.id}/end`, {});
 });
 
@@ -1079,28 +1077,27 @@ test('away and cover: the cover also sees the reviews and stages of the person t
   const t = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Check this', assignee_id: uid.trainee, due_date: awayDays(2), stage_no: 1, requires_review: true }); assert.equal(t.status, 201);
   assert.equal((await api(tok.trainee, 'POST', `/api/rd/tasks/${t.id}/complete`, { result: 'Viscosity 92 KU at 25C, two readings.' })).success, true);
   const a = await cv(tok.admin, 'POST', '', { user_id: uid.lead, cover_user_id: uid.rd2, from_date: R.todayIST(), to_date: awayDays(3) }); await cv(tok.rd2, 'POST', `/${a.id}/respond`, { accept: true });
-  const day = await api(tok.rd2, 'GET', '/api/rd/my-day'); const c = day.covering.find(x => x.user_id === uid.lead); assert.ok(c, 'covering the lead');
+  const c = (await api(tok.rd2, 'GET', '/api/rd/my-day')).covering.find(x => x.user_id === uid.lead); assert.ok(c, 'covering the lead');
   assert.ok(c.reviews.some(x => x.id === t.id), 'the review waiting for the lead is in the cover\'s list'); assert.ok(c.stages.some(x => x.project_id === p.id), 'and the stage the lead owns');
-  assert.match(c.handover_note === undefined ? '' : String(c.handover_note), /.*/);
   assert.equal((await api(tok.rd2, 'POST', `/api/rd/tasks/${t.id}/accept`, {})).success, true, 'the cover can accept it');
   assert.equal((await api(tok.rd2, 'GET', '/api/rd/my-day')).covering.find(x => x.user_id === uid.lead).reviews.some(x => x.id === t.id), false, 'and it leaves the queue');
   await cv(tok.admin, 'POST', `/${a.id}/end`, {});
 });
 
-test('away and cover: "welcome back" tells the person what was done for them', async () => {
+test('away and cover: "while you were away" tells the person what was done for them', async () => {
   const p = await newProject(tok.kannur); await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, lead_user_id: uid.lead, members: [uid.rd2, uid.trainee] });
   const t = await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/tasks`, { title: 'Done while away', assignee_id: uid.trainee, due_date: awayDays(2), stage_no: 1, requires_review: false });
   const a = await cv(tok.admin, 'POST', '', { user_id: uid.trainee, cover_user_id: uid.rd2, from_date: R.todayIST(), to_date: awayDays(4) }); await cv(tok.rd2, 'POST', `/${a.id}/respond`, { accept: true });
   const done = await api(tok.rd2, 'POST', `/api/rd/tasks/${t.id}/complete`, { result: 'Pot life 4 h confirmed on the retained sample.' }); assert.equal(done.success, true, JSON.stringify(done));
-  const during = (await cv(tok.trainee, 'GET', '/summary')).summary; assert.ok(!during || during.absence.id !== a.id, 'this absence has not ended, so it is not summarised yet');
+  const during = (await cv(tok.trainee, 'GET', '/summary')).summary; assert.ok(!during || during.absence.id !== a.id, 'not summarised until it ends');
   await cv(tok.trainee, 'POST', `/${a.id}/end`, {});
-  const s = (await cv(tok.trainee, 'GET', '/summary')).summary; assert.ok(s && s.absence.id === a.id, 'summary after it ends'); assert.ok(s.done_for_me.some(x => x.title === 'Done while away')); assert.equal(s.done_for_me.find(x => x.title === 'Done while away').by_name, 'Test rd2');
+  const s = (await cv(tok.trainee, 'GET', '/summary')).summary; assert.ok(s && s.absence.id === a.id); assert.equal(s.done_for_me.find(x => x.title === 'Done while away').by_name, 'Test rd2');
 });
 
-test('away and cover: the morning message asks the cover to confirm and the approvers to decide', () => {
+test('away and cover: the morning message asks the chosen cover to answer and the manager to decide', () => {
   const { compose } = require('../digest');
-  const d = { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [], lab: [], confirm: [{ name: 'Roshan P', from_date: '2026-12-01', to_date: '2026-12-05' }], approve: [{ name: 'Najma', from_date: '2026-12-01', to_date: '2026-12-02', cover_name: 'Asha', cover_status: 'pending' }] };
+  const d = { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [], lab: [], confirm: [{ name: 'Roshan P', from_date: '2026-12-01', to_date: '2026-12-05' }], approve: [{ name: 'Najma', from_date: '2026-12-01', to_date: '2026-12-02', cover_name: 'Asha' }, { name: 'Jain', from_date: '2026-12-03', to_date: '2026-12-04', cover_name: null }] };
   const m = compose('Saifu K', d, '2026-11-30');
-  assert.match(m.text, /1 absence waiting for your approval/); assert.match(m.text, /1 request to confirm that you can cover/);
-  assert.match(m.text, /Najma: 01-12-2026 to 02-12-2026, cover Asha \(not confirmed yet\)/); assert.match(m.text, /Roshan P: 01-12-2026 to 05-12-2026/);
+  assert.match(m.text, /2 absences waiting for you to decide or choose a cover/); assert.match(m.text, /1 request asking if you can cover/);
+  assert.match(m.text, /Najma: 01-12-2026 to 02-12-2026, suggested cover Asha/); assert.match(m.text, /Jain: 03-12-2026 to 04-12-2026, no cover chosen yet/); assert.match(m.text, /Roshan P: 01-12-2026 to 05-12-2026/);
 });

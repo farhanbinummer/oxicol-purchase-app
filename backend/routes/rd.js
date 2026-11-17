@@ -332,7 +332,7 @@ router.get('/my-day', requirePermissionAny([KEYS.RD_VIEW, KEYS.RD_CREATE]), asyn
             AND s.stage_no = (SELECT MIN(x.stage_no) FROM rd_stages x WHERE x.project_id = p.id AND x.completed_at IS NULL) AND COALESCE(s.owner_user_id, p.lead_user_id) = $1 ORDER BY s.planned_date NULLS LAST, p.id`, [c.user_id, ['Completed', 'Rejected']]);
       covering.push({ ...c, tasks: rows(q), reviews: rows(rvw), stages: rows(stg).map(x => ({ ...x, stage_name: R.STAGES[x.stage_no - 1].name })) });
     }
-    const away = await pool.query(`SELECT a.id, a.kind, a.cover_status, a.approval_status, a.from_date::text AS from_date, a.to_date::text AS to_date, cu.name AS cover_name FROM rd_absences a JOIN users cu ON cu.id = a.cover_user_id WHERE a.user_id = $1 AND a.ended_at IS NULL AND a.to_date >= $2 ORDER BY a.from_date`, [req.user.id, today()]);
+    const away = await pool.query(`SELECT a.id, a.kind, a.cover_status, a.approval_status, a.from_date::text AS from_date, a.to_date::text AS to_date, cu.name AS cover_name FROM rd_absences a LEFT JOIN users cu ON cu.id = a.cover_user_id WHERE a.user_id = $1 AND a.ended_at IS NULL AND a.to_date >= $2 ORDER BY a.from_date`, [req.user.id, today()]);
     res.json({
       success: true, today: today(), covering, my_absences: away.rows, mine: rows(mine), done_by_me: rows(doneByMe), assigned: rows(assigned), assigned_done: rows(assignedDone), submitted: rows(submitted), to_review: rows(toReview),
       stages: rows(stages).map(x => ({ ...x, stage_name: R.STAGES[x.stage_no - 1].name }))

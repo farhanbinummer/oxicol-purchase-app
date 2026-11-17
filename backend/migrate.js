@@ -691,6 +691,16 @@ const STEPS = [
       await db.query("ALTER TABLE rd_absences ADD CONSTRAINT rd_absences_approval_status_check CHECK (approval_status IN ('pending', 'approved', 'rejected'))");
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager', 'rd.cover_approve') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // The manager chooses who covers. The person asking may only suggest someone (or nobody), so the cover can now be empty, and the
+    // cover is not asked to confirm ('none') until the manager has approved and chosen. Additive only.
+    name: '026_rd_manager_chooses_cover',
+    async run(db) {
+      await db.query('ALTER TABLE rd_absences ALTER COLUMN cover_user_id DROP NOT NULL');
+      await db.query('ALTER TABLE rd_absences DROP CONSTRAINT IF EXISTS rd_absences_cover_status_check');
+      await db.query("ALTER TABLE rd_absences ADD CONSTRAINT rd_absences_cover_status_check CHECK (cover_status IN ('none', 'pending', 'accepted', 'declined'))");
+    }
   }
 ];
 

@@ -165,20 +165,22 @@ The reported completion of all eight stages on the same day is **not imported**.
 8. Fields on the request form record what the requester states. The application does not certify regulatory or safety compliance.
 
 
-## Away and cover (plan, confirm, approve, hand over)
+## Away and cover
 
-The page **Away and cover** (menu entry for R&D) is where absences are planned, confirmed, approved and watched.
+The page **Away and cover** (menu entry for R&D) is where absences are asked for, approved and watched.
 
 **The steps**
-1. **Plan:** the person chooses the kind (Leave, Travel, Training, Sick, Other), the first and last day (up to 90 days), who covers, a short reason and a **handover note**. While typing, the page shows **what will be waiting**: open tasks due by the last day (or with no date), stages they own and reviews waiting for them. Managers and R&D editors can plan for someone else.
-2. **The cover confirms or declines.** They are told, see the handover note, and answer. Declining needs a reason; the absence is then ended and the person is told to choose another cover.
-3. **A manager approves or refuses.** Anyone holding `rd.cover_approve` (the Manager, and administrators) sees a queue on the page and in the morning message. Refusing needs a reason. Nobody approves their own absence (an administrator, who has nobody above, may). Someone with authority who records another person's absence has approved it by doing so.
-4. **Only when the absence is approved AND the cover has confirmed does the cover take over,** from the first day. Until then the calendar shows it as waiting. A changed plan (dates or cover) is approved again (unless an approver made the change); a changed note does not need it.
+1. **The person asks.** They give the type (Leave, Travel, Training, Sick, Other), the first and last day (up to 90 days), a reason and notes for the person who will cover. While typing, the page shows the **work that will be waiting**: open tasks due by the last day (or with no date), stages they are in charge of and work waiting for them to check. They may *suggest* a cover, but do not have to.
+2. **The manager approves and chooses who will cover.** Anyone holding `rd.cover_approve` (the Manager, and administrators) sees the request under "Waiting for you", picks the person (people who are away on those dates cannot be picked), and approves, or says no with a reason. Nobody approves their own absence (an administrator, who has nobody above, may). A manager who writes an absence down for someone else settles it on the spot and must choose the cover.
+3. **The chosen person answers.** Only now are they asked. They press **I can cover**, or **I cannot cover** with a reason. If they cannot, the absence stays approved with nobody chosen and the manager chooses again.
+4. **Only when the manager has approved and the chosen person has said "I can cover" does the cover take over,** from the first day. Until then the calendar shows where it is ("Waiting for the manager", "Approved. Cover not chosen yet", "Waiting for the cover to say yes", "Ready", "Away now").
 
-**What the cover gets while it is active:** the absent person's open tasks in My Day ("Covering for ..."), the **reviews** waiting for them and the **stages** they own, their notices and morning-message items, and the handover note. Everything the cover does is recorded "on behalf of" the absent person, who is told. The task stays theirs, and the cover can never review work they did for someone.
+**What the cover gets while it is active:** the person's open tasks in My Day ("Covering for ..."), the work waiting for them to check and the stages they are in charge of, their notices and morning-message items, and the notes. Everything the cover does is recorded "on behalf of" the person away, who is told. The task stays theirs, and the cover can never check work they did for someone.
 
-**Around it:** assigning work to someone who is away shows a warning (and names the cover); the people list shows who is away; a **team calendar** shows the next six weeks; when an absence ends, a **"Welcome back"** card lists what was done for the person and what has arrived; it ends by itself after the last day, or earlier with "End early" (the person, the cover, whoever recorded it, or R&D management). Existing absences were treated as approved and confirmed when this was added.
+**Changing it:** the person can change the dates, type, reason, notes and suggestion. New dates go back to the manager. Once the manager has chosen, only the manager changes the cover (the new person is asked). A started absence cannot move its first day. Either can cancel it; the person covering can stop covering.
 
-**Reminders:** the cover gets a notice and a line in the morning message until they answer; approvers get a notice and a morning-message line until they decide. Notices never include the handover note.
+**Around it:** giving a task to someone who is away shows a warning that names the cover, and the people list marks who is away; a six-week calendar (with a table for screen readers) shows who is away; "While you were away" lists what was done for the person and what has come in; it ends by itself after the last day. Existing absences were treated as approved and confirmed when this was added.
 
-**Numbers:** work done by a cover counts as the cover's completion, not the absent person's, in Team Performance.
+**Reminders:** the manager gets a notice and a morning-message line until each request is decided or has a cover; the person asked to cover gets the same until they answer. Notices never include the notes.
+
+**Numbers:** work done by a cover counts as the cover's completion, not the person's, in Team Performance.
