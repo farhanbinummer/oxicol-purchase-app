@@ -961,3 +961,23 @@ test('cover/notices: the morning message lists lab projects that need a trial', 
   const m = compose('Asha Nair', d, '2026-01-05');
   assert.match(m.text, /2 lab projects needing a trial/); assert.match(m.text, /Lab trials to record/); assert.match(m.text, /OXRD011026: no trial recorded yet/); assert.match(m.text, /OXRD021026: last trial 20 days ago/);
 });
+
+test('notices: the morning message is only sent in the morning (India time), and a late call neither sends nor uses up the day', async () => {
+  const D = require('../digest');
+  const at = (iso) => Date.parse(iso);                                   // UTC instants; India is UTC+5:30
+  assert.equal(D.inMorningWindow(at('2026-11-17T00:30:00Z')), true, '06:00 IST');
+  assert.equal(D.inMorningWindow(at('2026-11-17T02:30:00Z')), true, '08:00 IST');
+  assert.equal(D.inMorningWindow(at('2026-11-17T05:29:00Z')), true, '10:59 IST');
+  assert.equal(D.inMorningWindow(at('2026-11-17T05:30:00Z')), false, '11:00 IST');
+  assert.equal(D.inMorningWindow(at('2026-11-17T10:50:00Z')), false, '16:20 IST: the afternoon "good morning"');
+  assert.equal(D.inMorningWindow(at('2026-11-16T23:59:00Z')), false, '05:29 IST');
+  const saved = process.env.NOTIFY_TEST_MODE; process.env.NOTIFY_TEST_MODE = '1';
+  const before = (await pool.query("SELECT last_run FROM job_runs WHERE name = 'morning-digest'")).rows[0];
+  try {
+    const late = await D.morningDigest({ nowMs: at('2026-11-17T10:50:00Z') });
+    assert.match(late.skipped, /outside the morning window/);
+    assert.deepEqual((await pool.query("SELECT last_run FROM job_runs WHERE name = 'morning-digest'")).rows[0], before, 'a late call does not use up the day');
+    assert.ok(!(await D.morningDigest({ nowMs: at('2026-11-17T10:50:00Z'), dryRun: true })).skipped, 'a dry run is allowed at any time');
+    assert.match((await D.morningDigest({ nowMs: at('2026-11-22T02:30:00Z') })).skipped, /Sunday/, 'still no message on Sunday');
+  } finally { if (saved === undefined) delete process.env.NOTIFY_TEST_MODE; else process.env.NOTIFY_TEST_MODE = saved; }
+});

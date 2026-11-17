@@ -83,9 +83,16 @@ function compose(name, d, today) {
 }
 
 /** Sends (or, with dryRun, only prepares) today's message to everyone who should get one. */
-async function morningDigest({ dryRun, force } = {}) {
-  const today = R.todayIST();
+// The morning message is only sent between 06:00 and 11:00 India time. GitHub's free timer can start a job hours late; a late call is
+// skipped (and does not use up the day) rather than sending "good morning" in the afternoon.
+const MORNING_FROM = 6, MORNING_UNTIL = 11;
+const istHour = (nowMs) => new Date((nowMs == null ? Date.now() : nowMs) + 330 * 60000).getUTCHours();
+const inMorningWindow = (nowMs) => { const h = istHour(nowMs); return h >= MORNING_FROM && h < MORNING_UNTIL; };
+
+async function morningDigest({ dryRun, force, nowMs } = {}) {
+  const today = R.todayIST(nowMs);
   if (new Date(today + 'T00:00:00Z').getUTCDay() === 0 && !force) return { skipped: 'It is Sunday: no morning message is sent.' };
+  if (!force && !dryRun && !inMorningWindow(nowMs)) return { skipped: `It is outside the morning window (${MORNING_FROM}:00 to ${MORNING_UNTIL}:00 India time), so nothing was sent today.` };
   if (!emailOn() && !whatsappOn()) return { skipped: 'Email and WhatsApp are not switched on, so nothing can be sent.' };
   if (!dryRun) {
     const claim = await pool.query(
@@ -103,4 +110,4 @@ async function morningDigest({ dryRun, force } = {}) {
   return out;
 }
 
-module.exports = { morningDigest, compose, gather };
+module.exports = { morningDigest, compose, gather, inMorningWindow };
