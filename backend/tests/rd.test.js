@@ -249,13 +249,13 @@ test('visibility: drafts are private; projects are seen by involvement or by wid
 
 test('confidential content stays with people who may see it, even for project members', async () => {
   const p = await newProject(tok.kannur);
-  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, members: [uid.purchase, uid.qc], lead_user_id: uid.lead, technical_approach: 'SECRET-APPROACH', risks: 'SECRET-RISK' });
+  await api(tok.lead, 'PUT', `/api/rd/projects/${p.id}/assessment`, { version: (await get(tok.lead, p.id)).project.version, members: [uid.purchase, uid.store], lead_user_id: uid.lead, technical_approach: 'SECRET-APPROACH', risks: 'SECRET-RISK' });
   assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/updates`, { kind: 'lab_note', body: 'SECRET-LAB-NOTE' })).status, 201);
   assert.equal((await api(tok.lead, 'POST', `/api/rd/projects/${p.id}/updates`, { kind: 'comment', body: 'a normal comment' })).status, 201);
   const rd = await get(tok.lead, p.id);
   assert.equal(rd.project.technical_approach, 'SECRET-APPROACH');
   assert.ok(rd.updates.some(u => u.kind === 'lab_note'));
-  for (const who of ['purchase', 'qc', 'kannur']) {
+  for (const who of ['purchase', 'store', 'kannur']) {
     const d = await get(tok[who], p.id);
     assert.equal(d.status, 200, who);
     assert.ok(!('technical_approach' in d.project) && !('risks' in d.project), who + ': technical fields are omitted from the response');

@@ -1440,10 +1440,25 @@
       box.appendChild(msg); stop(); setTimeout(stop, 0); return box;
     }
 
+    /** The cost-only form for people who may enter prices but may not see the formula (for example Accounts). */
+    function costDialog(x) {
+      dialog((x.rm_cost_per_kg == null ? 'Enter' : 'Change') + ' cost per kg: trial ' + x.label, (body) => {
+        const c = el('input'); c.type = 'text'; c.inputMode = 'decimal'; c.value = x.rm_cost_per_kg == null ? '' : String(x.rm_cost_per_kg);
+        body.appendChild(field('Raw-material cost per kg (₹)', c, 'coCost', 'Up to two decimals. Only people with price access see this.'));
+        let why = null; if (x.rm_cost_per_kg != null) { why = el('textarea'); why.rows = 2; why.maxLength = 1000; body.appendChild(field('Reason for the change (required)', why, 'coWhy', 'The earlier cost is kept in the history.')); }
+        return () => ({ c, why });
+      }, 'Save cost', async (f, err) => {
+        if (f.why && !f.why.value.trim()) { err.textContent = 'Say why the cost is changing.'; err.hidden = false; f.why.focus(); return false; }
+        const r = await api('/api/rd/projects/' + pid + '/trials/' + x.id + '/cost', 'PUT', { rm_cost_per_kg: f.c.value, version: x.version, reason: f.why ? f.why.value : undefined });
+        if (!r.success) { trialFail(r, err); return false; }
+        note('Cost saved.', true); await loadTrials(); lastFocus = $('trialsview').querySelector('button[aria-label="Open trial ' + x.label + '"]'); return true;
+      });
+    }
+
     function trialDetail(id) {
       const x = T.trials.find(y => y.id === id); if (!x) return;
       dialog('Trial ' + x.label, (body) => {
-        const dl = el('dl', 'tr-dl');
+        let costBox = null; const dl = el('dl', 'tr-dl');
         const row = (k, v) => { if (v == null || v === '') return; dl.appendChild(el('dt', null, k)); const dd = el('dd'); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; dl.appendChild(dd); };
         row('Stage', x.stage_no + ': ' + STAGE_NAMES[x.stage_no]); row('Date', dmy(x.trial_date)); row('Recorded by', x.recorded_by_name);
         row('Outcome', Object.assign(el('span', OUT_BADGE[x.outcome] || 'badge', x.outcome)));
@@ -1452,7 +1467,8 @@
         row('Batch size', x.batch_size_text); if (T.can.technical) row('Observations', x.observations);
         if (T.can.technical) (x.extra_fields || []).forEach(f => row(f.label, f.value || '-'));
         if (T.can.prices) row('Raw-material cost', x.rm_cost_per_kg == null ? 'Not recorded' : rupeesPerKg(x.rm_cost_per_kg));
-        body.appendChild(dl);
+        if (T.can.cost) { const cb = el('button', 'oxi-btn-secondary oxi-btn-sm', x.rm_cost_per_kg == null ? 'Enter cost per kg' : 'Change cost per kg'); cb.type = 'button'; cb.onclick = () => { body.closest('dialog').close(); setTimeout(() => costDialog(x), 0); }; costBox = el('div'); costBox.style.margin = '0 0 12px'; costBox.appendChild(cb); }
+        body.appendChild(dl); if (costBox) body.appendChild(costBox);
         const rt = el('table', 'oxi-nocards'); const rh = el('tr'); ['Requirement', 'Result'].concat(T.can.technical ? ['Measured'] : []).forEach(c => { const th = el('th', null, c); th.scope = 'col'; rh.appendChild(th); }); const th0 = el('thead'); th0.appendChild(rh); rt.appendChild(th0);
         const rb = el('tbody'); T.requirements.forEach(q => { const r = x.results.find(y => y.requirement_id === q.id) || { result: 'Not tested' }; const tr = el('tr'); tr.appendChild(el('td', null, (q.parameter || '(unnamed)') + (q.target ? ' (target ' + q.target + ')' : ''))); const td = el('td'); td.appendChild(el('span', 'tr-res tr-c-' + r.result.replace(' ', '').toLowerCase(), RES_SYM[r.result] + ' ' + r.result)); tr.appendChild(td); if (T.can.technical) tr.appendChild(el('td', null, r.measured_value || '')); rb.appendChild(tr); });
         rt.appendChild(rb); const rw = el('div', 'oxi-table-scroll'); rw.appendChild(rt); body.appendChild(rw);

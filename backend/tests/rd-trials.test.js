@@ -59,6 +59,9 @@ test.before(async () => {
   tok.lead = await mkUser('lead', ['rd']);
   tok.manager = await mkUser('manager', ['manager']);
   tok.qc = await mkUser('qc', ['qc']);
+  tok.purchase = await mkUser('purchase', ['purchase']);          // holds no trial key
+  tok.accounts = await mkUser('accounts', ['accounts']);
+  await grant('accounts', 'rd.trial_view'); await grant('accounts', 'rd.trial_cost');      // what the Manager passes on (here: the administrator's Roles and Permissions screen)
   tok.trainee = await mkUser('trainee', ['rd_trainee']);
 });
 
@@ -74,15 +77,17 @@ test.after(async () => {
   } finally { server && server.kill(); await pool.end(); }
 });
 
-test('trials: default grants (trial_edit to R&D only; trial_view to R&D and view_all holders)', async () => {
+test('trials: default grants (R&D and QC record trials; R&D, QC and Manager see them; the Manager holds the cost key)', async () => {
   const { DEFAULTS } = require('../permissions');
   const holders = (k) => Object.entries(DEFAULTS).filter(([, keys]) => keys.includes(k)).map(([r]) => r).sort();
-  assert.deepEqual(holders('rd.trial_edit'), ['rd']);
-  assert.deepEqual(holders('rd.trial_view'), ['manager', 'rd']);
+  assert.deepEqual(holders('rd.trial_edit'), ['qc', 'rd']);
+  assert.deepEqual(holders('rd.trial_view'), ['manager', 'qc', 'rd']);
+  assert.deepEqual(holders('rd.trial_cost'), ['manager'], 'R&D does not enter costs');
   const db = await pool.query("SELECT role, permission_key FROM role_permissions WHERE permission_key IN ('rd.trial_edit','rd.trial_view') AND role = ANY($1)", [['rd', 'manager', 'qc', 'purchase']]);
   const has = (r, k) => db.rows.some(x => x.role === r && x.permission_key === k);
-  assert.ok(has('rd', 'rd.trial_edit') && has('rd', 'rd.trial_view') && has('manager', 'rd.trial_view'));
-  assert.ok(!has('manager', 'rd.trial_edit') && !has('qc', 'rd.trial_view') && !has('purchase', 'rd.trial_view'));
+  assert.ok(has('rd', 'rd.trial_edit') && has('rd', 'rd.trial_view') && has('manager', 'rd.trial_view') && has('qc', 'rd.trial_edit') && has('qc', 'rd.trial_view'));
+  assert.ok(!has('manager', 'rd.trial_edit') && !has('purchase', 'rd.trial_view') && !has('rd', 'rd.trial_cost'));
+  const tech = await pool.query("SELECT 1 FROM role_permissions WHERE role = 'qc' AND permission_key = 'field.rd_technical'"); assert.equal(tech.rowCount, 1, 'QC records trials, so it holds technical access');
 });
 
 test('trials: trial numbers are unique and sequential under simultaneous inserts', async () => {
@@ -132,7 +137,7 @@ test('trials: formula, what changed, observations and measured values need field
   assert.equal(m1.summary.total, requirements.length); assert.ok(m1.summary.pass > 0); assert.equal(asMgr.can.technical, false); assert.equal(asMgr.can.add, false);
   // and cannot write
   assert.equal((await api(tok.manager, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements))).status, 403, 'manager has no trial_edit');
-  assert.equal((await api(tok.qc, 'GET', `/api/rd/projects/${pid}/trials`)).status, 403, 'qc has no trial_view');
+  assert.equal((await api(tok.purchase, 'GET', `/api/rd/projects/${pid}/trials`)).status, 403, 'purchase has no trial_view');
   // the audit trail records that trials exist, never their text or cost
   const aud = await pool.query("SELECT * FROM audit_log WHERE entity = 'rd_trial' AND actor_id = ANY($1)", [[uid.lead, uid.admin]]);
   assert.ok(aud.rowCount >= 2); const dump = JSON.stringify(aud.rows);
@@ -252,7 +257,7 @@ test('trials: photographs and PDFs - checked by their bytes, confidential, cappe
   const l = (await list(tok.lead, pid)).trials[0]; assert.equal(l.attachments.length, 1); assert.equal(l.attachments[0].file_name, 'My Plate1.jpg'); assert.ok(!('data' in l.attachments[0]));
   const mg = (await list(tok.manager, pid)).trials[0]; assert.equal(mg.attachment_count, 1); assert.ok(!('attachments' in mg));
   assert.equal((await download(tok.manager, pid, t.id, ok.id)).status, 403); assert.equal((await upload(tok.manager, pid, t.id, JPEG)).status, 403);
-  assert.equal((await download(tok.qc, pid, t.id, ok.id)).status, 403, 'no trial_view');
+  assert.equal((await download(tok.purchase, pid, t.id, ok.id)).status, 403, 'no trial_view');
   // a person who cannot open the project, and a file reached through the wrong trial
   assert.equal((await download(tok.trainee, pid, t.id, ok.id)).status, 403, 'no technical access (and the project is not theirs to open)');
   const other = await newProject(); const ot = await api(tok.lead, 'POST', `/api/rd/projects/${other}/trials`, trialBody((await list(tok.lead, other)).requirements));
@@ -347,4 +352,38 @@ test('trials: the project\'s people are told about a trial or a preferred formul
   // the person who recorded it is not told about their own action
   const own = await pool.query('SELECT 1 FROM notice_log WHERE user_id = $1', [uid.admin]); assert.equal(own.rowCount, 0);
   await pool.query('UPDATE users SET email = NULL WHERE id = $1', [uid.lead]);
+});
+
+// ---------------------------------------------------------------- QC records trials; the cost goes to another department
+test('trials: QC may record trials on projects it is on (and only those); R&D cannot enter costs, a department given the cost key can', async () => {
+  const pid = await newProject(); const { requirements } = await list(tok.lead, pid);
+  // QC is not on the project: it is not found
+  assert.equal((await list(tok.qc, pid)).status, 404, 'QC cannot open a project it is not on');
+  await pool.query('INSERT INTO rd_project_members (project_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [pid, uid.qc]);
+  const l = await list(tok.qc, pid); assert.equal(l.status, 200); assert.equal(l.can.add, true);
+  const t = await api(tok.qc, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements)); assert.equal(t.status, 201, JSON.stringify(t));
+  assert.equal((await list(tok.qc, pid)).trials[0].recorded_by_name, 'Test qc');
+  assert.equal((await api(tok.qc, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements, { rm_cost_per_kg: '10' }))).status, 403, 'QC has no price access');
+  // R&D has neither the cost key nor price access
+  const url = `/api/rd/projects/${pid}/trials/${t.id}/cost`;
+  assert.equal((await api(tok.lead, 'PUT', url, { rm_cost_per_kg: '10', version: 1 })).status, 403);
+  // Accounts: given rd.trial_view and rd.trial_cost, on the project, holds price access but NOT technical access
+  assert.equal((await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '10', version: 1 })).status, 404, 'still has to be on the project');
+  await pool.query('INSERT INTO rd_project_members (project_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [pid, uid.accounts]);
+  const view = await list(tok.accounts, pid); assert.equal(view.status, 200); assert.equal(view.can.cost, true); assert.equal(view.can.add, false); assert.equal(view.can.technical, false);
+  assert.ok(!JSON.stringify(view).includes(SECRET), 'Accounts never sees the formula');
+  assert.equal((await api(tok.accounts, 'POST', `/api/rd/projects/${pid}/trials`, trialBody(requirements))).status, 403, 'and cannot record trials');
+  const bad = await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '12.345', version: 1 }); assert.equal(bad.status, 400);
+  assert.equal((await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '45.50', version: 99 })).status, 409, 'stale version');
+  const ok = await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '45.50', version: 1 }); assert.equal(ok.status, 200, JSON.stringify(ok)); assert.equal(ok.version, 2);
+  assert.equal((await list(tok.accounts, pid)).trials[0].rm_cost_per_kg, 45.5);
+  assert.equal((await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '45.50', version: 2 })).status, 400, 'nothing changed');
+  assert.equal((await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '50', version: 2 })).status, 400, 'a change needs a reason');
+  assert.equal((await api(tok.accounts, 'PUT', url, { rm_cost_per_kg: '50', version: 2, reason: 'Supplier price rose' })).status, 200);
+  // the cost never appears for people without price access, in the trial, its history or the audit trail
+  const asLead = await list(tok.lead, pid); assert.ok(!JSON.stringify(asLead).includes('45.5') && !JSON.stringify(asLead).includes('"rm_cost_per_kg"'), 'R&D does not see the cost or the cost changes');
+  const acc = (await list(tok.accounts, pid)).trials[0]; assert.equal(acc.corrections.length, 2); assert.equal(acc.corrections[1].old.rm_cost_per_kg, 45.5); assert.equal(acc.corrections[1].new.rm_cost_per_kg, 50);
+  const aud = await pool.query("SELECT * FROM audit_log WHERE action = 'rd.trial_cost' AND entity_id = $1", [t.id]); assert.equal(aud.rowCount, 2); assert.ok(!/45\.5|\b50\b/.test(JSON.stringify(aud.rows.map(r => [r.summary, r.before_data, r.after_data]))), 'the audit never stores the amount');
+  // without the key, price access alone is not enough
+  assert.equal((await api(tok.purchase, 'PUT', url, { rm_cost_per_kg: '1', version: 3 })).status, 403);
 });

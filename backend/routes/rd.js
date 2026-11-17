@@ -1267,7 +1267,8 @@ function shapeTrial(row, results, corrections, ctx, files) {
     corrections: corrections.map(c => {
       const keys = Object.keys(c.new_values || {}).filter(k => ctx.prices || k !== 'rm_cost_per_kg').filter(k => ctx.technical || !TRIAL_CONFIDENTIAL.has(k));
       const base = { id: c.id, at: c.created_at, by: c.corrected_by_name, fields: keys };
-      if (!ctx.technical) return base;
+      const costOnly = Object.keys(c.new_values || {}).every(k => k === 'rm_cost_per_kg');
+      if (!ctx.technical && !(ctx.prices && costOnly)) return base;          // a change to the cost alone is shown, with its reason, to people who may see prices
       const strip = (o) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => ctx.prices || k !== 'rm_cost_per_kg'));
       return { ...base, reason: c.reason, old: strip(c.old_values), new: strip(c.new_values) };
     })
@@ -1310,7 +1311,7 @@ router.get('/projects/:id/trials', needTrialView, async (req, res) => {
       success: true, today: today(), project_status: o.p.status, requirements: reqs, outcomes: R.TRIAL_OUTCOMES, results: R.TRIAL_RESULTS, limits: { max_extra_fields: R.MAX_EXTRA_FIELDS, attach_max_bytes: R.ATTACH_MAX_BYTES, attach_max_per_trial: R.ATTACH_MAX_PER_TRIAL },
       trials: o.p.is_draft ? [] : await loadTrials(pool, o.p.id, ctx),
       open_trial_tasks: (trialOpen(o.p) && ctx.technical && (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT))) ? await myTrialTasks(pool, req.user.id, o.p.id) : [],
-      can: { add: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && ctx.technical && trialOpen(o.p), technical: ctx.technical, prices: ctx.prices, open: trialOpen(o.p), closed_reason: trialOpen(o.p) ? null : trialClosedMessage(o.p) }
+      can: { add: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && ctx.technical && trialOpen(o.p), cost: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_COST)) && ctx.prices && !o.p.is_draft, technical: ctx.technical, prices: ctx.prices, open: trialOpen(o.p), closed_reason: trialOpen(o.p) ? null : trialClosedMessage(o.p) }
     });
   } catch (err) { console.error('rd trials list failed:', err); fail(res, 500, 'Could not load the trials'); }
 });
@@ -1438,6 +1439,47 @@ router.patch('/projects/:id/trials/:trialId', needTrialEdit, async (req, res) =>
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('rd trial correct failed:', err); fail(res, 500, 'Could not correct the trial');
+  } finally { client.release(); }
+});
+
+/**
+ * Enter or change the raw-material cost per kg of a trial. A separate, narrow permission: the person needs rd.trial_cost (the Manager
+ * holds it and passes it to another department such as Accounts) AND access to prices, but no technical access, so they never see
+ * a formula. Each change is a correction row (old and new cost, visible only to people who may see prices), and the audit trail
+ * records that a cost was set, never the amount.
+ */
+router.put('/projects/:id/trials/:trialId/cost', async (req, res) => {
+  if (!(req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_COST))) return fail(res, 403, `Your role ("${req.user.role}") is not allowed to enter trial costs`);
+  if (!can(req.access, KEYS.FIELD_PRICES)) return fail(res, 403, 'Entering a cost needs access to prices');
+  const b = req.body || {};
+  const trialId = idOf(req.params.trialId);
+  if (!trialId) return fail(res, 400, 'Invalid trial id');
+  const c = R.parseTrialCost(b.rm_cost_per_kg); if (c.error) return fail(res, 400, c.error);
+  if (!Number.isInteger(Number(b.version))) return fail(res, 400, 'Send the version you are changing');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    req.params.id = String(idOf(req.params.id) || 0);
+    const o = await open(req, res, { db: client, lock: true });
+    if (!o) { await client.query('ROLLBACK'); return; }
+    if (o.p.is_draft) { await client.query('ROLLBACK'); return conflict(res, trialClosedMessage(o.p)); }
+    const tr = (await client.query('SELECT * FROM rd_trials WHERE id = $1 AND project_id = $2 FOR UPDATE', [trialId, o.p.id])).rows[0];
+    if (!tr) { await client.query('ROLLBACK'); return fail(res, 404, 'Trial not found'); }
+    if (Number(b.version) !== tr.version) { await client.query('ROLLBACK'); return conflict(res, 'Someone else changed this trial since you opened it. Reload to see their changes, then apply yours again.', { current_version: tr.version }); }
+    const old = tr.rm_cost_per_kg == null ? null : Number(tr.rm_cost_per_kg);
+    if (old === c.value) { await client.query('ROLLBACK'); return fail(res, 400, 'Nothing was changed'); }
+    const reason = old == null ? (String(b.reason || '').trim() || 'Cost per kg entered') : String(b.reason || '').trim();
+    if (reason.length < 5) { await client.query('ROLLBACK'); return fail(res, 400, 'Say why the cost is being changed (at least 5 characters)'); }
+    const upd = await client.query('UPDATE rd_trials SET rm_cost_per_kg = $1, version = version + 1, updated_at = NOW() WHERE id = $2 AND version = $3 RETURNING version', [c.value, tr.id, tr.version]);
+    if (!upd.rowCount) { await client.query('ROLLBACK'); return conflict(res, 'Someone else changed this trial at the same moment. Reload and try again.'); }
+    await client.query('INSERT INTO rd_trial_corrections (trial_id, corrected_by, corrected_by_name, reason, old_values, new_values) VALUES ($1,$2,$3,$4,$5,$6)', [tr.id, req.user.id, req.user.name, reason.slice(0, 1000), JSON.stringify({ rm_cost_per_kg: old }), JSON.stringify({ rm_cost_per_kg: c.value })]);
+    await addUpdate(client, o.p.id, 'system', req, `The cost per kg of lab trial ${R.trialLabel(tr.trial_no)} was ${old == null ? 'recorded' : 'changed'}`);
+    await audit(client, req, { action: 'rd.trial_cost', entity: 'rd_trial', id: tr.id, summary: `${o.p.project_number}: cost per kg ${old == null ? 'recorded' : 'changed'} for trial ${R.trialLabel(tr.trial_no)}`, reason });
+    await client.query('COMMIT');
+    res.json({ success: true, version: upd.rows[0].version });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('rd trial cost failed:', err); fail(res, 500, 'Could not save the cost');
   } finally { client.release(); }
 });
 
