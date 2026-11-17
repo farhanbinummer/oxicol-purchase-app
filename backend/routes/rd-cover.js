@@ -1,16 +1,15 @@
 // routes/rd-cover.js - away and cover: who is away, when, who covers.
-//   GET  /api/rd/cover              my absences, covers I hold, requests waiting for my answer or approval, the team calendar
+//   GET  /api/rd/cover              my absences, the covers I hold, requests waiting for my decision, the team calendar
 //   GET  /api/rd/cover/preview      the work that will be waiting while someone is away
 //   GET  /api/rd/cover/summary      what happened while I was away (last 14 days)
 //   POST /api/rd/cover              ask to be away { user_id?, from_date, to_date, kind, reason?, handover_note?, cover_user_id? (a suggestion) }
-//   PATCH /api/rd/cover/:id         change dates, kind, reason, notes or the suggested cover (the manager can change the cover)
+//   PATCH /api/rd/cover/:id         change dates, type, reason, notes or the suggested cover (once chosen, only the manager changes the cover)
 //   POST /api/rd/cover/:id/approve  the manager approves and chooses who covers { approve, cover_user_id?, reason? }
-//   POST /api/rd/cover/:id/respond  the chosen cover says "I can cover" or "I cannot cover" { accept, reason? }
+//   POST /api/rd/cover/:id/problem  the chosen cover tells the manager there is a problem { note }
 //   POST /api/rd/cover/:id/end      end it early
-// How it goes: the person asks. The MANAGER approves and chooses who covers (the person may only suggest someone). The chosen person
-// says "I can cover". Only when both have said yes does the cover take over, from the first day: they see the person's open tasks,
-// reviews and stages, and get their notices. The task stays the person's; what the cover does is recorded "on behalf of" them, and the
-// cover can never review work they did for someone.
+// How it goes: the person asks. The MANAGER approves and chooses who covers: that is an instruction, so the chosen person is told, not
+// asked, and takes over from the first day. They can only tell the manager about a problem; the manager decides. The task stays the
+// person's; what the cover does is recorded "on behalf of" them, and the cover can never review work they did for someone.
 const express = require('express');
 const { pool } = require('../database');
 const { fail } = require('../utils');
@@ -24,7 +23,7 @@ const router = express.Router();
 const MAX_DAYS = 90;
 const KINDS = ['Leave', 'Travel', 'Training', 'Sick', 'Other'];
 const COVER_ROLES = ['rd', 'rd_trainee', 'qc', 'manager', 'admin'];       // who can be asked to cover: R&D-related people
-// The cover takes over only when the absence is approved AND the cover has confirmed. "Shown" also includes absences still waiting (for the calendar and warnings).
+// The cover takes over when the absence is approved and a cover is chosen (cover_status 'accepted' means "chosen by the manager"). "Shown" also includes absences still waiting (for the calendar and warnings).
 const ACTIVE = "a.ended_at IS NULL AND a.from_date <= $DATE AND a.to_date >= $DATE AND a.approval_status = 'approved' AND a.cover_status = 'accepted'";
 const SHOWN = "a.ended_at IS NULL AND a.from_date <= $DATE AND a.to_date >= $DATE AND a.approval_status <> 'rejected' AND a.cover_status <> 'declined'";
 const active = (n) => ACTIVE.replace(/\$DATE/g, '$' + n), shown = (n) => SHOWN.replace(/\$DATE/g, '$' + n);
@@ -60,7 +59,7 @@ async function awayToday(db, ids, date) {
 }
 
 const SHOW = `a.id, a.user_id, au.name AS user_name, a.cover_user_id, cu.name AS cover_name, a.kind, a.from_date::text AS from_date, a.to_date::text AS to_date, a.reason,
-  a.handover_note, a.cover_status, a.cover_responded_at, a.cover_decline_reason, a.created_by, a.ended_at,
+  a.handover_note, a.cover_status, a.cover_responded_at, a.cover_decline_reason, a.cover_problem, a.cover_problem_at, a.created_by, a.ended_at,
   a.approval_status, a.approved_by, ap.name AS approved_by_name, a.approval_reason
   FROM rd_absences a LEFT JOIN users ap ON ap.id = a.approved_by JOIN users au ON au.id = a.user_id LEFT JOIN users cu ON cu.id = a.cover_user_id`;
 router.use((req, res, next) => (req.access.isAdmin || can(req.access, KEYS.RD_VIEW) || can(req.access, KEYS.RD_EDIT) ? next() : fail(res, 403, 'Not allowed')));
@@ -73,15 +72,15 @@ async function approverIds(db) {
   return r.rows.map(x => x.id);
 }
 const statusOf = (a, today) => (a.approval_status === 'rejected' ? 'rejected' : a.ended_at ? 'ended' : a.to_date < today ? 'finished' : a.approval_status === 'pending' ? 'waiting_approval'
-  : !a.cover_user_id || a.cover_status === 'none' ? 'needs_cover' : a.cover_status === 'pending' ? 'waiting' : a.from_date <= today ? 'active' : 'confirmed');
+  : !a.cover_user_id ? 'needs_cover' : a.cover_problem ? 'problem' : a.from_date <= today ? 'active' : 'ready');
 /** One absence for the signed-in person: the handover note only for the person away, their cover, whoever recorded it, and R&D managers. */
 function shape(a, req, today) {
   const me = req.user.id, mayRead = canManage(req) || a.user_id === me || a.cover_user_id === me || a.created_by === me;
   const out = { id: a.id, user_id: a.user_id, user_name: a.user_name, cover_user_id: a.cover_user_id, cover_name: a.cover_name, kind: a.kind, from_date: a.from_date, to_date: a.to_date, reason: a.reason, cover_status: a.cover_status, approval_status: a.approval_status, approved_by_name: a.approved_by_name || null, status: statusOf(a, today),
-    can_edit: !a.ended_at && a.to_date >= today && (canManage(req) || a.user_id === me || a.created_by === me), can_respond: a.cover_user_id === me && a.cover_status === 'pending' && !a.ended_at && a.to_date >= today,
+    can_edit: !a.ended_at && a.to_date >= today && (canManage(req) || a.user_id === me || a.created_by === me), can_report: a.cover_user_id === me && a.approval_status === 'approved' && !a.ended_at && a.to_date >= today && !a.cover_problem,
     can_approve: canApprove(req) && a.approval_status === 'pending' && !a.ended_at && a.to_date >= today && (a.user_id !== me || req.access.isAdmin),
-    can_assign: canApprove(req) && a.approval_status === 'approved' && !a.cover_user_id && !a.ended_at && a.to_date >= today };
-  if (mayRead || out.can_approve || out.can_assign) { out.handover_note = a.handover_note || ''; out.cover_decline_reason = a.cover_decline_reason || null; out.approval_reason = a.approval_reason || null; }
+    can_assign: canApprove(req) && a.approval_status === 'approved' && (!a.cover_user_id || !!a.cover_problem) && !a.ended_at && a.to_date >= today };
+  if (mayRead || out.can_approve || out.can_assign) { out.handover_note = a.handover_note || ''; out.cover_problem = a.cover_problem || null; out.approval_reason = a.approval_reason || null; }
   return out;
 }
 
@@ -109,11 +108,11 @@ router.get('/', async (req, res) => {
       (canManage(req) || can(req.access, KEYS.RD_VIEW_ALL)) ? pool.query(`SELECT ${SHOW} WHERE ${upcoming.replace('$2', '$1')} AND a.from_date <= ($1::date + 60) ORDER BY a.from_date, au.name LIMIT 200`, [t]) : { rows: [] },
       pool.query(`SELECT ${SHOW} WHERE a.user_id = $1 AND a.cover_status <> 'declined' AND a.approval_status = 'approved' AND (a.ended_at IS NOT NULL OR a.to_date < $2) AND a.from_date <= $2 AND COALESCE(a.ended_at::date, a.to_date) >= ($2::date - 14) ORDER BY a.to_date DESC LIMIT 3`, [me, t]),
       pool.query(`SELECT u.id, u.name FROM users u WHERE u.active AND EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = ANY($1)) ORDER BY u.name`, [COVER_ROLES]),
-      canApprove(req) ? pool.query(`SELECT ${SHOW} WHERE a.ended_at IS NULL AND a.to_date >= $1 AND (a.approval_status = 'pending' OR (a.approval_status = 'approved' AND a.cover_user_id IS NULL)) ORDER BY a.from_date, au.name LIMIT 100`, [t]) : { rows: [] }
+      canApprove(req) ? pool.query(`SELECT ${SHOW} WHERE a.ended_at IS NULL AND a.to_date >= $1 AND (a.approval_status = 'pending' OR (a.approval_status = 'approved' AND (a.cover_user_id IS NULL OR a.cover_problem IS NOT NULL))) ORDER BY a.from_date, au.name LIMIT 100`, [t]) : { rows: [] }
     ]);
     const all = [...mine.rows, ...covering.rows, ...team.rows];
     const mineS = mine.rows.map(a => shape(a, req, t)), covS = covering.rows.map(a => shape(a, req, t));
-    res.json({ success: true, today: t, max_days: MAX_DAYS, kinds: KINDS, can_manage: canManage(req), can_approve: canApprove(req), to_approve: toApprove.rows.map(a => shape(a, req, t)), mine: mineS, covering: covS, waiting_for_me: covS.filter(a => a.can_respond),
+    res.json({ success: true, today: t, max_days: MAX_DAYS, kinds: KINDS, can_manage: canManage(req), can_approve: canApprove(req), to_approve: toApprove.rows.map(a => shape(a, req, t)), mine: mineS, covering: covS, waiting_for_me: [],
       team: team.rows.map(a => shape(a, req, t)), people: people.rows.filter(p => p.id !== me || canManage(req)), welcome_back: recent.rows.map(a => shape(a, req, t)), _n: all.length });
   } catch (err) { console.error('rd cover list failed:', err); fail(res, 500, 'Could not load cover'); }
 });
@@ -189,8 +188,7 @@ async function coverCheck(coverId, from, to, exceptAbsenceId) {
 const tellOne = (ids, o) => { try { notifyUsers(ids, o); } catch (e) { console.error('notice failed:', e.message); } };
 
 const dates = (a) => `${R.dmy(a.from_date || a.from)} to ${R.dmy(a.to_date || a.to)}`;
-const askCover = (req, cover, awayName, from, to, kind, reason, hasNote) => tellOne([cover].filter(x => x && x !== req.user.id), { kind: 'cover_request', subject: `Can you cover for ${awayName}?`,
-  text: `${awayName} will be away from ${R.dmy(from)} to ${R.dmy(to)} (${kind}${reason ? ', ' + reason : ''}) and the manager chose you to cover. ${hasNote ? 'Notes were left for you. ' : ''}Please open "Away and cover" and press "I can cover" or "I cannot cover".`, path: 'cover.html' });
+const tellCover = (req, cover, awayName, from, to, kind, reason, hasNote) => tellOne([cover].filter(x => x && x !== req.user.id), { kind: 'cover_request', subject: `You will cover for ${awayName}`, text: `The manager chose you to cover for ${awayName}, who will be away from ${R.dmy(from)} to ${R.dmy(to)} (${kind}${reason ? ', ' + reason : ''}). From the first day their open tasks, work to check and stages will be in your My Day. ${hasNote ? 'They left notes for you. ' : ''}If there is a problem, open "Away and cover" and tell the manager.`, path: 'cover.html' });
 
 router.post('/', async (req, res) => {
   try {
@@ -198,11 +196,11 @@ router.post('/', async (req, res) => {
     // a manager (or administrator) recording it settles it at once and the cover is asked straight away; otherwise it waits for the manager
     const auto = c.deciding;
     const ins = await pool.query(`INSERT INTO rd_absences (user_id, cover_user_id, from_date, to_date, kind, reason, handover_note, created_by, approval_status, approved_by, approved_at, cover_status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,${auto ? 'NOW()' : 'NULL'},$11) RETURNING id`, [c.who, c.cover, c.from, c.to, c.kind, c.reason, c.note, req.user.id, auto ? 'approved' : 'pending', auto ? req.user.id : null, auto ? 'pending' : 'none']);
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,${auto ? 'NOW()' : 'NULL'},$11) RETURNING id`, [c.who, c.cover, c.from, c.to, c.kind, c.reason, c.note, req.user.id, auto ? 'approved' : 'pending', auto ? req.user.id : null, auto ? 'accepted' : 'none']);
     await audit(pool, req, { action: 'rd.cover_set', entity: 'rd_absence', id: ins.rows[0].id, summary: `${c.away.name} away ${c.from} to ${c.to} (${c.kind})${c.cv ? ', cover ' + (auto ? '' : 'suggested: ') + c.cv.name : ''}` });
-    if (auto) askCover(req, c.cover, c.away.name, c.from, c.to, c.kind, c.reason, !!c.note);
+    if (auto) tellCover(req, c.cover, c.away.name, c.from, c.to, c.kind, c.reason, !!c.note);
     else tellOne((await approverIds(pool)).filter(x => x !== req.user.id), { kind: 'cover_request', subject: `Please decide: ${c.away.name} wants to be away`, text: `${c.away.name} asks to be away from ${dates(c)} (${c.kind}${c.reason ? ', ' + c.reason : ''}). ${c.cv ? 'They suggest ' + c.cv.name + ' as cover.' : 'They did not suggest a cover.'} Please open "Away and cover", choose who will cover, and approve or say no.`, path: 'cover.html' });
-    if (c.who !== req.user.id) tellOne([c.who], { kind: 'cover_response', subject: 'Your absence is recorded', text: `${req.user.name} recorded your absence from ${dates(c)}.${c.cv ? ' ' + c.cv.name + ' was asked to cover your work.' : ''}`, path: 'cover.html' });
+    if (c.who !== req.user.id) tellOne([c.who], { kind: 'cover_response', subject: 'Your absence is recorded', text: `${req.user.name} recorded your absence from ${dates(c)}.${c.cv ? ' ' + c.cv.name + ' will cover your work.' : ''}`, path: 'cover.html' });
     const heads = await previewFor(pool, c.who, c.to);
     res.status(201).json({ success: true, id: ins.rows[0].id, approval: auto ? 'approved' : 'pending', heads_up: { tasks: heads.tasks.length, stages: heads.stages.length, reviews: heads.reviews } });
   } catch (err) { console.error('rd cover create failed:', err); fail(res, 500, 'Could not save'); }
@@ -224,37 +222,32 @@ router.patch('/:id', async (req, res) => {
     // new dates need the manager again (unless the manager made the change); the cover is only asked once the absence is approved
     const reapprove = datesChanged && a.approval_status === 'approved' && !(canApprove(req) && (a.user_id !== req.user.id || req.access.isAdmin));
     const approval = reapprove ? 'pending' : a.approval_status;
-    const coverStatus = !c.cover ? 'none' : approval !== 'approved' ? ((coverChanged || datesChanged) ? 'none' : a.cover_status) : ((coverChanged || datesChanged) ? 'pending' : a.cover_status);
-    const resetCover = coverStatus !== a.cover_status;
-    await pool.query(`UPDATE rd_absences SET cover_user_id = $2, from_date = $3, to_date = $4, kind = $5, reason = $6, handover_note = $7, cover_status = $8, updated_at = NOW()${resetCover ? ', cover_responded_at = NULL, cover_decline_reason = NULL' : ''}${reapprove ? ", approval_status = 'pending', approved_by = NULL, approved_at = NULL" : ''} WHERE id = $1`, [id, c.cover, c.from, c.to, c.kind, c.reason, c.note, coverStatus]);
+    const coverStatus = !c.cover || approval !== 'approved' ? 'none' : 'accepted';
+    const resetCover = coverChanged;
+    await pool.query(`UPDATE rd_absences SET cover_user_id = $2, from_date = $3, to_date = $4, kind = $5, reason = $6, handover_note = $7, cover_status = $8, updated_at = NOW()${resetCover ? ', cover_problem = NULL, cover_problem_at = NULL' : ''}${reapprove ? ", approval_status = 'pending', approved_by = NULL, approved_at = NULL" : ''} WHERE id = $1`, [id, c.cover, c.from, c.to, c.kind, c.reason, c.note, coverStatus]);
     await audit(pool, req, { action: 'rd.cover_edit', entity: 'rd_absence', id, summary: `Absence of ${a.user_name} changed: ${c.from} to ${c.to}${c.cv ? ', cover ' + c.cv.name : ''}` });
-    if (coverStatus === 'pending' && resetCover) askCover(req, c.cover, c.away.name, c.from, c.to, c.kind, c.reason, !!c.note);
-    if (coverChanged && a.cover_user_id && ['pending', 'accepted'].includes(a.cover_status)) tellOne([a.cover_user_id].filter(x => x !== req.user.id), { kind: 'cover_response', subject: 'You no longer need to cover', text: `Someone else will cover for ${c.away.name} from ${dates(a)}. You do not need to do anything.`, path: 'cover.html' });
-    else if (datesChanged && a.cover_user_id && ['pending', 'accepted'].includes(a.cover_status) && !resetCover) tellOne([a.cover_user_id].filter(x => x !== req.user.id), { kind: 'cover_response', subject: `New dates: cover for ${c.away.name}`, text: `${c.away.name} will now be away ${dates(c)}.`, path: 'cover.html' });
+    if (coverStatus === 'accepted' && coverChanged) tellCover(req, c.cover, c.away.name, c.from, c.to, c.kind, c.reason, !!c.note);
+    if (coverChanged && a.cover_user_id && a.approval_status === 'approved') tellOne([a.cover_user_id].filter(x => x !== req.user.id), { kind: 'cover_response', subject: 'You no longer need to cover', text: `Someone else will cover for ${c.away.name} from ${dates(a)}. You do not need to do anything.`, path: 'cover.html' });
+    else if (datesChanged && a.cover_user_id && a.approval_status === 'approved' && !coverChanged) tellOne([a.cover_user_id].filter(x => x !== req.user.id), { kind: 'cover_response', subject: `New dates: cover for ${c.away.name}`, text: `${c.away.name} will now be away ${dates(c)}.`, path: 'cover.html' });
     if (reapprove) tellOne((await approverIds(pool)).filter(x => x !== req.user.id), { kind: 'cover_request', subject: `Please decide again: ${c.away.name}'s dates changed`, text: `${c.away.name} now asks to be away ${dates(c)}. Please open "Away and cover" and approve or say no.`, path: 'cover.html' });
     res.json({ success: true });
   } catch (err) { console.error('rd cover edit failed:', err); fail(res, 500, 'Could not save the change'); }
 });
 
-/** The chosen person's answer. "I cannot cover" ends it and tells the manager and the person, so another cover can be chosen. */
-router.post('/:id/respond', async (req, res) => {
+/** The chosen cover tells the manager there is a problem. It does not stop anything by itself: the manager reads it and decides (for example, chooses someone else). */
+router.post('/:id/problem', async (req, res) => {
   const id = idOf(req.params.id); if (!id) return fail(res, 400, 'Invalid id');
-  const accept = req.body && req.body.accept === true, reason = String((req.body && req.body.reason) || '').trim();
-  if (!accept && reason.length < 5) return fail(res, 400, 'Say why you cannot cover (at least 5 characters)');
+  const note = String((req.body && req.body.note) || '').trim();
+  if (note.length < 5) return fail(res, 400, 'Please say what the problem is (at least 5 letters)');
   try {
     const r = await pool.query(`SELECT ${SHOW} WHERE a.id = $1`, [id]); const a = r.rows[0];
-    if (!a || a.ended_at || a.to_date < R.todayIST()) return fail(res, 404, 'Request not found');
-    if (a.cover_user_id !== req.user.id) return fail(res, 403, 'Only the person asked to cover can answer');
-    if (a.cover_status === 'none') return fail(res, 409, 'You have not been asked to cover yet: the manager has to approve and choose first');
-    if (a.cover_status !== 'pending') return fail(res, 409, 'This has already been answered');
-    if (accept) await pool.query("UPDATE rd_absences SET cover_status = 'accepted', cover_responded_at = NOW(), updated_at = NOW() WHERE id = $1", [id]);
-    else await pool.query("UPDATE rd_absences SET cover_status = 'none', cover_user_id = NULL, cover_responded_at = NOW(), cover_decline_reason = $2, updated_at = NOW() WHERE id = $1", [id, reason.slice(0, 1000)]);
-    await audit(pool, req, { action: accept ? 'rd.cover_accept' : 'rd.cover_decline', entity: 'rd_absence', id, summary: `${a.cover_name} said ${accept ? '"I can cover"' : '"I cannot cover"'} for ${a.user_name} (${a.from_date} to ${a.to_date})`, reason: accept ? undefined : reason });
-    const when = dates(a);
-    if (accept) tellOne([...new Set([a.user_id, a.created_by, a.approved_by].filter(x => x && x !== req.user.id))], { kind: 'cover_response', subject: `${a.cover_name} will cover`, text: `${a.cover_name} said "I can cover" for ${a.user_name} from ${when}.`, path: 'cover.html' });
-    else tellOne([...new Set([a.approved_by, ...(await approverIds(pool)), a.user_id].filter(x => x && x !== req.user.id))], { kind: 'cover_response', subject: `${a.cover_name} cannot cover: please choose someone else`, text: `${a.cover_name} cannot cover for ${a.user_name} from ${when}: ${reason}. The absence is still approved, but nobody is chosen to cover yet. Please open "Away and cover" and choose another person.`, path: 'cover.html' });
-    res.json({ success: true, status: accept ? 'accepted' : 'declined' });
-  } catch (err) { console.error('rd cover respond failed:', err); fail(res, 500, 'Could not save your answer'); }
+    if (!a || a.ended_at || a.to_date < R.todayIST()) return fail(res, 404, 'Not found');
+    if (a.cover_user_id !== req.user.id) return fail(res, 403, 'Only the person chosen to cover can do this');
+    await pool.query('UPDATE rd_absences SET cover_problem = $2, cover_problem_at = NOW(), updated_at = NOW() WHERE id = $1', [id, note.slice(0, 1000)]);
+    await audit(pool, req, { action: 'rd.cover_problem', entity: 'rd_absence', id, summary: `${a.cover_name} reported a problem covering for ${a.user_name} (${a.from_date} to ${a.to_date})`, reason: note });
+    tellOne([...new Set([a.approved_by, ...(await approverIds(pool))].filter(x => x && x !== req.user.id))], { kind: 'cover_response', subject: `${a.cover_name} reports a problem covering for ${a.user_name}`, text: `${a.cover_name} says: "${note}". This is for ${a.user_name}'s absence from ${dates(a)}. Please open "Away and cover" and decide, for example choose someone else.`, path: 'cover.html' });
+    res.json({ success: true });
+  } catch (err) { console.error('rd cover problem failed:', err); fail(res, 500, 'Could not send it'); }
 });
 
 /** The manager approves (and chooses who covers) or says no with a reason. */
@@ -279,12 +272,12 @@ router.post('/:id/approve', async (req, res) => {
     if (!chosen) return fail(res, 400, 'Choose who will cover before you approve');
     if (chosen === a.user_id) return fail(res, 400, 'A person cannot cover for themselves');
     const bad = await coverCheck(chosen, a.from_date, a.to_date, id); if (bad) return fail(res, bad.status, bad.error);
-    const asked = chosen !== a.cover_user_id || a.cover_status === 'none';                   // a newly chosen person has to say yes; someone who already said yes stays
-    await pool.query(`UPDATE rd_absences SET approval_status = 'approved', approved_by = $2, approved_at = NOW(), cover_user_id = $3, cover_status = $4, updated_at = NOW()${asked ? ', cover_responded_at = NULL, cover_decline_reason = NULL' : ''} WHERE id = $1`, [id, req.user.id, chosen, asked ? 'pending' : a.cover_status]);
+    const asked = chosen !== a.cover_user_id || a.cover_status === 'none';                   // the person chosen is told (unless it is the same person as before)
+    await pool.query("UPDATE rd_absences SET approval_status = 'approved', approved_by = $2, approved_at = NOW(), cover_user_id = $3, cover_status = 'accepted', cover_problem = NULL, cover_problem_at = NULL, updated_at = NOW() WHERE id = $1", [id, req.user.id, chosen]);
     const cv = await personCheck(chosen);
     await audit(pool, req, { action: 'rd.cover_approve', entity: 'rd_absence', id, summary: `Absence of ${a.user_name} (${a.from_date} to ${a.to_date}) approved by ${req.user.name}; cover ${cv.name}` });
-    if (asked) askCover(req, chosen, a.user_name, a.from_date, a.to_date, a.kind, a.reason, !!a.handover_note);
-    tellOne([...new Set([a.user_id, a.created_by].filter(x => x && x !== req.user.id))], { kind: 'cover_response', subject: `Approved: ${when}`, text: `${req.user.name} approved your absence from ${when}. ${cv.name} will cover your work${asked ? ' once they say "I can cover"' : ''}.`, path: 'cover.html' });
+    if (asked) tellCover(req, chosen, a.user_name, a.from_date, a.to_date, a.kind, a.reason, !!a.handover_note);
+    tellOne([...new Set([a.user_id, a.created_by].filter(x => x && x !== req.user.id))], { kind: 'cover_response', subject: `Approved: ${when}`, text: `${req.user.name} approved your absence from ${when}. ${cv.name} will cover your work.`, path: 'cover.html' });
     res.json({ success: true, status: 'approved', cover_name: cv.name });
   } catch (err) { console.error('rd cover approve failed:', err); fail(res, 500, 'Could not save the decision'); }
 });

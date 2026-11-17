@@ -173,7 +173,7 @@
       if (d.to_review.length) bits.unshift(plural(d.to_review.length, 'piece') + ' of work waiting for your review');
       hero.appendChild(el('p', null, (d.mine.length || d.to_review.length ? 'You have ' + bits.join(', ') + '.' : 'You have no open tasks.') + ' Today is ' + new Date(today + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) + '.'));
       box.appendChild(hero);
-      (d.my_absences || []).forEach(a => { const n = el('p', 'oxi-section-note'); const st = a.approval_status === 'pending' ? 'It is waiting for the manager.' : !a.cover_name ? 'The manager has not chosen who will cover yet.' : a.cover_status === 'pending' ? a.cover_name + ' has not said yes yet.' : a.from_date <= today ? a.cover_name + ' is covering your work.' : a.cover_name + ' will cover your work.'; n.append(document.createTextNode((a.from_date <= today ? 'You are away until ' + dmy(a.to_date) : 'You will be away ' + dmy(a.from_date) + ' to ' + dmy(a.to_date)) + ' (' + a.kind + '). ' + st + ' '), Object.assign(el('a', null, 'Away and cover'), { href: 'cover.html' })); box.appendChild(n); });
+      (d.my_absences || []).forEach(a => { const n = el('p', 'oxi-section-note'); const st = a.approval_status === 'pending' ? 'It is waiting for the manager.' : !a.cover_name ? 'The manager has not chosen who will cover yet.' : a.from_date <= today ? a.cover_name + ' is covering your work.' : a.cover_name + ' will cover your work.'; n.append(document.createTextNode((a.from_date <= today ? 'You are away until ' + dmy(a.to_date) : 'You will be away ' + dmy(a.from_date) + ' to ' + dmy(a.to_date)) + ' (' + a.kind + '). ' + st + ' '), Object.assign(el('a', null, 'Away and cover'), { href: 'cover.html' })); box.appendChild(n); });
 
       const sum = el('div', 'md-sum');
       const tile = (n, label, cls, target) => { const b = el('button', 'md-tile ' + (cls || '')); b.type = 'button'; b.append(el('b', null, String(n)), el('span', null, label)); b.setAttribute('aria-label', label + ': ' + n); b.onclick = () => { const e = $(target); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; sum.appendChild(b); };
@@ -221,7 +221,7 @@
     // ---- being away: the form, the approval and the calendar are on their own page ----
     function coverCard(box) {
       const card = el('section', 'oxi-card2 md-sec'); card.id = 'sAway'; card.appendChild(el('h2', null, 'Going to be away?'));
-      card.appendChild(el('p', 'oxi-section-note', 'Tell the manager when you will be away. The manager approves it and chooses who will cover. The person chosen says "I can cover". Then they do your work.'));
+      card.appendChild(el('p', 'oxi-section-note', 'Tell the manager when you will be away. The manager approves it and chooses who will cover. The person chosen is told, and does your work.'));
       const a = el('a', 'oxi-btn', 'Tell the manager'); a.href = 'cover.html'; card.appendChild(a); box.appendChild(card);
     }
 

@@ -35,7 +35,7 @@
 <body>
   <p><a href="index.html">&larr; Home</a> | <a href="my-day.html">My Day</a> | <a href="rd-dashboard.html">R&amp;D Dashboard</a></p>
   <h1>Away and cover</h1>
-  <p class="oxi-page-sub">Tell the manager when you will be away. The manager approves it and chooses who will cover. The person chosen says "I can cover". Then they do your work while you are away.</p>
+  <p class="oxi-page-sub">Tell the manager when you will be away. The manager approves it and chooses who will cover. The person chosen is told, and does your work while you are away.</p>
   <p id="message" role="status"></p>
   <div id="page" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
 
@@ -46,55 +46,54 @@
     const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
     let DATA = null, editing = null;
     function note(text, ok) { const m = $('message'); m.textContent = text; m.className = ok ? 'success' : 'error'; if (!ok) m.scrollIntoView({ block: 'nearest' }); }
-    const CHIP = { waiting_approval: ['Waiting for the manager', 'waiting'], needs_cover: ['Approved. Cover not chosen yet', 'waiting'], waiting: ['Waiting for the cover to say yes', 'waiting'], confirmed: ['Ready', 'confirmed'], active: ['Away now', 'active'], rejected: ['Not approved', 'declined'], finished: ['Finished', ''], ended: ['Ended early', ''] };
+    const CHIP = { waiting_approval: ['Waiting for the manager', 'waiting'], needs_cover: ['Approved. Cover not chosen yet', 'waiting'], problem: ['Cover reported a problem', 'waiting'], ready: ['Ready', 'confirmed'], active: ['Away now', 'active'], rejected: ['Not approved', 'declined'], finished: ['Finished', ''], ended: ['Ended early', ''] };
     const chip = (st) => { const c = CHIP[st] || [st, '']; return el('span', 'cv-chip ' + c[1], c[0]); };
     const range = (a) => dmy(a.from_date) + ' to ' + dmy(a.to_date);
     /** Is this person away (or already asked to be) on any of these dates? Used to warn before choosing a cover. */
     const clash = (userId, from, to, exceptId) => DATA.team.concat(DATA.mine, DATA.covering).find(a => a.user_id === userId && a.id !== exceptId && !['rejected', 'ended', 'finished'].includes(a.status) && a.from_date <= to && a.to_date >= from);
 
-    /** A small box asking for a reason (used for "I cannot cover" and "Do not approve"). */
+    /** A small box asking for a reason (used for "Tell the manager there is a problem" and "Do not approve"). */
     function askReason(title, label, okText, onOk) {
       const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'arT'); const f = el('form'); f.method = 'dialog';
       const h = el('h3', null, title); h.id = 'arT'; const l = el('label', null, label); const ta = el('textarea'); ta.rows = 3; ta.maxLength = 1000; ta.id = 'arWhy'; l.htmlFor = 'arWhy';
       const err = el('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const row = el('div', 'row');
       const no = el('button', 'oxi-btn-secondary', 'Cancel'); no.type = 'button'; no.onclick = () => dlg.close(); const ok = el('button', null, okText); ok.type = 'submit'; row.append(no, ok);
       f.append(h, l, ta, err, row); dlg.appendChild(f); document.body.appendChild(dlg); const back = document.activeElement;
-      f.onsubmit = async (e) => { e.preventDefault(); if (ta.value.trim().length < 5) { err.textContent = 'Please write a short reason (at least 5 letters).'; err.hidden = false; ta.focus(); return; } ok.disabled = true; const r = await onOk(ta.value); if (r === true) dlg.close(); else { ok.disabled = false; err.textContent = r || 'That did not work.'; err.hidden = false; } };
+      f.onsubmit = async (e) => { e.preventDefault(); if (ta.value.trim().length < 5) { err.textContent = 'Please write a few words (at least 5 letters).'; err.hidden = false; ta.focus(); return; } ok.disabled = true; const r = await onOk(ta.value); if (r === true) dlg.close(); else { ok.disabled = false; err.textContent = r || 'That did not work.'; err.hidden = false; } };
       dlg.addEventListener('close', () => { dlg.remove(); if (back && document.contains(back)) back.focus(); }); dlg.showModal(); ta.focus();
     }
     const person = (list, value, blank, a) => { const s = el('select'); if (blank != null) { const o = el('option', null, blank); o.value = ''; s.appendChild(o); } list.forEach(p => { const c = a ? clash(p.id, a.from_date, a.to_date, a.id) : null; const o = el('option', null, p.name + (c ? ' (away on those dates)' : '')); o.value = p.id; if (c) o.disabled = true; s.appendChild(o); }); s.value = value == null ? '' : String(value); return s; };
 
     function listItem(a, opts) {
-      const li = el('li'); const tone = (a.status === 'waiting' || a.status === 'waiting_approval' || a.status === 'needs_cover') ? 'warn' : a.status === 'rejected' ? 'bad' : (a.status === 'active' || a.status === 'confirmed') ? 'ok' : '';
+      const li = el('li'); const tone = (a.status === 'problem' || a.status === 'waiting_approval' || a.status === 'needs_cover') ? 'warn' : a.status === 'rejected' ? 'bad' : (a.status === 'active' || a.status === 'ready') ? 'ok' : '';
       const row = el('div', 'cv-item ' + tone); const m = el('div', 'cv-main');
       const t = el('strong'); t.append(document.createTextNode((opts.as === 'cover' ? a.user_name + ' will be away: ' : (opts.as === 'team' || opts.as === 'approve') ? a.user_name + ': ' : '') + a.kind + ', ' + range(a) + '  ')); t.appendChild(chip(a.status)); m.appendChild(t);
       const who = opts.as === 'cover' ? 'The manager chose you to cover.' : a.approval_status === 'pending' ? (a.cover_name ? 'Suggested cover: ' + a.cover_name : 'No cover suggested') : (a.cover_name ? 'Cover: ' + a.cover_name : 'Cover: not chosen yet');
       m.appendChild(el('small', null, who + (a.reason ? ' · ' + a.reason : '') + (a.approval_status === 'approved' && a.approved_by_name ? ' · Approved by ' + a.approved_by_name : '')));
       if (a.approval_status === 'rejected' && a.approval_reason) m.appendChild(el('small', null, 'Not approved: ' + a.approval_reason));
-      if (a.cover_decline_reason && !a.cover_name) m.appendChild(el('small', null, 'The person chosen said "I cannot cover": ' + a.cover_decline_reason));
+      if (a.cover_problem) { const pb = el('div', 'cv-note'); pb.style.borderLeftColor = 'var(--warn)'; pb.append(el('b', null, (a.cover_name || 'The cover') + ' reports a problem: '), document.createTextNode(a.cover_problem)); m.appendChild(pb); }
       if (a.handover_note) { const n = el('div', 'cv-note'); n.append(el('b', null, 'Notes for the cover: '), document.createTextNode(a.handover_note)); m.appendChild(n); }
       let pick = null;
-      if (a.can_approve || a.can_assign) { const l = el('label', null, 'Who will cover'); pick = person(DATA.people.filter(p => p.id !== a.user_id), a.cover_user_id, 'Choose a person', a); pick.id = 'pick' + a.id; l.htmlFor = pick.id; const w = el('div'); w.style.marginTop = '8px'; w.append(l, pick); m.appendChild(w); }
+      if (a.can_approve || a.can_assign) { const l = el('label', null, 'Who will cover'); pick = person(DATA.people.filter(p => p.id !== a.user_id), a.cover_problem ? '' : a.cover_user_id, 'Choose a person', a); pick.id = 'pick' + a.id; l.htmlFor = pick.id; const w = el('div'); w.style.marginTop = '8px'; w.append(l, pick); m.appendChild(w); }
       row.appendChild(m); const act = el('div', 'cv-act');
       if (a.can_approve || a.can_assign) {
-        const y = el('button', null, a.can_assign ? 'Choose this person' : 'Approve'); y.type = 'button'; y.setAttribute('aria-label', (a.can_assign ? 'Choose the cover for ' : 'Approve the absence of ') + a.user_name + ', ' + range(a));
+        const y = el('button', null, a.can_assign ? 'Choose this person instead' : 'Approve'); y.type = 'button'; y.setAttribute('aria-label', (a.can_assign ? 'Choose the cover for ' : 'Approve the absence of ') + a.user_name + ', ' + range(a));
         y.onclick = async () => { if (!pick.value) { note('Please choose who will cover.', false); pick.focus(); return; } y.disabled = true; const r = a.can_assign ? await api('/api/rd/cover/' + a.id, 'PATCH', { cover_user_id: Number(pick.value) }) : await api('/api/rd/cover/' + a.id + '/approve', 'POST', { approve: true, cover_user_id: Number(pick.value) }); if (!r.success) { y.disabled = false; note(r.error || 'Could not save.', false); return; } note('Done. ' + a.user_name + ' and the person chosen have been told.', true); load(); };
         act.appendChild(y);
         if (a.can_approve) { const n = el('button', 'oxi-btn-secondary', 'Do not approve'); n.type = 'button'; n.setAttribute('aria-label', 'Do not approve the absence of ' + a.user_name);
           n.onclick = () => askReason('Do not approve ' + a.user_name + '\'s absence', 'Why not? (they will be told)', 'Send', async (why) => { const r = await api('/api/rd/cover/' + a.id + '/approve', 'POST', { approve: false, reason: why }); if (!r.success) return r.error; note('Done. ' + a.user_name + ' has been told.', true); load(); return true; }); act.appendChild(n); }
       }
-      if (a.can_respond) {
-        const y = el('button', null, 'I can cover'); y.type = 'button'; y.setAttribute('aria-label', 'I can cover for ' + a.user_name); y.onclick = async () => { y.disabled = true; const r = await api('/api/rd/cover/' + a.id + '/respond', 'POST', { accept: true }); if (!r.success) { y.disabled = false; note(r.error || 'Could not save.', false); return; } note('Thank you. ' + a.user_name + ' has been told.', true); load(); };
-        const n = el('button', 'oxi-btn-secondary', 'I cannot cover'); n.type = 'button'; n.setAttribute('aria-label', 'I cannot cover for ' + a.user_name);
-        n.onclick = () => askReason('You cannot cover for ' + a.user_name, 'Why not? (the manager will choose someone else)', 'Send', async (why) => { const r = await api('/api/rd/cover/' + a.id + '/respond', 'POST', { accept: false, reason: why }); if (!r.success) return r.error; note('Done. The manager has been told.', true); load(); return true; });
-        act.append(y, n);
+      if (a.can_report) {
+        const n = el('button', 'oxi-btn-secondary', 'Tell the manager there is a problem'); n.type = 'button'; n.setAttribute('aria-label', 'Tell the manager there is a problem with covering for ' + a.user_name);
+        n.onclick = () => askReason('Problem with covering for ' + a.user_name, 'What is the problem? (the manager will read it and decide)', 'Send', async (why) => { const r = await api('/api/rd/cover/' + a.id + '/problem', 'POST', { note: why }); if (!r.success) return r.error; note('The manager has been told.', true); load(); return true; });
+        act.appendChild(n);
       }
       if (a.can_edit && opts.as !== 'cover' && opts.as !== 'approve') {
         const ed = el('button', 'oxi-btn-secondary', 'Change'); ed.type = 'button'; ed.setAttribute('aria-label', 'Change the absence ' + range(a)); ed.onclick = () => { editing = a; renderForm(); $('cvForm').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
         const en = el('button', 'oxi-btn-secondary', 'Cancel it'); en.type = 'button'; en.setAttribute('aria-label', 'Cancel the absence ' + range(a));
         en.onclick = async () => { if (!confirm('Cancel this absence? The person covering will no longer be needed.')) return; const r = await api('/api/rd/cover/' + a.id + '/end', 'POST', {}); if (!r.success) { note(r.error || 'Could not cancel it.', false); return; } note('Cancelled.', true); load(); };
         act.append(ed, en);
-      } else if (opts.as === 'cover' && !a.can_respond) {
+      } else if (opts.as === 'cover' && false) {
         const en = el('button', 'oxi-btn-secondary', 'Stop covering'); en.type = 'button'; en.onclick = async () => { if (!confirm('Stop covering now?')) return; const r = await api('/api/rd/cover/' + a.id + '/end', 'POST', {}); if (!r.success) { note(r.error || 'Could not end it.', false); return; } load(); }; act.appendChild(en);
       }
       row.appendChild(act); li.appendChild(row); return li;
@@ -160,7 +159,7 @@
       const wk = el('div', 'cv-weeks'); wk.append(el('div'), el('div')); for (let w = 0; w < 6; w++) wk.lastChild.appendChild(el('span', null, dmy(new Date(t0 + w * 7 * day).toISOString().slice(0, 10)))); tl.appendChild(wk);
       [...new Set(team.map(a => a.user_name))].forEach(n => {
         const row = el('div', 'cv-tl-row'); row.appendChild(el('div', 'cv-tl-name', n)); const tr = el('div', 'cv-tl-track');
-        team.filter(a => a.user_name === n).forEach(a => { const s = Math.max(0, (Date.parse(a.from_date) - t0) / day), e = Math.min(N, (Date.parse(a.to_date) - t0) / day + 1); if (e <= 0 || s >= N) return; const b = el('div', 'cv-bar ' + (a.status === 'active' || a.status === 'confirmed' ? 'active' : 'waiting')); b.style.left = (s / N * 100) + '%'; b.style.width = Math.max(1.5, (e - s) / N * 100) + '%'; b.title = n + ': ' + range(a) + (a.cover_name ? ' (cover ' + a.cover_name + ')' : ''); tr.appendChild(b); });
+        team.filter(a => a.user_name === n).forEach(a => { const s = Math.max(0, (Date.parse(a.from_date) - t0) / day), e = Math.min(N, (Date.parse(a.to_date) - t0) / day + 1); if (e <= 0 || s >= N) return; const b = el('div', 'cv-bar ' + (a.status === 'active' || a.status === 'ready' ? 'active' : 'waiting')); b.style.left = (s / N * 100) + '%'; b.style.width = Math.max(1.5, (e - s) / N * 100) + '%'; b.title = n + ': ' + range(a) + (a.cover_name ? ' (cover ' + a.cover_name + ')' : ''); tr.appendChild(b); });
         const td = el('div', 'cv-today'); td.style.left = '0%'; tr.appendChild(td); row.appendChild(tr); tl.appendChild(row);
       });
       wrap.appendChild(tl); return wrap;
@@ -168,8 +167,7 @@
 
     function render() {
       const d = DATA, page = $('page'); page.innerHTML = ''; page.setAttribute('aria-busy', 'false');
-      if (d.can_approve && d.to_approve.length) { const c = card('cvApprove', 'Waiting for you', 'Choose who will cover, then approve. The person chosen is asked next. The cover starts only when you have approved and they have said "I can cover".'); const ul = el('ul', 'cv-list'); d.to_approve.forEach(a => ul.appendChild(listItem(a, { as: 'approve' }))); c.appendChild(ul); page.appendChild(c); }
-      if (d.waiting_for_me.length) { const c = card('cvWait', 'Can you cover?', 'The manager chose you to cover while someone is away. Please answer so they can plan.'); const ul = el('ul', 'cv-list'); d.waiting_for_me.forEach(a => ul.appendChild(listItem(a, { as: 'cover' }))); c.appendChild(ul); page.appendChild(c); }
+      if (d.can_approve && d.to_approve.length) { const c = card('cvApprove', 'Waiting for you', 'Choose who will cover, then approve. The person chosen is told straight away and starts on the first day.'); const ul = el('ul', 'cv-list'); d.to_approve.forEach(a => ul.appendChild(listItem(a, { as: 'approve' }))); c.appendChild(ul); page.appendChild(c); }
       const wb = d.welcome_back_summary; if (wb) {
         const c = card('cvBack', 'While you were away', 'What happened ' + range(wb.absence) + '.'); const ul = el('ul'); ul.style.margin = '0'; ul.style.paddingLeft = '18px';
         ul.appendChild(el('li', null, wb.done_for_me.length ? plural(wb.done_for_me.length, 'task') + ' done for you:' : 'No task was done for you.'));
@@ -180,7 +178,7 @@
       renderForm();
       const cm = card('cvMine', 'Your absences', 'What you asked for, and where it is now.');
       if (!d.mine.length) cm.appendChild(el('p', 'oxi-section-note', 'Nothing planned.')); else { const ul = el('ul', 'cv-list'); d.mine.forEach(a => ul.appendChild(listItem(a, { as: 'mine' }))); cm.appendChild(ul); } page.appendChild(cm);
-      const cov = d.covering.filter(a => !a.can_respond); if (cov.length) { const cc = card('cvCov', 'You are covering', 'Their open tasks, work to check and stages are in My Day while they are away.'); const ul = el('ul', 'cv-list'); cov.forEach(a => ul.appendChild(listItem(a, { as: 'cover' }))); cc.appendChild(ul); page.appendChild(cc); }
+      const cov = d.covering; if (cov.length) { const cc = card('cvCov', 'You will cover', 'The manager chose you. Their open tasks, work to check and stages are in My Day while they are away. If there is a problem, tell the manager.'); const ul = el('ul', 'cv-list'); cov.forEach(a => ul.appendChild(listItem(a, { as: 'cover' }))); cc.appendChild(ul); page.appendChild(cc); }
       const ct = card('cvTeam', 'Who is away in the next six weeks', 'Look here before giving out work.');
       if (!d.team.length) ct.appendChild(el('p', 'oxi-section-note', d.can_see_team ? 'Nobody is away.' : 'This list is shown to R&D editors, managers and people who can see all projects.')); else {
         ct.appendChild(timeline(d.team, d.today)); const w = el('div', 'oxi-table-scroll'); const t = el('table'); t.appendChild(el('caption', 'oxi-sr-only', 'Who is away and who covers'));

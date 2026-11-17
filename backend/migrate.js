@@ -701,6 +701,17 @@ const STEPS = [
       await db.query('ALTER TABLE rd_absences DROP CONSTRAINT IF EXISTS rd_absences_cover_status_check');
       await db.query("ALTER TABLE rd_absences ADD CONSTRAINT rd_absences_cover_status_check CHECK (cover_status IN ('none', 'pending', 'accepted', 'declined'))");
     }
+  },
+  {
+    // The manager's choice is final: the chosen person is told, not asked. Their only option is to tell the manager about a problem,
+    // which the manager sees and decides on. A cover who was still "asked" under the earlier flow now simply takes over once approved.
+    name: '027_rd_cover_is_an_order',
+    async run(db) {
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS cover_problem TEXT');
+      await db.query('ALTER TABLE rd_absences ADD COLUMN IF NOT EXISTS cover_problem_at TIMESTAMPTZ');
+      await db.query("UPDATE rd_absences SET cover_status = 'accepted' WHERE cover_status = 'pending' AND approval_status = 'approved' AND cover_user_id IS NOT NULL");
+      await db.query("UPDATE rd_absences SET cover_status = 'none' WHERE cover_status = 'pending' AND approval_status <> 'approved'");
+    }
   }
 ];
 

@@ -32,7 +32,7 @@ async function gather(today) {
         WHERE x.uid IS NOT NULL AND x.uid IS DISTINCT FROM x.assignee_id ORDER BY x.id`)
   ]);
   const people = new Map();
-  const get = (uid) => { if (!people.has(uid)) people.set(uid, { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [], lab: [], confirm: [], approve: [] }); return people.get(uid); };
+  const get = (uid) => { if (!people.has(uid)) people.set(uid, { overdue: [], today: [], tomorrow: [], sent_back: [], review: [], cover: [], lab: [], approve: [] }); return people.get(uid); };
   open.rows.forEach(r => { const d = String(r.due_date).slice(0, 10); get(r.uid)[d < today ? 'overdue' : d === today ? 'today' : 'tomorrow'].push({ ...r, due: d }); });
   back.rows.forEach(r => get(r.uid).sent_back.push(r));
   review.rows.forEach(r => get(r.uid).review.push(r));
@@ -42,11 +42,8 @@ async function gather(today) {
       FROM rd_projects p JOIN rd_stages s ON s.project_id = p.id AND s.stage_no = (SELECT MIN(x.stage_no) FROM rd_stages x WHERE x.project_id = p.id AND x.completed_at IS NULL)
      WHERE p.is_draft = FALSE AND p.status = ANY($1) AND s.stage_no = ANY($2) AND COALESCE(s.owner_user_id, p.lead_user_id) IS NOT NULL`, [R.ACTIVE_STATUSES, R.TRIAL_STAGES]);
   lab.rows.forEach(r => { const since = r.last ? R.daysBetween(r.last.slice(0, 10), today) : null; if (!r.n || since > 14) get(r.uid).lab.push({ ...r, since }); });
-  // cover requests still waiting for the person's answer
-  const pend = await pool.query(`SELECT a.cover_user_id AS uid, u.name, a.from_date::text AS from_date, a.to_date::text AS to_date FROM rd_absences a JOIN users u ON u.id = a.user_id WHERE a.cover_status = 'pending' AND a.ended_at IS NULL AND a.to_date >= $1 ORDER BY a.from_date`, [today]);
-  pend.rows.forEach(r => get(r.uid).confirm.push(r));
   // absences waiting for approval go to everyone who may approve them (not the person away)
-  const wait = await pool.query(`SELECT a.user_id, u.name, a.from_date::text AS from_date, a.to_date::text AS to_date, cu.name AS cover_name, a.cover_status FROM rd_absences a JOIN users u ON u.id = a.user_id LEFT JOIN users cu ON cu.id = a.cover_user_id WHERE a.ended_at IS NULL AND a.to_date >= $1 AND (a.approval_status = 'pending' OR (a.approval_status = 'approved' AND a.cover_user_id IS NULL)) ORDER BY a.from_date`, [today]);
+  const wait = await pool.query(`SELECT a.user_id, u.name, a.from_date::text AS from_date, a.to_date::text AS to_date, cu.name AS cover_name, a.cover_problem FROM rd_absences a JOIN users u ON u.id = a.user_id LEFT JOIN users cu ON cu.id = a.cover_user_id WHERE a.ended_at IS NULL AND a.to_date >= $1 AND (a.approval_status = 'pending' OR (a.approval_status = 'approved' AND (a.cover_user_id IS NULL OR a.cover_problem IS NOT NULL))) ORDER BY a.from_date`, [today]);
   if (wait.rowCount) for (const uid of await cover.approverIds(pool)) wait.rows.filter(r => r.user_id !== uid).forEach(r => get(uid).approve.push(r));
   // people who are away today: what is due on their tasks also goes to whoever covers for them
   const away = await pool.query(`SELECT a.user_id, a.cover_user_id, u.name FROM rd_absences a JOIN users u ON u.id = a.user_id WHERE a.ended_at IS NULL AND a.from_date <= $1 AND a.to_date >= $1 AND a.approval_status = 'approved' AND a.cover_status = 'accepted'`, [today]);
@@ -64,8 +61,8 @@ const lines = (list, fmt) => list.slice(0, MAX_LINES).map(x => '  - ' + fmt(x)).
 
 /** The message for one person, or null when there is nothing to say. */
 function compose(name, d, today) {
-  d.cover = d.cover || []; d.lab = d.lab || []; d.confirm = d.confirm || []; d.approve = d.approve || [];
-  const n = d.overdue.length + d.today.length + d.tomorrow.length + d.sent_back.length + d.review.length + d.cover.length + d.lab.length + d.confirm.length + d.approve.length;
+  d.cover = d.cover || []; d.lab = d.lab || []; d.approve = d.approve || [];
+  const n = d.overdue.length + d.today.length + d.tomorrow.length + d.sent_back.length + d.review.length + d.cover.length + d.lab.length + d.approve.length;
   if (!n) return null;
   const bits = [];
   if (d.sent_back.length) bits.push(plural(d.sent_back.length, 'piece') + ' of work sent back');
@@ -75,7 +72,6 @@ function compose(name, d, today) {
   if (d.tomorrow.length) bits.push(plural(d.tomorrow.length, 'task') + ' due tomorrow');
   if (d.cover.length) bits.push(plural(d.cover.length, 'task') + ' to cover for ' + [...new Set(d.cover.map(x => x.for_name))].join(' and '));
   if (d.approve.length) bits.unshift(plural(d.approve.length, 'absence') + ' waiting for you to decide or choose a cover');
-  if (d.confirm.length) bits.unshift(plural(d.confirm.length, 'request') + ' asking if you can cover');
   if (d.lab.length) bits.push(plural(d.lab.length, 'lab project') + ' needing a trial');
   const sections = [];
   if (d.sent_back.length) sections.push('Sent back to you:\n' + lines(d.sent_back, x => `${x.title} (${x.project_number}): ${x.review_note}`));
@@ -84,8 +80,7 @@ function compose(name, d, today) {
   if (d.today.length) sections.push('Due today:\n' + lines(d.today, x => `${x.title} (${x.project_number})`));
   if (d.tomorrow.length) sections.push('Due tomorrow:\n' + lines(d.tomorrow, x => `${x.title} (${x.project_number})`));
   if (d.cover.length) sections.push('Covering for a colleague who is away:\n' + lines(d.cover, x => `${x.title} (${x.project_number}) for ${x.for_name}${x.kind === 'overdue' ? ', was due ' + dmy(x.due) : x.kind === 'today' ? ', due today' : x.kind === 'tomorrow' ? ', due tomorrow' : ', sent back'}`));
-  if (d.approve.length) sections.push('Absences waiting for you (open Away and cover):\n' + lines(d.approve, x => `${x.name}: ${dmy(x.from_date)} to ${dmy(x.to_date)}, ${x.cover_name ? 'suggested cover ' + x.cover_name : 'no cover chosen yet'}`));
-  if (d.confirm.length) sections.push('Can you cover? Please answer (open Away and cover):\n' + lines(d.confirm, x => `${x.name}: ${dmy(x.from_date)} to ${dmy(x.to_date)}`));
+  if (d.approve.length) sections.push('Absences waiting for you (open Away and cover):\n' + lines(d.approve, x => `${x.name}: ${dmy(x.from_date)} to ${dmy(x.to_date)}, ${x.cover_problem ? x.cover_name + ' reports a problem: ' + x.cover_problem : x.cover_name ? 'suggested cover ' + x.cover_name : 'no cover chosen yet'}`));
   if (d.lab.length) sections.push('Lab trials to record:\n' + lines(d.lab, x => `${x.project_number}: ${x.n ? 'last trial ' + plural(x.since, 'day') + ' ago' : 'no trial recorded yet'} (stage ${x.stage_no})`));
   const subject = `Your day: ${bits.slice(0, 2).join(', ')}`;
   const text = `Today is ${dmy(today)}. Here is what is on your plate: ${bits.join(', ')}.\n\n${sections.join('\n\n')}`;
