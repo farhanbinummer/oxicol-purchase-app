@@ -1374,3 +1374,22 @@ dialog.oxi-dlg textarea, dialog.oxi-dlg input[type=text], dialog.oxi-dlg input[t
 .kpi-note { padding: 10px 12px; border-left: 4px solid var(--warn); background: var(--warn-bg); border-radius: 0 8px 8px 0; font-size: 14px; margin: 0 0 var(--s4); }
 .kpi-below { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s2) 0 0; padding: 0; list-style: none; }
 .kpi-below a { display: inline-flex; flex-direction: column; padding: 6px 12px; border: 1px solid var(--border); border-left: 4px solid var(--danger); border-radius: 10px; background: var(--surface); color: var(--text); text-decoration: none; font-size: 14px; } .kpi-below small { color: var(--text-2); }
+
+
+/* ---- smooth clicks ---- */
+#oxiProgress { position: fixed; top: 0; left: 0; height: 3px; width: 0; background: var(--accent, #0f766e); z-index: 10000; opacity: 0; pointer-events: none; border-radius: 0 2px 2px 0; }
+#oxiProgress.on { opacity: 1; width: 82%; transition: width 9s cubic-bezier(.1, .7, .1, 1), opacity .12s; }
+#oxiProgress.end { opacity: 0; width: 100%; transition: width .15s ease-out, opacity .35s ease .1s; }
+a, button, input, select, textarea, label, summary, [role="button"], [role="tab"] { touch-action: manipulation; }
+html { -webkit-tap-highlight-color: rgba(15, 118, 110, .12); }
+button, a.oxi-btn, .oxi-btn, [role="tab"] { transition: transform .08s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease, opacity .15s ease; }
+button:active:not(:disabled), a.oxi-btn:active, .oxi-btn:active, [role="tab"]:active { transform: scale(.97); }
+button:disabled, button[aria-busy="true"] { opacity: .6; cursor: not-allowed; }
+@keyframes oxiFadeIn { from { opacity: 0; } to { opacity: 1; } }       /* opacity only: a moving page would also move fixed menus */
+main, #page, #day, #overview, .oxi-main-panel { animation: oxiFadeIn .18s ease-out; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+@media (prefers-reduced-motion: reduce) {
+  #oxiProgress.on { transition: none; width: 60%; } #oxiProgress.end { transition: opacity .2s; width: 100%; }
+  button, a.oxi-btn, .oxi-btn, [role="tab"] { transition: none; } button:active:not(:disabled), a.oxi-btn:active, .oxi-btn:active, [role="tab"]:active { transform: none; }
+  main, #page, #day, #overview, .oxi-main-panel { animation: none; }
+}

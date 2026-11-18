@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 const { testConnection } = require('./database');
 const { requireAuth, requireRole } = require('./auth');
 const { ensureSchema, emailOn, whatsappOn } = require('./notify');
@@ -31,11 +32,17 @@ const loginLimiter = rateLimit({
   message: { success: false, error: 'Too many login attempts. Please wait a few minutes and try again.' }
 });
 
+// Speed: compress text responses (pages, styles, scripts and API answers shrink by about 80%).
+app.use(compression());
+
 // Serve the HTML frontend from ../frontend so http://localhost:3000 opens the app.
-// No caching: this is an actively-edited internal tool, and a stale cached .html/.js
-// file (e.g. an old common.js) can silently break a page after an update.
-app.use(express.static(path.join(__dirname, '..', 'frontend'), { etag: false, lastModified: false, cacheControl: false,
-  setHeaders: (res) => res.set('Cache-Control', 'no-store') }));
+// Pages, scripts and styles are kept by the browser but CHECKED against the server on every use (Cache-Control: no-cache + ETag): an
+// unchanged file costs a tiny "not modified" answer instead of a full download, and a changed file (a new deploy) is always picked up
+// at once, so a stale common.js can never break a page. Pictures and icons are kept for a week.
+// Data is never kept: every /api answer is sent with no-store.
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+app.use(express.static(path.join(__dirname, '..', 'frontend'), { etag: true, lastModified: true, cacheControl: false,
+  setHeaders: (res, filePath) => res.set('Cache-Control', /\.(png|jpe?g|webp|gif|svg|ico|woff2?)$/i.test(filePath) ? 'public, max-age=604800' : 'no-cache') }));
 
 // ---------- Routes ----------
 // Health check: confirms both the server and the database are up.

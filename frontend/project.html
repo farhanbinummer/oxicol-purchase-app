@@ -1256,9 +1256,11 @@
     const trialErrors = (r) => (r && r.errors && r.errors.length ? r.errors.map(e => e.message).join(' ') : null);
     function trialFail(r, box) { fail(r, box); const m = trialErrors(r); if (m && box) { box.textContent = m; box.hidden = false; } }
 
+    let earlyTrials = null;
     async function loadTrials() {
       if (!D.can.trial_view) return;
-      const r = await api('/api/rd/projects/' + pid + '/trials');
+      const early = earlyTrials; earlyTrials = null;                     // asked for at the same time as the project, so it is usually already here
+      const r = await (early || api('/api/rd/projects/' + pid + '/trials'));
       if (!r.success) { const b = $('trialsview'); b.innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, r.error || 'Could not load the trials.')); const t = el('button', null, 'Try again'); t.type = 'button'; t.onclick = loadTrials; e.appendChild(t); b.appendChild(e); return; }
       T = r; renderTrials();
     }
@@ -1568,6 +1570,12 @@
 
     async function load(quiet) {
       if (!pid) { note('No project selected.', false); return; }
+      // Ask for everything at the same time instead of one after another (each answer used to wait for the one before it). The page already
+      // knows from the saved menu data what this person may open, so it only asks for what they can use; anything missed is asked for later.
+      const can = (k) => typeof oxiCan === 'function' && oxiCan(k);
+      const pMeta = !meta ? api('/api/rd/meta') : null;
+      const pPeople = can('rd.edit') && !people.length ? api('/api/rd/people?project=' + pid) : null;
+      if (can('rd.trial_view') && !earlyTrials) earlyTrials = api('/api/rd/projects/' + pid + '/trials');
       const d = await api('/api/rd/projects/' + pid);
       if (!d.success) {
         $('overview').setAttribute('aria-busy', 'false'); $('overview').innerHTML = '';
@@ -1576,8 +1584,8 @@
       }
       if (d.project.is_draft) { location.replace('project-new.html?id=' + pid); return; }
       D = d; D.me_id = (() => { try { return JSON.parse(localStorage.getItem('oxicol_user')).id; } catch (e) { return null; } })();
-      if (!meta) { meta = await api('/api/rd/meta'); if (!meta.success) { note(meta.error, false); return; } }
-      if (D.can.edit && !people.length) { const p = await api('/api/rd/people?project=' + pid); if (p.success) people = p.people; }
+      if (!meta) { meta = await (pMeta || api('/api/rd/meta')); if (!meta.success) { note(meta.error, false); meta = null; return; } }
+      if (D.can.edit && !people.length) { const p = await (pPeople || api('/api/rd/people?project=' + pid)); if (p.success) people = p.people; }
       TABS = D.can.trial_view ? BASE_TABS.concat('trials') : BASE_TABS.slice(); $('tab-trials').hidden = !D.can.trial_view;
       renderHeader(); renderOverview(); renderList(); renderBoard(); renderTimeline(); renderActivity();
       if (D.can.trial_view) loadTrials();

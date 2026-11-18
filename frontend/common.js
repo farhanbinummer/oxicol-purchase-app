@@ -62,6 +62,29 @@ function svgIcon(name, size) {
     'stroke-linecap="round" stroke-linejoin="round" class="oxi-icon" aria-hidden="true" focusable="false">' + (OXI_ICONS[name] || '') + '</svg>';
 }
 
+// ---------- instant feedback: a thin progress bar ----------
+// Shows at once when a link is clicked (the next page is on its way) and after a short delay when the app is waiting for the server, so
+// a click never feels ignored. It is only a picture: nothing waits for it.
+(function () {
+  let bar = null, inflight = 0, timer = null;
+  const el = () => { if (!bar) { bar = document.createElement('div'); bar.id = 'oxiProgress'; bar.setAttribute('aria-hidden', 'true'); document.body.appendChild(bar); } return bar; };
+  const show = () => { const b = el(); b.className = ''; void b.offsetWidth; b.className = 'on'; };
+  const hide = () => { if (!bar) return; bar.className = 'end'; setTimeout(() => { if (bar && bar.className === 'end') bar.className = ''; }, 500); };
+  window.oxiProgress = {
+    start() { inflight++; if (!timer && inflight === 1) timer = setTimeout(() => { timer = null; if (inflight > 0) show(); }, 150); },
+    end() { inflight = Math.max(0, inflight - 1); if (inflight === 0) { if (timer) { clearTimeout(timer); timer = null; } else hide(); } },
+    now() { show(); }
+  };
+  // clicking a link to another page of the app: show the bar immediately
+  document.addEventListener('click', (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest && e.target.closest('a[href]'); if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+    const u = new URL(a.href, location.href); if (u.origin !== location.origin || (u.pathname === location.pathname && u.search === location.search)) return;
+    window.oxiProgress.now();
+  });
+  window.addEventListener('pageshow', (e) => { if (e.persisted && bar) bar.className = ''; });
+})();
+
 (function () {
   const PUBLIC_PAGES = ['login.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
@@ -81,7 +104,8 @@ function svgIcon(name, size) {
     if (url.startsWith('/api/') && token) {
       init.headers = Object.assign({}, init.headers, { Authorization: 'Bearer ' + token });
     }
-    const res = await realFetch(input, init);
+    const track = url.startsWith('/api/') && window.oxiProgress; if (track) window.oxiProgress.start();
+    let res; try { res = await realFetch(input, init); } finally { if (track) window.oxiProgress.end(); }
     if (res.status === 403 && url.startsWith('/api/') && page !== 'account.html') {
       const j = await res.clone().json().catch(() => null);
       if (j && j.code === 'PASSWORD_CHANGE_REQUIRED') { location.href = 'account.html?force=1'; return res; }
