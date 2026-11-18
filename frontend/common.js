@@ -296,6 +296,7 @@ function svgIcon(name, size) {
         g.items.forEach(item => {
           const a = document.createElement('a');
           a.href = item.href;
+          if (item.external) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
           a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
           if (item === active) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
           sidenav.appendChild(a);

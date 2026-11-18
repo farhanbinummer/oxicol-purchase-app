@@ -275,6 +275,13 @@ for (const [id, w] of Object.entries(WORKSPACES)) {
   w.nav.splice(1, 0, { title: 'R&D', items: [{ label: 'R&D Dashboard', href: 'rd-dashboard.html', icon: 'dashboard', perm: KEYS.RD_VIEW }, { label: 'R&D Projects', href: 'projects.html', icon: 'clipboardlist', perm: KEYS.RD_VIEW, also: ['project.html', 'project-new.html'] }] });
 }
 
+// Every workspace also links out to the separate Task Management app (opens in a new tab). Set TASK_APP_URL to change the address;
+// set it to an empty string to hide the link. No login details are stored here: people sign in to that app themselves.
+const TASK_APP_URL = process.env.TASK_APP_URL === undefined ? 'https://steady-frangollo-e2886d.netlify.app/' : process.env.TASK_APP_URL.trim();
+if (/^https:\/\//.test(TASK_APP_URL)) {
+  for (const w of Object.values(WORKSPACES)) w.nav.push({ title: 'Apps', items: [{ label: 'Tasks', href: TASK_APP_URL, icon: 'clipboardlist', external: true }] });
+}
+
 /** Workspaces a person is assigned: those that list any of the roles they hold. Switching never adds permissions. */
 function workspacesFor(access) {
   return Object.entries(WORKSPACES)
@@ -295,7 +302,7 @@ function navFor(workspaceId, access) {
     return true;
   };
   return w.nav
-    .map(g => ({ title: g.title, items: g.items.filter(allowed).map(i => ({ label: i.label, href: i.href, icon: i.icon, also: i.also || [] })) }))
+    .map(g => ({ title: g.title, items: g.items.filter(allowed).map(i => ({ label: i.label, href: i.href, icon: i.icon, also: i.also || [], external: !!i.external })) }))
     .filter(g => g.items.length > 0);
 }
 
