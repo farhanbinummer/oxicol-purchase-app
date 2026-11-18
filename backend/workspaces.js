@@ -267,7 +267,7 @@ const WORKSPACES = {
         { label: 'Recipes / Bill of Materials', href: 'recipes.html', icon: 'book', perm: KEYS.PRODUCTION_INDENT_VIEW },
         { label: 'Catalogue Review', href: 'catalog-review.html', icon: 'link', perm: KEYS.CATALOG_MAP_ITEMS } ] },
       { title: 'Reports', items: [{ label: 'Team Performance', href: 'team-performance.html', icon: 'dashboard', perm: KEYS.KPI_VIEW_ALL }] },
-      { title: 'System', items: [{ label: 'Integration Settings', href: 'system.html', icon: 'server', admin: true }] }
+      { title: 'System', items: [{ label: 'Integration Settings', href: 'system.html', icon: 'server', admin: true }, { label: 'Remove Data', href: 'data-cleanup.html', icon: 'shield', admin: true }] }
     ]
   }
 };

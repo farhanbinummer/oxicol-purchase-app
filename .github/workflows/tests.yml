@@ -74,6 +74,9 @@ jobs:
       - name: Lab trials tests
         working-directory: backend
         run: npm run test:trials
+      - name: Remove data tests
+        working-directory: backend
+        run: npm run test:admin-data
 
       - name: Workspace and permission tests
         working-directory: backend

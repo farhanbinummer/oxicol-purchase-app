@@ -79,6 +79,7 @@ function shape(a, req, today) {
   const out = { id: a.id, user_id: a.user_id, user_name: a.user_name, cover_user_id: a.cover_user_id, cover_name: a.cover_name, kind: a.kind, from_date: a.from_date, to_date: a.to_date, reason: a.reason, cover_status: a.cover_status, approval_status: a.approval_status, approved_by_name: a.approved_by_name || null, status: statusOf(a, today),
     can_edit: !a.ended_at && a.to_date >= today && (canManage(req) || a.user_id === me || a.created_by === me), can_report: a.cover_user_id === me && a.approval_status === 'approved' && !a.ended_at && a.to_date >= today && !a.cover_problem,
     can_approve: canApprove(req) && a.approval_status === 'pending' && !a.ended_at && a.to_date >= today && (a.user_id !== me || req.access.isAdmin),
+    can_delete: req.access.isAdmin,
     can_assign: canApprove(req) && a.approval_status === 'approved' && (!a.cover_user_id || !!a.cover_problem) && !a.ended_at && a.to_date >= today };
   if (mayRead || out.can_approve || out.can_assign) { out.handover_note = a.handover_note || ''; out.cover_problem = a.cover_problem || null; out.approval_reason = a.approval_reason || null; }
   return out;
