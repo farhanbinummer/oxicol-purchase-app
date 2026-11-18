@@ -10,6 +10,7 @@
     "test:integration": "node --test tests/integration.test.js",
     "test:rd": "node --test tests/rd.test.js",
     "test:trials": "node --test tests/rd-trials.test.js",
+    "test:admin-data": "node --test tests/admin-data.test.js",
     "test:workspaces": "node --test tests/workspaces.test.js",
     "test:all": "node --test --test-concurrency=1 \"tests/*.test.js\""
   },

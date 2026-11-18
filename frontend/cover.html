@@ -96,6 +96,8 @@
       } else if (opts.as === 'cover' && false) {
         const en = el('button', 'oxi-btn-secondary', 'Stop covering'); en.type = 'button'; en.onclick = async () => { if (!confirm('Stop covering now?')) return; const r = await api('/api/rd/cover/' + a.id + '/end', 'POST', {}); if (!r.success) { note(r.error || 'Could not end it.', false); return; } load(); }; act.appendChild(en);
       }
+      if (a.can_delete) { const rm = el('button', 'oxi-danger oxi-btn-sm', 'Remove record'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove the record of ' + a.user_name + ', ' + range(a) + ' permanently');
+        rm.onclick = () => askReason('Remove this record permanently?', 'Why is it being removed? (kept in the Audit History. This cannot be undone.)', 'Remove permanently', async (why) => { const r = await api('/api/admin/data/absences/' + a.id + '/delete', 'POST', { reason: why }); if (!r.success) return r.error; note('Removed.', true); load(); return true; }); act.appendChild(rm); }
       row.appendChild(act); li.appendChild(row); return li;
     }
     function card(id, title, sub) { const c = el('section', 'oxi-card2 cv-card'); c.id = id; c.setAttribute('aria-labelledby', id + 'T'); const h = el('h2', null, title); h.id = id + 'T'; c.appendChild(h); if (sub) c.appendChild(el('p', 'oxi-section-note', sub)); return c; }

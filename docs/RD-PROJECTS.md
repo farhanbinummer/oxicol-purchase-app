@@ -184,3 +184,21 @@ The page **Away and cover** (menu entry for R&D) is where absences are asked for
 **Reminders:** the manager gets a notice and a morning-message line until each request is decided or has a cover, and when a cover reports a problem. Notices never include the notes.
 
 **Numbers:** work done by a cover counts as the cover's completion, not the person's, in Team Performance.
+
+## Removing data (administrator only)
+
+Menu: System, Remove Data (`data-cleanup.html`). Administrators only; every route sits behind the admin role.
+
+| What | Where | What goes with it |
+|---|---|---|
+| R&D projects (one or many, drafts too) | Remove Data page, or "Remove this project" at the bottom of a project's Overview | Stages, checklist, tasks and their history, lab trials with results, corrections and files, notes, team, approvals |
+| One task | "Remove this task" inside the task | The task's history. A lab trial linked to it stays; only the link is cleared |
+| One lab trial | "Remove this trial" in the trial's details | Its results, corrections and files |
+| An absence record | "Remove record" on Away and cover | Nothing else |
+| Old sent-notice records | Remove Data page, "Clear old records" (at least 7 days old) | Only the list of emails and messages tried |
+
+Safeguards: a warning that it cannot be undone; the number of tasks, trials and files shown first; typing the project number to confirm (`DELETE n PROJECTS` for several, at most 50 at a time); a written reason (at least 5 letters). All of it is done in one database transaction, so a failure removes nothing.
+
+The Audit History records who removed what, when and why, with counts only (never confidential trial text). **It can never be removed here.** Project numbers are not reused after a project is removed.
+
+Not included on purpose: purchase orders, GRNs, payments, branch requests and other money or stock records. Take a database backup before removing real data (docs/BACKUP-AND-RECOVERY.md).

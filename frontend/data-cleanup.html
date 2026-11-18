@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Remove Data</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .dc-warn { margin: 0 0 var(--s4); padding: 12px 14px; border-radius: 12px; background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); font-size: 14px; }
+    .dc-warn a { color: inherit; font-weight: 700; }
+    .dc-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .dc-bar input[type=search] { flex: 1 1 260px; max-width: 420px; }
+    .dc-card { margin: 0 0 var(--s4); } .dc-card > h2 { margin: 0 0 4px; font-size: 20px; }
+    .dc-num { white-space: nowrap; font-variant-numeric: tabular-nums; } td.dc-small { font-size: 13px; color: var(--text-2); }
+    .dc-sel { min-width: 44px; } .dc-sel input { width: 20px; height: 20px; }
+    .dc-list { margin: 6px 0 12px; padding-left: 18px; max-height: 160px; overflow-y: auto; } .dc-list li { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="audit.html">Audit History</a></p>
+  <h1>Remove Data</h1>
+  <p class="oxi-page-sub">For administrators only. Remove test projects or data that should not be in the app. <b>Removing is permanent.</b></p>
+  <div class="dc-warn" role="note"><b>Before you remove real data, take a database backup</b> (see <code>docs/BACKUP-AND-RECOVERY.md</code>). Each removal asks you to type a confirmation and write a reason. The reason, who removed it and what was removed (counts only) are kept in the Audit History, which cannot be removed.</div>
+  <p id="message" role="status"></p>
+  <div id="page" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    let LIST = [], chosen = new Set(), q = '';
+    function note(text, ok) { const m = $('message'); m.textContent = text; m.className = ok ? 'success' : 'error'; if (!ok) m.scrollIntoView({ block: 'nearest' }); }
+    const what = (c) => [c.tasks && plural(c.tasks, 'task'), c.trials && plural(c.trials, 'trial'), c.files && plural(c.files, 'file') + ' (' + c.file_mb + ' MB)', c.stages_done && c.stages_done + ' of ' + c.stages + ' stages done'].filter(Boolean).join(', ') || '-';
+
+    function confirmDialog(items) {
+      const dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'cdT'); const f = el('form'); f.method = 'dialog';
+      const h = el('h3', null, 'Remove ' + plural(items.length, 'project') + ' permanently?'); h.id = 'cdT'; f.appendChild(h);
+      f.appendChild(el('p', 'dc-warn', 'This cannot be undone. Everything under the project goes with it: stages, checklist, tasks, lab trials, files, notes and team.'));
+      const ul = el('ul', 'dc-list'); items.slice(0, 12).forEach(p => ul.appendChild(el('li', null, (p.project_number || '(draft)') + ' ' + p.title + ': ' + what(p.counts)))); if (items.length > 12) ul.appendChild(el('li', null, '...and ' + (items.length - 12) + ' more')); f.appendChild(ul);
+      const expected = items.length === 1 ? (items[0].project_number || 'DELETE') : 'DELETE ' + items.length + ' PROJECTS';
+      const l1 = el('label', null, 'Type  ' + expected + '  to confirm'); const typed = el('input'); typed.type = 'text'; typed.autocomplete = 'off'; typed.id = 'cdType'; l1.htmlFor = 'cdType'; f.append(l1, typed);
+      const l2 = el('label', null, 'Why are you removing this? (kept in the Audit History)'); const why = el('textarea'); why.rows = 2; why.maxLength = 1000; why.id = 'cdWhy'; l2.htmlFor = 'cdWhy'; l2.style.marginTop = '10px'; f.append(l2, why);
+      const err = el('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const row = el('div', 'row');
+      const no = el('button', 'oxi-btn-secondary', 'Cancel'); no.type = 'button'; no.onclick = () => dlg.close(); const ok = el('button', 'oxi-danger', 'Remove permanently'); ok.type = 'submit'; row.append(no, ok); f.append(err, row); dlg.appendChild(f); document.body.appendChild(dlg);
+      const back = document.activeElement;
+      f.onsubmit = async (e) => {
+        e.preventDefault(); err.hidden = true;
+        if (typed.value.trim() !== expected) { err.textContent = 'Please type exactly: ' + expected; err.hidden = false; typed.focus(); return; }
+        if (why.value.trim().length < 5) { err.textContent = 'Please write why (at least 5 letters).'; err.hidden = false; why.focus(); return; }
+        ok.disabled = true; const r = await api('/api/admin/data/projects/delete', 'POST', { ids: items.map(p => p.id), confirm: typed.value.trim(), reason: why.value });
+        if (!r.success) { ok.disabled = false; err.textContent = r.error || 'Could not remove.'; err.hidden = false; return; }
+        dlg.close(); chosen.clear(); note('Removed ' + plural(r.removed, 'project') + '.', true); load();
+      };
+      dlg.addEventListener('close', () => { dlg.remove(); if (back && document.contains(back)) back.focus(); }); dlg.showModal(); typed.focus();
+    }
+
+    function render(d) {
+      const page = $('page'); page.innerHTML = ''; page.setAttribute('aria-busy', 'false');
+      const c = el('section', 'oxi-card2 dc-card'); c.setAttribute('aria-labelledby', 'dcPT'); const h = el('h2', null, 'R&D projects'); h.id = 'dcPT'; c.appendChild(h);
+      c.appendChild(el('p', 'oxi-section-note', 'Tick the projects to remove. Search by number, title or who requested it. Showing ' + d.shown + ' of ' + d.total + (d.total > d.shown ? ' (search to find others).' : '.')));
+      const bar = el('div', 'dc-bar'); const s = el('input'); s.type = 'search'; s.placeholder = 'Search projects'; s.value = q; s.setAttribute('aria-label', 'Search projects'); s.onkeydown = (e) => { if (e.key === 'Enter') { q = s.value.trim(); load(); } };
+      const go = el('button', 'oxi-btn-secondary', 'Search'); go.type = 'button'; go.onclick = () => { q = s.value.trim(); load(); };
+      const del = el('button', 'oxi-danger', 'Remove selected (' + chosen.size + ')'); del.type = 'button'; del.disabled = !chosen.size; del.onclick = () => confirmDialog(LIST.filter(p => chosen.has(p.id)));
+      bar.append(s, go, del); c.appendChild(bar);
+      if (!LIST.length) c.appendChild(el('p', 'oxi-section-note', 'No projects found.')); else {
+        const w = el('div', 'oxi-table-scroll'); const t = el('table'); t.appendChild(el('caption', 'oxi-sr-only', 'R&D projects that can be removed'));
+        const hr = el('tr'); const allTh = el('th', 'dc-sel'); allTh.scope = 'col'; const all = el('input'); all.type = 'checkbox'; all.setAttribute('aria-label', 'Select all shown'); all.checked = LIST.length && LIST.every(p => chosen.has(p.id)); all.onchange = () => { LIST.forEach(p => all.checked ? chosen.add(p.id) : chosen.delete(p.id)); render(d); }; allTh.appendChild(all); hr.appendChild(allTh);
+        ['Number', 'Project', 'Status', 'Requested by', 'Created', 'Under it'].forEach(x => { const th = el('th', null, x); th.scope = 'col'; hr.appendChild(th); }); const th0 = el('thead'); th0.appendChild(hr); t.appendChild(th0);
+        const tb = el('tbody');
+        LIST.forEach(p => { const tr = el('tr'); const td = el('td', 'dc-sel'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = chosen.has(p.id); cb.setAttribute('aria-label', 'Select ' + (p.project_number || 'draft') + ' ' + p.title); cb.onchange = () => { cb.checked ? chosen.add(p.id) : chosen.delete(p.id); del.textContent = 'Remove selected (' + chosen.size + ')'; del.disabled = !chosen.size; }; td.appendChild(cb); tr.appendChild(td);
+          tr.append(el('td', 'dc-num', p.project_number || '(draft)')); const a = el('td'); const l = el('a', null, p.title); l.href = 'project.html?id=' + p.id; a.appendChild(l); tr.append(a, el('td', null, p.is_draft ? 'Draft' : p.status), el('td', null, p.requested_by_name || '-'), el('td', 'dc-num', dmy(p.created)), el('td', 'dc-small', what(p.counts))); tb.appendChild(tr); });
+        t.appendChild(tb); w.appendChild(t); c.appendChild(w);
+      }
+      page.appendChild(c);
+      const n = el('section', 'oxi-card2 dc-card'); n.setAttribute('aria-labelledby', 'dcNT'); const nh = el('h2', null, 'Sent-notice records'); nh.id = 'dcNT'; n.appendChild(nh);
+      n.appendChild(el('p', 'oxi-section-note', 'The list of emails and WhatsApp messages the app tried to send (shown on My Account). Old records can be cleared. The Audit History is never cleared.'));
+      const nb = el('div', 'dc-bar'); const sel = el('select'); sel.setAttribute('aria-label', 'Clear records older than'); [30, 90, 180, 365].forEach(x => { const o = el('option', null, 'Older than ' + x + ' days'); o.value = x; sel.appendChild(o); });
+      const cl = el('button', 'oxi-btn-secondary', 'Clear old records'); cl.type = 'button'; cl.onclick = async () => { if (!confirm('Clear sent-notice records older than ' + sel.value + ' days? This cannot be undone.')) return; const r = await api('/api/admin/data/notice-log/clear', 'POST', { older_than_days: Number(sel.value) }); if (!r.success) { note(r.error || 'Could not clear.', false); return; } note('Cleared ' + plural(r.removed, 'record') + '.', true); };
+      nb.append(sel, cl); n.appendChild(nb); page.appendChild(n);
+      page.appendChild(el('p', 'oxi-section-note', 'Single tasks, lab trials and absence records are removed from their own screens (an administrator sees a remove button there).'));
+    }
+    async function load() {
+      const d = await api('/api/admin/data/projects?q=' + encodeURIComponent(q));
+      if (!d.success) { $('page').innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load this page. Only administrators can open it.')); $('page').appendChild(e); return; }
+      LIST = d.projects; chosen = new Set([...chosen].filter(id => LIST.some(p => p.id === id))); render(d);
+    }
+    load().catch(() => note('Could not reach the server.', false));
+  </script>
+</body>
+</html>

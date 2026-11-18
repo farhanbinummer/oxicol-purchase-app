@@ -833,10 +833,44 @@
       c.appendChild(open); return c;
     }
 
+
+    // ------------------------------------------------------------------ administrator: remove data (permanent)
+    /** One careful box for every removal: a warning, what goes, an optional typed confirmation and a written reason. */
+    function removeDialog(title, intro, lines, opts) {
+      const d = dialog(title, (body) => {
+        body.appendChild(el('p', 'tr-warn', 'This cannot be undone. If this is real data, take a database backup first.'));
+        body.appendChild(el('p', null, intro));
+        if (lines.length) { const ul = el('ul'); lines.forEach(l => ul.appendChild(el('li', null, l))); body.appendChild(ul); }
+        let typed = null; if (opts.confirmText) { typed = el('input'); typed.type = 'text'; typed.autocomplete = 'off'; body.appendChild(field('Type  ' + opts.confirmText + '  to confirm', typed, 'rmType')); }
+        const why = el('textarea'); why.rows = 2; why.maxLength = 1000; body.appendChild(field('Why is this being removed? (kept in the Audit History)', why, 'rmWhy'));
+        return () => ({ typed, why });
+      }, 'Remove permanently', async (f, err) => {
+        if (f.typed && f.typed.value.trim() !== opts.confirmText) { err.textContent = 'Please type exactly: ' + opts.confirmText; err.hidden = false; f.typed.focus(); return false; }
+        if (f.why.value.trim().length < 5) { err.textContent = 'Please write why (at least 5 letters).'; err.hidden = false; f.why.focus(); return false; }
+        const r = await api(opts.path, 'POST', Object.assign({ reason: f.why.value }, opts.body ? opts.body(f) : {}));
+        if (!r.success) { fail(r, err); return false; }
+        await opts.after(); return true;
+      });
+      d.querySelector('button[type=submit]').classList.add('oxi-danger'); return d;
+    }
+    function removeCard() {
+      if (!D.can.delete_data) return null;
+      const c = el('section', 'oxi-card2'); c.setAttribute('aria-labelledby', 'rmT'); const h = el('h2', null, 'Administrator: remove this project'); h.id = 'rmT'; c.appendChild(h);
+      c.appendChild(el('p', 'oxi-section-note', 'Removes the project and everything under it (stages, checklist, tasks, lab trials, files, notes). Only for test data or mistakes. It cannot be undone.'));
+      const b = el('button', 'oxi-danger', 'Remove this project...'); b.type = 'button';
+      b.onclick = async () => {
+        const r = await api('/api/admin/data/projects/' + pid + '/preview'); if (!r.success) { note(r.error || 'Could not load.', false); return; } const c2 = r.counts;
+        removeDialog('Remove ' + (r.project.project_number || 'this draft') + ' permanently?', '"' + r.project.title + '" and everything under it will be removed:',
+          [c2.stages_done + ' of ' + c2.stages + ' stages done, ' + c2.checklist_items + ' checklist items', plural(c2.tasks, 'task'), plural(c2.trials, 'lab trial'), plural(c2.files, 'file') + ' (' + c2.file_mb + ' MB)', plural(c2.notes, 'note') + ' and ' + plural(c2.approvals, 'approval record')],
+          { confirmText: r.confirm_text, path: '/api/admin/data/projects/delete', body: () => ({ ids: [Number(pid)], confirm: r.confirm_text }), after: async () => { location.href = 'projects.html'; } });
+      };
+      c.appendChild(b); return c;
+    }
+
     function renderOverview() {
       const o = $('overview'); o.innerHTML = ''; o.setAttribute('aria-busy', 'false');
       const top = el('div', 'oxi-ovgrid'); top.append(nextStepCard(), attentionCard());
-      o.append(...[summaryRow(), top, trialsCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard()].filter(Boolean));
+      o.append(...[summaryRow(), top, trialsCard(), milestoneCard(), assessmentCard(), approvalCard(), ...updatesCards(), detailsCard(), removeCard()].filter(Boolean));
     }
 
     // ------------------------------------------------------------------ List tab (tasks)
@@ -1108,7 +1142,9 @@
       });
       pn.append(head, desc, info);
       if (tk.review_note) { const sb = el('div', 'oxi-flag'); sb.append(icon('alert', 15), document.createTextNode(' Sent back: ' + tk.review_note)); pn.appendChild(sb); }
-      pn.append(form); bg.appendChild(pn); document.body.appendChild(bg); status.focus();
+      pn.append(form);
+      if (D.can.delete_data) { const rb = el('button', 'oxi-danger oxi-btn-sm', 'Administrator: remove this task'); rb.type = 'button'; rb.style.marginTop = '14px'; rb.onclick = () => { close(); setTimeout(() => removeDialog('Remove this task permanently?', '"' + tk.title + '" and its history will be removed.', [], { path: '/api/admin/data/tasks/' + tk.id + '/delete', after: async () => { note('Task removed.', true); await load(true); } }), 0); }; pn.appendChild(rb); }
+      bg.appendChild(pn); document.body.appendChild(bg); status.focus();
     }
 
     function taskForm() {
@@ -1479,6 +1515,7 @@
         if (!x.corrections.length) body.appendChild(el('p', 'oxi-section-note', 'This trial has not been corrected.'));
         else { const ul = el('ul', 'tr-corr'); x.corrections.slice().reverse().forEach(c => { const li = el('li'); li.appendChild(el('strong', null, dmy(String(c.at).slice(0, 10)) + ', ' + c.by + ': ' + (c.fields.length ? 'changed ' + c.fields.map(f => f.replace(/_/g, ' ')).join(', ') : 'corrected'))); if (c.reason) li.appendChild(el('div', null, 'Reason: ' + c.reason)); if (c.old) { const old = Object.entries(c.old).filter(([k]) => k !== 'results').map(([k, v]) => k.replace(/_/g, ' ') + ' was "' + (v == null ? '' : v) + '"'); if (c.old.results) old.push('results were changed'); if (old.length) li.appendChild(el('div', 'oxi-section-note', 'Before: ' + old.join('; '))); } ul.appendChild(li); }); body.appendChild(ul); }
         if (T.can.add) { const cb = el('button', 'oxi-btn-secondary', 'Correct this trial'); cb.type = 'button'; cb.onclick = () => { body.closest('dialog').close(); setTimeout(() => trialDialog(x), 0); }; body.appendChild(cb); }
+        if (D.can.delete_data) { const rb = el('button', 'oxi-danger oxi-btn-sm', 'Administrator: remove this trial'); rb.type = 'button'; rb.style.marginTop = '12px'; rb.onclick = () => { body.closest('dialog').close(); setTimeout(() => removeDialog('Remove trial ' + x.label + ' permanently?', 'The trial, its results, corrections and ' + plural(x.attachment_count || 0, 'file') + ' will be removed.', [], { path: '/api/admin/data/trials/' + x.id + '/delete', after: async () => { note('Trial removed.', true); await loadTrials(); load(true); } }), 0); }; body.appendChild(rb); }
         return null;
       }, '', null, { cancelLabel: 'Close' });
     }

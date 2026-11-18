@@ -473,7 +473,7 @@ async function detail(req, p, members, acc) {
     tasks: tasks.rows.map(x => withFlags(norm(x))), updates: updates.rows, approvals: approvals.rows.map(norm),
     members: mem.rows, lead, favourite: fav.rows[0] ? fav.rows[0].favourite : false,
     covering_ids: (await cover.coveredBy(pool, req.user.id)).map(c => c.user_id),       // people I am covering for today: I may do their tasks
-    can: { ...acc, create_task: acc.edit && !p.is_draft, trial_view: req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_VIEW), trial_edit: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && can(req.access, KEYS.FIELD_RD_TECHNICAL) }
+    can: { ...acc, delete_data: req.access.isAdmin, create_task: acc.edit && !p.is_draft, trial_view: req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_VIEW), trial_edit: (req.access.isAdmin || can(req.access, KEYS.RD_TRIAL_EDIT)) && can(req.access, KEYS.FIELD_RD_TECHNICAL) }
   };
   out.project.lead_name = lead ? lead.name : null;
   if (out.can.trial_view) out.trials_summary = await trialsSummary(p, acc.technical);
