@@ -131,7 +131,8 @@ router.get('/expected-deliveries', async (req, res) => {
 router.get('/task-summary', requirePermission(KEYS.TASKS_SUMMARY_VIEW), async (req, res) => {
   const s = await require('../taskflow').getSummary();
   if (!s) return res.json({ success: true, enabled: false });
-  res.json({ success: true, enabled: true, ...s, open_url: require('../taskflow').appUrl() });
+  res.json({ success: true, enabled: true, ...s, open_url: require('../taskflow').appUrl(),
+    view_urls: { overdue: require('../taskflow').viewUrl('overdue'), today: require('../taskflow').viewUrl('today'), open: require('../taskflow').viewUrl('open') } });
 });
 
 router.get('/:id/dashboard', async (req, res) => {

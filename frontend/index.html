@@ -237,11 +237,18 @@
       if (mine !== taskTicket) return;                       // the person switched workspace meanwhile
       body.innerHTML = '';
       if (!s || !s.success || s.enabled === false) { box.hidden = true; return; }
-      const open = (txt) => { const a = el('a', 'oxi-btn oxi-btn-secondary', txt); a.href = s.open_url || '#'; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.style.marginTop = '12px'; return a; };
+      const open = (txt) => { const a = el('a', 'oxi-btn oxi-btn-secondary', txt); a.href = (s.view_urls && s.view_urls.overdue && s.ok && s.overdue) ? s.view_urls.overdue : (s.open_url || '#'); a.target = '_blank'; a.rel = 'noopener noreferrer'; a.style.marginTop = '12px'; return a; };
       if (!s.ok) { body.append(el('p', 'oxi-section-note', 'The task numbers could not be reached just now. They will appear here again when TaskFlow answers.'), ...(s.open_url ? [open('Open TaskFlow (new tab)')] : [])); return; }
-      const mk = (value, label, cls) => { const t = el('div', 'kpi-tile ' + (cls || '')); t.append(el('b', null, String(value)), el('span', null, label)); return t; };
+      // a number opens the matching TaskFlow list in a new tab (TaskFlow reads ?view=...). Without a link it is a plain tile.
+      const mk = (value, label, cls, view) => {
+        const url = view && s.view_urls && s.view_urls[view];
+        const t = el(url ? 'a' : 'div', 'kpi-tile ' + (cls || '') + (url ? ' kpi-link' : ''));
+        t.append(el('b', null, String(value)), el('span', null, label));
+        if (url) { t.href = url; t.target = '_blank'; t.rel = 'noopener noreferrer'; t.setAttribute('aria-label', value + ' ' + label + ' - open in TaskFlow (new tab)'); }
+        return t;
+      };
       const tiles = el('div', 'kpi-tiles');
-      tiles.append(mk(s.overdue, s.overdue === 1 ? 'task overdue' : 'tasks overdue', s.overdue ? 'red' : 'green'), mk(s.open, 'tasks open'), mk(s.due_today, 'due today', s.due_today ? 'amber' : ''), mk(s.done_7d, 'done in the last 7 days', 'green'));
+      tiles.append(mk(s.overdue, s.overdue === 1 ? 'task overdue' : 'tasks overdue', s.overdue ? 'red' : 'green', 'overdue'), mk(s.open, 'tasks open', '', 'open'), mk(s.due_today, 'due today', s.due_today ? 'amber' : '', 'today'), mk(s.done_7d, 'done in the last 7 days', 'green'));
       body.appendChild(tiles);
       if (s.top_overdue && s.top_overdue.length) { const ul = el('ul', 'kpi-below'); ul.setAttribute('aria-label', 'People with the most overdue tasks'); s.top_overdue.forEach(p => ul.appendChild(el('li', null, p.name + ': ' + p.count + ' overdue'))); body.appendChild(ul); }
       body.appendChild(el('p', 'oxi-section-note', 'Counts only, read from TaskFlow. Nothing is copied or changed there.'));

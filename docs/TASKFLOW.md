@@ -39,3 +39,7 @@ TaskFlow's database rules (`database.rules.json`) let **any signed-in account re
 - keep its password only in Render's Environment settings;
 - if it is ever exposed, delete the user in Firebase Authentication and create a new one;
 - tightening those rules (for example, reads only for this account) is a change to TaskFlow, not Oxicol, and is not done here.
+
+## 3. Numbers that open the matching TaskFlow list
+On the card, **overdue**, **open** and **due today** are links (new tab) to `TASK_APP_URL` with `?view=overdue`, `?view=open` or `?view=today`. The "Open TaskFlow" button goes to the overdue list when there are overdue tasks.
+This needs the small TaskFlow change on the branch `claude/taskflow-deeplink` (about 20 lines in `index.html`): when TaskFlow opens it reads `?view=`, chooses its Tasks tab and its existing Overdue / Today filter once, and removes the parameter from the address. It reads and changes no task data. **Deploy that TaskFlow change to Netlify for the links to land on the right list;** until then they simply open TaskFlow normally (nothing breaks). Oxicol adds only the word `overdue`, `today` or `open`: never a task name or any other text.

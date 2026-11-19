@@ -30,6 +30,12 @@ function appUrl(env = process.env) {
   try { const u = new URL(raw); return u.protocol === 'https:' && !u.username && !u.password ? u.href : null; } catch (e) { return null; }
 }
 
+/** The task app address with ?view=overdue|today|open added (TaskFlow opens its Tasks tab with that filter). Null when the link is off. */
+function viewUrl(view, env = process.env) {
+  const base = appUrl(env); if (!base || !['overdue', 'today', 'open'].includes(view)) return null;
+  const u = new URL(base); u.searchParams.set('view', view); return u.href;
+}
+
 const isDay = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && R.isValidDate(s);
 
 /** Counts from the raw tasks object. Pure: no network, no clock (today is passed in as a YYYY-MM-DD India date). */
@@ -114,4 +120,4 @@ async function getSummary(deps = {}) {
   return inflight;
 }
 
-module.exports = { config, enabled, appUrl, summarize, getSummary, reset, DEFAULT_APP_URL, CACHE_MS, TIMEOUT_MS };
+module.exports = { config, enabled, appUrl, viewUrl, summarize, getSummary, reset, DEFAULT_APP_URL, CACHE_MS, TIMEOUT_MS };

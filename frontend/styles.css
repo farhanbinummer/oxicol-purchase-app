@@ -1355,6 +1355,7 @@ dialog.oxi-dlg textarea, dialog.oxi-dlg input[type=text], dialog.oxi-dlg input[t
 .kpi-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--s3); margin: 0 0 var(--s4); }
 .kpi-tile { padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--border); border-top: 5px solid var(--info); border-radius: var(--r-card); box-shadow: var(--shadow-sm); }
 .kpi-tile.green { border-top-color: var(--success); } .kpi-tile.amber { border-top-color: var(--warn); } .kpi-tile.red { border-top-color: var(--danger); }
+.kpi-link { display: block; color: inherit; text-decoration: none; transition: transform .12s ease, box-shadow .12s ease; } .kpi-link:hover { transform: translateY(-2px); box-shadow: var(--shadow-md, var(--shadow-sm)); } .kpi-link:focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
 .kpi-tile b { display: block; font-size: 28px; line-height: 1.1; } .kpi-tile span { font-size: 13px; color: var(--text-2); }
 .kpi-table { width: 100%; border-collapse: collapse; background: var(--surface); }
 .kpi-table th, .kpi-table td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--border); font-size: 14px; }

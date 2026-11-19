@@ -99,6 +99,15 @@ test('link: TASK_APP_URL defaults, can be hidden, and must be https', () => {
   for (const bad of ['http://tasks.example.test', 'javascript:alert(1)', 'tasks.example.test', 'https://a:b@tasks.example.test']) assert.equal(T.appUrl({ TASK_APP_URL: bad }), null, bad);
 });
 
+test('link: a number opens the matching TaskFlow list (?view=...), https only, and nothing else is added', () => {
+  const a = T.viewUrl('overdue', {}); assert.equal(a, 'https://steady-frangollo-e2886d.netlify.app/?view=overdue');
+  assert.equal(T.viewUrl('today', { TASK_APP_URL: 'https://tasks.example.test/app' }), 'https://tasks.example.test/app?view=today');
+  assert.equal(T.viewUrl('open', { TASK_APP_URL: 'https://tasks.example.test/?x=1' }), 'https://tasks.example.test/?x=1&view=open');
+  for (const bad of ['done', 'overdue&x=1', '', undefined, '<script>']) assert.equal(T.viewUrl(bad, {}), null, String(bad));
+  assert.equal(T.viewUrl('overdue', { TASK_APP_URL: '' }), null, 'no link when the link is hidden');
+  assert.equal(T.viewUrl('overdue', { TASK_APP_URL: 'http://tasks.example.test' }), null);
+});
+
 // ------------------------------------------------------------------ reading
 const fake = (opts = {}) => {
   const calls = [];
