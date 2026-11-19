@@ -13,6 +13,7 @@ const express = require('express');
 const { pool } = require('../database');
 const { fail } = require('../utils');
 const { KEYS } = require('../permissions');
+const { requirePermission } = require('../auth');
 const { can, branchScope } = require('../access');
 const W = require('../workspaces');
 const { visibleClause } = require('../rd-visibility');
@@ -124,6 +125,13 @@ router.get('/expected-deliveries', async (req, res) => {
     lines.rows.forEach(l => { if (!by.has(l.po_id)) by.set(l.po_id, []); by.get(l.po_id).push({ item_name: l.item_name, unit: l.unit, ordered: l.ordered, received_accepted: 0, rejected_earlier: l.rejected_earlier, remaining: l.ordered }); });
     res.json({ success: true, when, count: pos.length, deliveries: pos.map(p => ({ ...p, items: by.get(p.id) || [] })) });
   } catch (err) { console.error(err); fail(res, 500, 'Could not load expected deliveries'); }
+});
+
+// Read-only TaskFlow counts (see taskflow.js). Counts only: no task text ever reaches this response.
+router.get('/task-summary', requirePermission(KEYS.TASKS_SUMMARY_VIEW), async (req, res) => {
+  const s = await require('../taskflow').getSummary();
+  if (!s) return res.json({ success: true, enabled: false });
+  res.json({ success: true, enabled: true, ...s, open_url: require('../taskflow').appUrl() });
 });
 
 router.get('/:id/dashboard', async (req, res) => {

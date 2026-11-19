@@ -18,6 +18,7 @@ const { ROLES, ROLE_NAMES, can, branchScope, branchClause, fieldAccess } = requi
 const { emailOn, whatsappOn } = require('./notify');
 const { visibleClause } = require('./rd-visibility');
 const RD = require('./rd-logic');
+const taskflow = require('./taskflow');
 
 const PRE_DELIVERY = "('created','payment_pending','payment_done','in_transit')"; // a PO whose goods have not been received yet
 const MAX_QUEUE = 15;
@@ -298,9 +299,13 @@ function navFor(workspaceId, access) {
     if (it.anyPerm) return it.anyPerm.some(k => can(access, k));
     return true;
   };
-  return w.nav
+  const groups = w.nav
     .map(g => ({ title: g.title, items: g.items.filter(allowed).map(i => ({ label: i.label, href: i.href, icon: i.icon, also: i.also || [] })) }))
     .filter(g => g.items.length > 0);
+  // The separate TaskFlow app: one link in every workspace, opened in a new tab. TASK_APP_URL empty hides it.
+  const url = taskflow.appUrl();
+  if (url && groups.length) groups[0].items.push({ label: 'Tasks', href: url, icon: 'clipboardlist', also: [], external: true });
+  return groups;
 }
 
 // =====================================================================================================
@@ -881,6 +886,8 @@ async function buildDashboard(req, workspaceId, opts) {
     exceptions: { total: built.exceptions.length, items: sort(built.exceptions).slice(0, MAX_QUEUE) },
     activity: await recentActivity(ctx, ACTIVITY_KINDS[workspaceId] || []),
     notes: built.notes || [], controls: built.controls || [],
+    // the TaskFlow counts are fetched by the page from /api/workspace/task-summary, so a slow TaskFlow can never slow this dashboard
+    task_summary_available: ['admin', 'manager'].includes(workspaceId) && ctx.can(KEYS.TASKS_SUMMARY_VIEW) && taskflow.enabled(),
     // the administrator's and manager's home also show how the team is doing (numbers from recorded work; never a ranking)
     team_kpis: ['admin', 'manager'].includes(workspaceId) && ctx.can(KEYS.KPI_VIEW_ALL) ? await require('./routes/kpi').teamSummary().catch(e => { console.error('team summary failed:', e); return null; }) : null,
     generated_at: new Date().toISOString()

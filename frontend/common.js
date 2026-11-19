@@ -319,13 +319,14 @@ function svgIcon(name, size) {
     function renderNav() {
       sidenav.innerHTML = '';
       const groups = (ws && ws.nav) || [];
-      const active = pickActive(groups.flatMap(g => g.items));
+      const active = pickActive(groups.flatMap(g => g.items).filter(i => !i.external));
       groups.forEach(g => {
         const h = document.createElement('div'); h.className = 'oxi-nav-group'; h.textContent = g.title; sidenav.appendChild(h);
         g.items.forEach(item => {
           const a = document.createElement('a');
           a.href = item.href;
           a.innerHTML = svgIcon(item.icon, 19) + '<span class="oxi-nav-label">' + item.label + '</span>';
+          if (item.external) { a.target = '_blank'; a.rel = 'noopener noreferrer'; a.setAttribute('aria-label', item.label + ' (opens in a new tab)'); }
           if (item === active) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
           sidenav.appendChild(a);
         });

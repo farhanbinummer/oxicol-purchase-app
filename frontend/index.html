@@ -72,6 +72,10 @@
     <div id="kpiTiles" class="kpi-tiles"></div>
     <div id="kpiBelow"></div>
   </section>
+  <section id="taskBox" hidden aria-labelledby="taskTitle">
+    <h2 class="oxi-band-title" id="taskTitle">Tasks (TaskFlow)</h2>
+    <div id="taskBody" aria-live="polite"></div>
+  </section>
   <section id="extraBox" hidden aria-labelledby="extraTitle">
     <h2 class="oxi-band-title" id="extraTitle">R&amp;D projects</h2>
     <div class="oxi-metrics" id="extraCards"></div>
@@ -222,6 +226,28 @@
       $('queue').innerHTML = ''; $('queue').appendChild(skeletonBlock(72)); $('queue').appendChild(skeletonBlock(72));
     }
 
+    // Read-only TaskFlow counts, fetched on their own so a slow or unreachable TaskFlow never holds the dashboard back.
+    let taskTicket = 0;
+    async function loadTaskSummary(available) {
+      const box = $('taskBox'), body = $('taskBody'), mine = ++taskTicket;
+      box.hidden = !available; body.innerHTML = '';
+      if (!available) return;
+      body.appendChild(el('p', 'oxi-section-note', 'Loading task numbers...'));
+      let s = null; try { s = await api('/api/workspace/task-summary'); } catch (e) { s = null; }
+      if (mine !== taskTicket) return;                       // the person switched workspace meanwhile
+      body.innerHTML = '';
+      if (!s || !s.success || s.enabled === false) { box.hidden = true; return; }
+      const open = (txt) => { const a = el('a', 'oxi-btn oxi-btn-secondary', txt); a.href = s.open_url || '#'; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.style.marginTop = '12px'; return a; };
+      if (!s.ok) { body.append(el('p', 'oxi-section-note', 'The task numbers could not be reached just now. They will appear here again when TaskFlow answers.'), ...(s.open_url ? [open('Open TaskFlow (new tab)')] : [])); return; }
+      const mk = (value, label, cls) => { const t = el('div', 'kpi-tile ' + (cls || '')); t.append(el('b', null, String(value)), el('span', null, label)); return t; };
+      const tiles = el('div', 'kpi-tiles');
+      tiles.append(mk(s.overdue, s.overdue === 1 ? 'task overdue' : 'tasks overdue', s.overdue ? 'red' : 'green'), mk(s.open, 'tasks open'), mk(s.due_today, 'due today', s.due_today ? 'amber' : ''), mk(s.done_7d, 'done in the last 7 days', 'green'));
+      body.appendChild(tiles);
+      if (s.top_overdue && s.top_overdue.length) { const ul = el('ul', 'kpi-below'); ul.setAttribute('aria-label', 'People with the most overdue tasks'); s.top_overdue.forEach(p => ul.appendChild(el('li', null, p.name + ': ' + p.count + ' overdue'))); body.appendChild(ul); }
+      body.appendChild(el('p', 'oxi-section-note', 'Counts only, read from TaskFlow. Nothing is copied or changed there.'));
+      if (s.open_url) body.appendChild(open('Open TaskFlow (new tab)'));
+    }
+
     async function load() {
       skeleton();
       const me = await api('/api/workspace/me');
@@ -278,6 +304,8 @@
         const more = el('a', 'oxi-btn oxi-btn-secondary', 'Open Team Performance'); more.href = 'team-performance.html'; more.style.marginTop = '12px'; $('kpiBelow').appendChild(more);
         $('kpiBelow').appendChild(el('p', 'oxi-section-note', 'Numbers come from recorded work only. They show where to ask a question, not who is better: there is no overall score or ranking.'));
       }
+
+      loadTaskSummary(!!d.task_summary_available);
 
       const ch = $('charts'); ch.innerHTML = '';
       [barsChart(d.cards), donutChart(d.activity)].forEach(c => { if (c) ch.appendChild(c); });
