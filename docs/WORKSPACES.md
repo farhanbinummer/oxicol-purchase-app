@@ -53,7 +53,7 @@ section would only hide that.
 | Supplier follow-up log | No record of follow-ups (overdue orders are listed; nothing is logged) |
 | POs "awaiting approval" or "not yet issued" | Purchase orders have no approval or issue step |
 | Stock & Locations; material shortages; reserved stock | No inventory data |
-| Branch dispatches; dispatched / received stages; incoming deliveries; branch receipt confirmation; partial fulfilment ("60 of 100 received") | Nothing records a dispatch or a branch receipt. Branch progress shows Submitted, Approved, Being prepared |
+| Branch dispatches; dispatched stage; incoming deliveries | Nothing records a dispatch. Branch receipt confirmation and partial fulfilment ("60 of 100 received") now exist: see BRANCH-DELIVERY.md |
 | Returns & replacements as records | Only "rejected, still waiting for replacement goods" is derivable |
 | Line-level accepted/rejected quantities, reasons, documents; inspector and time per line | Quality is one decision per receipt. (The person and time of the decision are recorded in Audit History) |
 | Partial receipts | One receipt per order |

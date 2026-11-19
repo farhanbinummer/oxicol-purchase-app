@@ -27,8 +27,8 @@
     </select>
   </div>
   <table class="oxi-desk-only">
-    <thead><tr><th>Request</th><th>Branch</th><th>Requested by</th><th>Needed by</th><th>Status</th><th></th></tr></thead>
-    <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
+    <thead><tr><th>Request</th><th>Branch</th><th>Requested by</th><th>Needed by</th><th>Status</th><th>Delivery</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="7">Loading...</td></tr></tbody>
   </table>
 
   <!-- Phone view (hidden on desktop) -->
@@ -90,7 +90,7 @@
       const badgeEl = el('span', 'oxi-status ' + st.cls); badgeEl.append(el('i'), document.createTextNode(st.label));
       head.append(t, badgeEl);
       const grid = el('dl', 'oxi-req-grid');
-      [['Branch', r.branch], ['Requested by', cap(r.requested_by)], ['Needed by', fmt(r.delivery_needed_by)], ['Priority', cap(r.priority || 'normal')]]
+      [['Branch', r.branch], ['Requested by', cap(r.requested_by)], ['Needed by', fmt(r.delivery_needed_by)], ['Priority', cap(r.priority || 'normal')]].concat(['approved', 'po_raised'].includes(r.status) && r.delivery ? [['Delivery', r.delivery.text]] : [])
         .forEach(([k, v]) => { const d = el('div'); d.append(el('dt', '', k), el('dd', '', v)); grid.appendChild(d); });
       const foot = el('footer', 'oxi-req-foot');
       const view = el('a', 'oxi-req-view', 'View details'); view.href = 'branch-request-detail.html?id=' + r.id;
@@ -146,7 +146,7 @@
       all = d.requests;
       document.getElementById('mCount').textContent = all.length + ' total';
       renderMobile(false);
-      if (d.requests.length === 0) { rows.innerHTML = '<tr><td colspan="6">No requests yet.</td></tr>'; return; }
+      if (d.requests.length === 0) { rows.innerHTML = '<tr><td colspan="7">No requests yet.</td></tr>'; return; }
       d.requests.forEach(r => {
         const tr = document.createElement('tr');
         tr.dataset.status = r.status;
@@ -155,6 +155,7 @@
         addCell(tr, r.requested_by);
         addCell(tr, day(r.delivery_needed_by));
         addBadge(tr, r.status);
+        const dc = addCell(tr, ['approved', 'po_raised'].includes(r.status) && r.delivery ? r.delivery.text : '-'); if (r.delivery && r.delivery.has_problem) dc.className = 'error';
         const td = document.createElement('td');
         const view = document.createElement('a'); view.href = 'branch-request-detail.html?id=' + r.id; view.textContent = 'View'; view.className = 'oxi-view-btn';
         td.appendChild(view);

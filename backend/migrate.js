@@ -745,6 +745,34 @@ const STEPS = [
         )`);
       await db.query('CREATE INDEX IF NOT EXISTS idx_grn_attachments_grn ON grn_attachments(grn_id, id)');
     }
+  },
+  {
+    // The branch confirms what arrived of a stock request (in parts if needed, with damage reported). Records only: nothing is ever
+    // changed on the request itself. The new key goes to the Branch role; an administrator holds every key.
+    name: '030_branch_delivery',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS branch_receipts (
+          id               SERIAL PRIMARY KEY,
+          request_id       INTEGER NOT NULL REFERENCES branch_stock_requests(id) ON DELETE CASCADE,
+          received_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          received_by_name VARCHAR(150) NOT NULL,
+          received_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          note             VARCHAR(300),
+          is_final         BOOLEAN NOT NULL DEFAULT FALSE
+        )`);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS branch_receipt_items (
+          id               SERIAL PRIMARY KEY,
+          receipt_id       INTEGER NOT NULL REFERENCES branch_receipts(id) ON DELETE CASCADE,
+          request_item_id  INTEGER NOT NULL REFERENCES branch_request_items(id) ON DELETE CASCADE,
+          qty              NUMERIC(12,3) NOT NULL CHECK (qty >= 0),
+          damaged_qty      NUMERIC(12,3) NOT NULL DEFAULT 0 CHECK (damaged_qty >= 0 AND damaged_qty <= qty)
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipts_req ON branch_receipts(request_id, id)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipt_items_item ON branch_receipt_items(request_item_id)');
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('branch', 'branch_request.confirm_delivery') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 
