@@ -1615,6 +1615,24 @@ function enterApp(){
   if (!isAdmin) switchView('dashboard');
   renderAll();
   renderAnnouncements();
+  applyDeepLink();
+}
+
+/* DEEP LINK: an address ending in ?view=overdue, ?view=today or ?view=open opens the Tasks tab with that filter (used by the Oxicol
+   dashboard). It only chooses a tab and a filter that already exist: it reads and changes no task data, and it runs once. */
+var deepLinkDone = false;
+function applyDeepLink() {
+  if (deepLinkDone) return; deepLinkDone = true;
+  var view = '';
+  try { view = (new URLSearchParams(location.search).get('view') || '').toLowerCase(); } catch (e) { return; }
+  if (['overdue', 'today', 'open'].indexOf(view) < 0) return;
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}   // so a refresh does not reapply it
+  if (!tabAllowed('tasks')) return;
+  switchView('tasks');
+  var set = function (id, v) { var f = $(id); if (f) { f.value = v; f.dispatchEvent(new Event('change', { bubbles: true })); } };
+  ['taskSearch'].forEach(function (id) { var f = $(id); if (f) f.value = ''; });
+  set('filterStatus', view === 'overdue' ? 'overdue' : '');
+  set('filterDate', view === 'today' ? 'today' : '');
 }
 
 /* TAB ACCESS: the admin can switch tabs off for everyone, or for one member (admins always see every tab) */
