@@ -186,7 +186,7 @@ test('permission: tasks.summary_view is registered and granted to the Manager on
   for (const r of ['rd', 'branch', 'rd_trainee', 'qc', 'purchase', 'store', 'accounts', 'production']) assert.ok(!(DEFAULTS[r] || []).includes('tasks.summary_view'), r);
 });
 test('permission: a new migration (never an edited old one) seeds it for existing databases', async () => {
-  const step = STEPS[STEPS.length - 1]; assert.equal(step.name, '028_tasks_summary_permission');
+  const step = STEPS.find(x => x.name === '028_tasks_summary_permission'); assert.ok(step, 'the migration exists');
   assert.equal(new Set(STEPS.map(s => s.name)).size, STEPS.length, 'migration names are unique');
   const sql = []; await step.run({ query: async (q) => { sql.push(q); return { rows: [] }; } });
   assert.equal(sql.length, 1); assert.match(sql[0], /INSERT INTO role_permissions/); assert.match(sql[0], /'manager'/); assert.match(sql[0], /tasks\.summary_view/); assert.match(sql[0], /ON CONFLICT DO NOTHING/);

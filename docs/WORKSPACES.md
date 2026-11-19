@@ -57,7 +57,7 @@ section would only hide that.
 | Returns & replacements as records | Only "rejected, still waiting for replacement goods" is derivable |
 | Line-level accepted/rejected quantities, reasons, documents; inspector and time per line | Quality is one decision per receipt. (The person and time of the decision are recorded in Audit History) |
 | Partial receipts | One receipt per order |
-| Attachments, exports (other than the Tally log) | Neither exists, so there is nothing to protect yet |
+| Attachments (goods receipts only, see RECEIPT-FILES.md), exports (other than the Tally log) | Receipt files follow the receipt permissions; there are no exports yet |
 | Production progress updates | No such process |
 | Accounting export queue, retry, failed state | Tally is a test-mode log; it is shown honestly as "Test mode" |
 | Reject with reason / return for correction; approval limits | Only approve exists, with no amount thresholds |

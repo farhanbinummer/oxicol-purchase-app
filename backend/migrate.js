@@ -720,6 +720,31 @@ const STEPS = [
     async run(db) {
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager', 'tasks.summary_view') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // Photos and files on goods receipts (delivery challan, photos of damaged or short goods). Stored in the database; removing a file only
+    // hides it and records who and why. No new permission: whoever may record or decide a receipt may add files; whoever may see it sees them.
+    name: '029_grn_attachments',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS grn_attachments (
+          id               SERIAL PRIMARY KEY,
+          grn_id           INTEGER NOT NULL REFERENCES grn_notes(id) ON DELETE CASCADE,
+          kind             VARCHAR(12) NOT NULL DEFAULT 'other' CHECK (kind IN ('challan', 'damage', 'other')),
+          note             VARCHAR(150),
+          file_name        VARCHAR(150) NOT NULL,
+          mime             VARCHAR(40) NOT NULL CHECK (mime IN ('image/jpeg', 'image/png', 'application/pdf')),
+          size_bytes       INTEGER NOT NULL CHECK (size_bytes > 0),
+          data             BYTEA NOT NULL,
+          uploaded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          uploaded_by_name VARCHAR(150) NOT NULL,
+          created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          removed_at       TIMESTAMPTZ,
+          removed_by_name  VARCHAR(150),
+          removed_reason   TEXT
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_grn_attachments_grn ON grn_attachments(grn_id, id)');
+    }
   }
 ];
 

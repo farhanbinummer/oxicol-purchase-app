@@ -11,6 +11,7 @@
     "test:rd": "node --test tests/rd.test.js",
     "test:trials": "node --test tests/rd-trials.test.js",
     "test:admin-data": "node --test tests/admin-data.test.js",
+    "test:grn-files": "node --test tests/grn-attachments.test.js",
     "test:taskflow": "node --test tests/taskflow.test.js",
     "test:workspaces": "node --test tests/workspaces.test.js",
     "test:all": "node --test --test-concurrency=1 \"tests/*.test.js\""

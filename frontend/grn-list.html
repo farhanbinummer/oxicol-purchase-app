@@ -28,7 +28,7 @@
 
   <table>
     <thead>
-      <tr><th>GRN</th><th>Date</th><th>PO</th><th>Supplier</th><th>Received by</th><th>Condition</th><th>Status</th><th>Discrepancy</th><th></th></tr>
+      <tr><th>GRN</th><th>Date</th><th>PO</th><th>Supplier</th><th>Received by</th><th>Condition</th><th>Status</th><th>Discrepancy</th><th>Files</th><th></th></tr>
     </thead>
     <tbody id="rows"><tr><td colspan="9">Loading...</td></tr></tbody>
   </table>
@@ -61,6 +61,7 @@
         addBadge(tr, g.status);
         const dc = addCell(tr, g.discrepancy_count > 0 ? g.discrepancy_count + ' item(s)' : 'none');
         if (g.discrepancy_count > 0) dc.className = 'error';
+        addCell(tr, g.file_count > 0 ? g.file_count + (g.file_count === 1 ? ' file' : ' files') : '-');
         const td = document.createElement('td');
         if (g.status === 'pending_qc') {
           [['Approve', true], ['Reject', false]].forEach(([label, ok]) => {

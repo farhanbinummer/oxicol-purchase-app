@@ -1501,6 +1501,7 @@ router.post('/projects/:id/trials/:trialId/attachments', needTrialEdit, needTech
   if (!trialId) return fail(res, 400, 'Invalid trial id');
   const buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) return fail(res, 400, 'Send a JPEG, PNG or PDF file (no larger than ' + Math.round(R.ATTACH_MAX_BYTES / 1048576) + ' MB)');
+  if (buf.length > R.ATTACH_MAX_BYTES) return fail(res, 400, 'That file is larger than ' + Math.round(R.ATTACH_MAX_BYTES / 1048576) + ' MB');
   const mime = R.sniffAttachment(buf);
   if (!mime) return fail(res, 400, 'That file is not a JPEG, PNG or PDF');
   let name = ''; try { name = decodeURIComponent(String(req.headers['x-file-name'] || '')); } catch (e) { name = ''; }
