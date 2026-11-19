@@ -712,6 +712,14 @@ const STEPS = [
       await db.query("UPDATE rd_absences SET cover_status = 'accepted' WHERE cover_status = 'pending' AND approval_status = 'approved' AND cover_user_id IS NOT NULL");
       await db.query("UPDATE rd_absences SET cover_status = 'none' WHERE cover_status = 'pending' AND approval_status <> 'approved'");
     }
+  },
+  {
+    // The read-only TaskFlow task summary on the Manager and Administrator dashboards. The Manager holds the key by default; an
+    // administrator holds every key. Nobody else gets it unless an administrator grants it.
+    name: '028_tasks_summary_permission',
+    async run(db) {
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager', 'tasks.summary_view') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 
