@@ -176,9 +176,10 @@ test('navigation: every entry points at a real page the role may use, and nothin
     const r = await api(tok[who], 'GET', '/api/workspace/me');
     const perms = new Set(r.permissions || []);
     for (const g of r.nav) for (const it of g.items) {
+      if (it.external) { assert.equal(it.label, 'Tasks', who + ': the only outside link is the TaskFlow one'); assert.ok(/^https:\/\//.test(it.href), 'and it is https'); continue; }
       assert.ok(fs.existsSync(path.join(FRONTEND, it.href.split('?')[0])), `${who}: ${it.href} is a real page`);
     }
-    if (who === 'kannur') assert.deepEqual(r.nav.flatMap(g => g.items.map(i => i.label)), ['Dashboard', 'My Day', 'Away & Cover', 'My Performance', 'R&D Dashboard', 'R&D Projects', 'My Branch Requests'], 'a branch can follow its own R&D projects (it cannot raise requests: only the Manager can)');
+    if (who === 'kannur') assert.deepEqual(r.nav.flatMap(g => g.items.map(i => i.label)), ['Dashboard', 'Tasks', 'My Day', 'Away & Cover', 'My Performance', 'R&D Dashboard', 'R&D Projects', 'My Branch Requests'], 'a branch can follow its own R&D projects (it cannot raise requests: only the Manager can)');
     if (who === 'store') { assert.ok(!allText(r.nav).includes('Payments') && !allText(r.nav).includes('Purchase Orders')); }
     if (who === 'qc') { assert.ok(!allText(r.nav).includes('Users') && r.nav.flatMap(g => g.items).some(i => i.label === 'Inspection Queue')); }
     assert.ok(perms.size > 0 || who === 'admin');
