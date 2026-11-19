@@ -14,7 +14,7 @@ Until now a branch request ended at "approved / being prepared". The branch can 
 - Manager dashboard and the branch's own list: damage or a short close appears under **Exceptions**. The Manager and Purchase are also sent a notice when a problem is reported.
 
 **Rules**
-- Only the branch concerned (and administrators) can confirm. New permission **branch_request.confirm_delivery**, given to the Branch role by default and seeded for existing databases by migration `030_branch_delivery`. The Manager does not hold it; an administrator can grant it in Roles and Permissions.
+- Only the branch concerned, the Manager and administrators can confirm. New permission **branch_request.confirm_delivery**, given to the Branch role by default and seeded for existing databases by migration `030_branch_delivery`. The Manager holds it too and can confirm for any branch (for example when a branch phones in a delivery); the confirmation is recorded under the Manager's own name. An administrator can change who holds it in Roles and Permissions.
 - Only approved requests can be confirmed. Nothing can be confirmed for more than is still expected, and two people saving at the same moment can never receive more than was requested.
 - Confirming only records facts. It does not change the request's status, and nothing about stock quantities in the app is changed (the app does not track branch stock).
 - Every confirmation is in the audit history. Confirmations cannot be edited; a wrong entry is explained to the Manager, and an administrator can remove the whole request's data if needed.

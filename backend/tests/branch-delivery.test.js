@@ -90,10 +90,10 @@ test.after(async () => {
   } finally { server && server.kill(); await pool.end(); }
 });
 
-test('permission: the new key is in the catalogue, held by the Branch role (and the administrator), not by the Manager', async () => {
+test('permission: the new key is in the catalogue, held by the Branch role and the Manager (and the administrator), nobody else', async () => {
   const c = CATALOG.find(x => x.key === 'branch_request.confirm_delivery'); assert.ok(c); assert.equal(c.kind, 'edit');
-  const holders = Object.entries(DEFAULTS).filter(([, k]) => k.includes('branch_request.confirm_delivery')).map(([r]) => r); assert.deepEqual(holders, ['branch']);
-  const db = await pool.query("SELECT role FROM role_permissions WHERE permission_key = 'branch_request.confirm_delivery'"); assert.deepEqual(db.rows.map(r => r.role), ['branch']);
+  const holders = Object.entries(DEFAULTS).filter(([, k]) => k.includes('branch_request.confirm_delivery')).map(([r]) => r); assert.deepEqual(holders.sort(), ['branch', 'manager']);
+  const db = await pool.query("SELECT role FROM role_permissions WHERE permission_key = 'branch_request.confirm_delivery'"); assert.deepEqual(db.rows.map(r => r.role).sort(), ['branch', 'manager']);
 });
 
 test('a branch confirms in parts; the list and the details show how much has arrived; the request itself is not changed', async () => {
@@ -147,14 +147,15 @@ test('only a request that is being fulfilled can be confirmed', async () => {
   const po = await mkReq({ status: 'po_raised' }); assert.equal((await confirm(tok.kannur, po, [{ item_id: po.wax, qty: 1 }])).status, 201, 'also while the purchase order is being arranged');
 });
 
-test('who may confirm: the branch concerned and administrators; not another branch, not the Manager, not a stranger', async () => {
+test('who may confirm: the branch concerned, the Manager and administrators; not another branch, not a stranger', async () => {
   const q = await mkReq();
   assert.equal((await confirm(tok.thrissur, q, [{ item_id: q.wax, qty: 1 }])).status, 403, 'a different branch');
-  assert.equal((await confirm(tok.manager, q, [{ item_id: q.wax, qty: 1 }])).status, 403, 'the Manager does not hold the key');
   assert.equal((await confirm(null, q, [{ item_id: q.wax, qty: 1 }])).status, 401);
-  assert.equal((await api(tok.manager, 'GET', '/api/branch-request/' + q.id)).delivery.can_confirm, false);
+  assert.equal((await api(tok.manager, 'GET', '/api/branch-request/' + q.id)).delivery.can_confirm, true, 'the Manager is offered the form');
+  const byManager = await confirm(tok.manager, q, [{ item_id: q.wax, qty: 1 }]); assert.equal(byManager.status, 201, 'the Manager may confirm for any branch (for example when the branch phones it in)');
+  assert.equal((await api(tok.kannur, 'GET', '/api/branch-request/' + q.id)).delivery.receipts[0].by, 'Test manager', 'and it is recorded under the Manager\'s own name');
   assert.equal((await confirm(tok.admin, q, [{ item_id: q.wax, qty: 1 }])).status, 201, 'an administrator may');
-  assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM branch_receipts WHERE request_id = $1', [q.id])).rows[0].n, 1);
+  assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM branch_receipts WHERE request_id = $1', [q.id])).rows[0].n, 2);
 });
 
 test('simultaneous confirmations can never receive more than was requested', async () => {

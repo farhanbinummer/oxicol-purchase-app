@@ -748,7 +748,7 @@ const STEPS = [
   },
   {
     // The branch confirms what arrived of a stock request (in parts if needed, with damage reported). Records only: nothing is ever
-    // changed on the request itself. The new key goes to the Branch role; an administrator holds every key.
+    // changed on the request itself. The new key goes to the Branch role and the Manager (who can confirm for any branch); an administrator holds every key.
     name: '030_branch_delivery',
     async run(db) {
       await db.query(`
@@ -771,7 +771,7 @@ const STEPS = [
         )`);
       await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipts_req ON branch_receipts(request_id, id)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipt_items_item ON branch_receipt_items(request_item_id)');
-      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('branch', 'branch_request.confirm_delivery') ON CONFLICT DO NOTHING");
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('branch', 'branch_request.confirm_delivery'), ('manager', 'branch_request.confirm_delivery') ON CONFLICT DO NOTHING");
     }
   }
 ];
