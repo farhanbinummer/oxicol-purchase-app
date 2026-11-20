@@ -75,10 +75,13 @@
     </div>
   </div>
   <script src="common.js"></script>
+  <script src="admin-remove.js"></script>
 
   <script>
     // money() / day() / badge() / show() come from common.js.
     const id = new URLSearchParams(location.search).get('id');
+    // administrators only: a careful "remove this record" card at the bottom (the server checks again)
+    window.addEventListener('load', () => { const d = document.getElementById('detail'); if (d) oxiAdminRemove({ kind: 'po', id, mount: d, listHref: 'po-list.html' }); });
     const set = (elId, text) => { document.getElementById(elId).textContent = text; };
     const setBadge = (elId, status) => {
       const el = document.getElementById(elId); el.innerHTML = ''; el.appendChild(badge(status));

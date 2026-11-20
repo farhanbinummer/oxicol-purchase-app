@@ -201,4 +201,4 @@ Safeguards: a warning that it cannot be undone; the number of tasks, trials and 
 
 The Audit History records who removed what, when and why, with counts only (never confidential trial text). **It can never be removed here.** Project numbers are not reused after a project is removed.
 
-Not included on purpose: purchase orders, GRNs, payments, branch requests and other money or stock records. Take a database backup before removing real data (docs/BACKUP-AND-RECOVERY.md).
+Other kinds of record (purchase orders, goods receipts, payments, invoices, branch and production requests, suppliers, raw materials, finished products) are removed the same way: see REMOVING-DATA.md. Take a database backup before removing real data (docs/BACKUP-AND-RECOVERY.md).

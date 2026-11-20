@@ -1103,6 +1103,8 @@ td select.inline { min-height: 32px; margin: 0; padding: 0 6px; font-size: 13px;
 .oxi-section-note { color: var(--text-2); font-size: 13px; margin: 0 0 var(--s3); }
 dialog.oxi-dlg { width: min(94vw, 560px); }
 dialog.oxi-dlg h3 { margin: 0 0 var(--s3); }
+.oxi-warn-box { margin: 0 0 var(--s3); padding: 10px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); font-size: 14px; }
+.oxi-rm-list { margin: 6px 0 12px; padding-left: 18px; max-height: 160px; overflow-y: auto; } .oxi-rm-list li { overflow-wrap: anywhere; }
 dialog.oxi-dlg .row { display: flex; gap: var(--s2); justify-content: flex-end; margin-top: var(--s4); }
 dialog.oxi-dlg .row button { margin: 0; }
 dialog.oxi-dlg table { margin: var(--s2) 0; }
