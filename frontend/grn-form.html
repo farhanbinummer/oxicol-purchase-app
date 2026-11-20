@@ -63,6 +63,9 @@
         sel.appendChild(o);
       });
       if (pos.length === 0) sel.innerHTML = '<option value="">No POs waiting for goods</option>';
+      // opened from Expected Deliveries with ?po=ID: that order is already chosen
+      const want = new URLSearchParams(location.search).get('po');
+      if (want && pos.some(p => String(p.id) === want)) { sel.value = want; sel.dispatchEvent(new Event('change')); }
     }
 
     // When a PO is picked, load its items with the ordered quantities.

@@ -828,6 +828,13 @@ const STEPS = [
       await db.query('CREATE UNIQUE INDEX IF NOT EXISTS ux_suppliers_gst ON suppliers(gst_number) WHERE gst_number IS NOT NULL');
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'suppliers.manage'), ('manager', 'suppliers.manage') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // A production request can be edited by the person who raised it until it is approved. edit_count is the version an approver saw.
+    name: '034_indent_edit',
+    async run(db) {
+      await db.query('ALTER TABLE production_indents ADD COLUMN IF NOT EXISTS edit_count INTEGER NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ');
+    }
   }
 ];
 

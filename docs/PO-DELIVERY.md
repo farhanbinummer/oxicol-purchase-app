@@ -15,6 +15,13 @@ On a purchase order page, the **Delivery and tracking** section shows the expect
 - **Expected Deliveries** shows "On its way since ... with ..., tracking ..., vehicle ..." so Stores knows what to expect.
 - Entering details does **not** change the order's status. A tick box, **Also mark this order as In transit**, appears only once payment is done (an advance payment can only be recorded before the order is "in transit", so marking it earlier would block that).
 
+**Expected Deliveries page** (Stores, Purchase, Manager)
+- One card per order waiting for goods, with a colour stripe: red = overdue, amber = due today, green = on its way, grey = no date.
+- Each card shows the expected date with how many days late or to go, and a **Dispatch and tracking** box: transporter, tracking or LR number, vehicle, dispatch date. **Track shipment** opens the tracking page in a new tab; **Copy tracking number** copies it.
+- Purchase and the Manager can **Change date**, **Set date**, **Add dispatch details** and **Update details** right on the card (same forms as the order page). Stores sees the details and a **Receive goods** button that opens the receipt form with that order already chosen.
+- Filter buttons with counts: All waiting, Overdue, Due today, Due in 7 days, On its way, No date set. Links from dashboard cards (`?when=overdue`, `today`, `soon`) still work.
+- The search box finds an order by order number, supplier, tracking number, vehicle number, transporter or item name (for example when a lorry arrives at the gate).
+
 **Who:** a new permission, `po.update_delivery`, held by **Purchase** and the **Manager** (administrators hold every key). It is seeded by migration `032_po_delivery_tracking`. Stores, Purchase and the Manager are sent a notice when the date or the dispatch details change.
 
 **History and audit:** every change is listed on the order (who, when, old value, new value, reason) and recorded in the Audit History. The history goes with the order if an administrator removes it.
