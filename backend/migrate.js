@@ -790,6 +790,34 @@ const STEPS = [
           [String(m.code).slice(0, 30), String(m.name).slice(0, 200), String(m.unit || '').slice(0, 20), m.hsn ? String(m.hsn).slice(0, 10) : null, m.gst == null ? null : Number(m.gst)]);
       }
     }
+  },
+  {
+    // Purchase orders: the expected delivery date can be changed (with a reason, kept in a history) and dispatch details can be entered
+    // (transporter or courier, tracking or LR number, vehicle, dispatch date, tracking link). Records only: the order's status is not changed
+    // unless the person ticks "also mark as in transit". New key po.update_delivery for Purchase and the Manager.
+    name: '032_po_delivery_tracking',
+    async run(db) {
+      await db.query(`ALTER TABLE purchase_orders
+        ADD COLUMN IF NOT EXISTS transporter     VARCHAR(100),
+        ADD COLUMN IF NOT EXISTS tracking_number VARCHAR(80),
+        ADD COLUMN IF NOT EXISTS vehicle_number  VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS dispatch_date   DATE,
+        ADD COLUMN IF NOT EXISTS tracking_url    VARCHAR(300)`);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS po_delivery_log (
+          id         SERIAL PRIMARY KEY,
+          po_id      INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+          kind       VARCHAR(10) NOT NULL CHECK (kind IN ('date', 'dispatch')),
+          old_values JSONB,
+          new_values JSONB NOT NULL,
+          reason     VARCHAR(300),
+          by_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          by_name    VARCHAR(150) NOT NULL,
+          at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_po_delivery_log_po ON po_delivery_log(po_id, id)');
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'po.update_delivery'), ('manager', 'po.update_delivery') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 

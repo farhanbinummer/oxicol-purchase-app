@@ -13,6 +13,8 @@ const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const { can, fieldAccess, redactPo, redactItems } = require('../access');
 const { resolveMaterials } = require('../materials');
+const { audit } = require('../audit');
+const RD = require('../rd-logic');
 const router = express.Router();
 
 // Order of statuses. A PO can only move FORWARD in this list.
@@ -177,8 +179,10 @@ router.get('/:id', requirePermission(KEYS.PO_VIEW), async (req, res) => {
     const fa = fieldAccess(req.access);
     redactPo(po.rows[0], fa); redactItems(items.rows, fa);
 
+    const dlog = await pool.query('SELECT id, kind, old_values, new_values, reason, by_name, at FROM po_delivery_log WHERE po_id = $1 ORDER BY id DESC LIMIT 50', [id]);
     res.json({ success: true, po: po.rows[0], items: items.rows,
-               payments: payments.rows, grns: grns.rows, fields: fa });
+               payments: payments.rows, grns: grns.rows, fields: fa,
+               delivery_log: dlog.rows, can_update_delivery: can(req.access, KEYS.PO_UPDATE_DELIVERY) && DELIVERY_OPEN.includes(po.rows[0].status) });
   } catch (err) {
     console.error(err);
     fail(res, 500, 'Could not load PO');
@@ -211,6 +215,95 @@ router.put('/:id/status', requirePermission(KEYS.PO_UPDATE_STATUS), async (req, 
     console.error(err);
     fail(res, 500, 'Could not update status');
   }
+});
+
+// ------------------------------------------------------------
+// Expected delivery date and dispatch (tracking) details. Whoever holds po.update_delivery (Purchase, the Manager) may change them while the
+// order has not been delivered. Every change is kept in po_delivery_log (old value, new value, reason, who, when) and in the audit history,
+// and Stores, Purchase and the Manager are told.
+//   PUT /api/po/:id/delivery-date   { delivery_date, reason }          a reason is needed when an existing date is changed
+//   PUT /api/po/:id/dispatch        { transporter, tracking_number, vehicle_number, dispatch_date, tracking_url, reason, mark_in_transit }
+// ------------------------------------------------------------
+const DELIVERY_OPEN = ['created', 'payment_pending', 'payment_done', 'in_transit'];
+const clip = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+const dayText = (d) => (d ? String(d).slice(0, 10) : null);
+
+async function loadForDelivery(client, id) {
+  return (await client.query(
+    `SELECT po.id, po.po_number, po.status, to_char(po.po_date, 'YYYY-MM-DD') AS po_date, to_char(po.delivery_date, 'YYYY-MM-DD') AS delivery_date,
+            po.transporter, po.tracking_number, po.vehicle_number, to_char(po.dispatch_date, 'YYYY-MM-DD') AS dispatch_date, po.tracking_url, s.name AS supplier_name
+       FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id WHERE po.id = $1 FOR UPDATE OF po`, [id])).rows[0];
+}
+const told = (po) => ({ roles: ['store', 'purchase', 'manager'], path: 'po-detail.html?id=' + po.id });
+
+router.put('/:id/delivery-date', requirePermission(KEYS.PO_UPDATE_DELIVERY), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid PO id');
+  const b = req.body || {}, date = String(b.delivery_date || '').trim(), reason = clip(b.reason, 300);
+  if (!isValidDate(date)) return fail(res, 400, 'Choose a valid date');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const po = await loadForDelivery(client, id);
+    if (!po) { await client.query('ROLLBACK'); return fail(res, 404, 'PO not found'); }
+    if (!DELIVERY_OPEN.includes(po.status)) { await client.query('ROLLBACK'); return fail(res, 409, 'This order has already been delivered, so its expected date is closed.'); }
+    if (date < po.po_date) { await client.query('ROLLBACK'); return fail(res, 400, 'The expected date cannot be before the order date (' + po.po_date + ')'); }
+    if (date > RD.addDays(RD.todayIST(), 365)) { await client.query('ROLLBACK'); return fail(res, 400, 'That date is more than a year away. Please check it.'); }
+    if (date === po.delivery_date) { await client.query('ROLLBACK'); return fail(res, 400, 'That is already the expected date'); }
+    if (po.delivery_date && reason.length < 5) { await client.query('ROLLBACK'); return fail(res, 400, 'Say why the date is changing (at least 5 characters)'); }
+    await client.query('UPDATE purchase_orders SET delivery_date = $1, updated_at = NOW() WHERE id = $2', [date, id]);
+    await client.query("INSERT INTO po_delivery_log (po_id, kind, old_values, new_values, reason, by_id, by_name) VALUES ($1,'date',$2,$3,$4,$5,$6)",
+      [id, JSON.stringify({ delivery_date: po.delivery_date }), JSON.stringify({ delivery_date: date }), reason || null, req.user.id, req.user.name]);
+    await audit(client, req, { action: 'po.delivery_date', entity: 'purchase_order', id, summary: `${po.po_number}: expected delivery ${po.delivery_date ? 'changed from ' + po.delivery_date + ' to ' + date : 'set to ' + date}`, before: { delivery_date: po.delivery_date }, after: { delivery_date: date }, reason: reason || undefined });
+    await client.query('COMMIT');
+    notify({ ...told(po), subject: 'Expected delivery date changed', text: `${po.po_number} (${po.supplier_name}): expected delivery is now ${date}${po.delivery_date ? ' (was ' + po.delivery_date + ')' : ''}.${reason ? ' Reason: ' + reason : ''}` });
+    res.json({ success: true, delivery_date: date });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('po delivery date failed:', err); fail(res, 500, 'Could not save the date');
+  } finally { client.release(); }
+});
+
+router.put('/:id/dispatch', requirePermission(KEYS.PO_UPDATE_DELIVERY), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid PO id');
+  const b = req.body || {}, reason = clip(b.reason, 300);
+  const d = { transporter: clip(b.transporter, 100) || null, tracking_number: clip(b.tracking_number, 80) || null, vehicle_number: clip(b.vehicle_number, 30).toUpperCase() || null,
+              dispatch_date: String(b.dispatch_date || '').trim() || null, tracking_url: String(b.tracking_url || '').trim() || null };
+  if (!d.transporter && !d.tracking_number && !d.vehicle_number) return fail(res, 400, 'Enter at least the transporter, the tracking number or the vehicle number');
+  if (d.tracking_number && !/^[A-Za-z0-9][A-Za-z0-9 \-\/._]*$/.test(d.tracking_number)) return fail(res, 400, 'The tracking number can only have letters, numbers, spaces and - / . _');
+  if (d.dispatch_date && !isValidDate(d.dispatch_date)) return fail(res, 400, 'Dispatch date must be a valid date');
+  if (d.dispatch_date && d.dispatch_date > RD.todayIST()) return fail(res, 400, 'The dispatch date cannot be in the future');
+  if (d.tracking_url) { let u = null; try { u = new URL(d.tracking_url); } catch (e) { u = null; } if (!u || u.protocol !== 'https:' || u.username || u.password || d.tracking_url.length > 300) return fail(res, 400, 'The tracking link must be a web address starting with https://'); d.tracking_url = u.href; }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const po = await loadForDelivery(client, id);
+    if (!po) { await client.query('ROLLBACK'); return fail(res, 404, 'PO not found'); }
+    if (!DELIVERY_OPEN.includes(po.status)) { await client.query('ROLLBACK'); return fail(res, 409, 'This order has already been delivered, so its dispatch details are closed.'); }
+    if (d.dispatch_date && d.dispatch_date < po.po_date) { await client.query('ROLLBACK'); return fail(res, 400, 'The dispatch date cannot be before the order date (' + po.po_date + ')'); }
+    const keys = ['transporter', 'tracking_number', 'vehicle_number', 'dispatch_date', 'tracking_url'];
+    const old = {}; keys.forEach(k => { old[k] = po[k] === undefined ? null : (k === 'dispatch_date' ? dayText(po[k]) : po[k]); });
+    const changed = keys.filter(k => (old[k] || null) !== (d[k] || null));
+    const wantTransit = b.mark_in_transit === true;
+    if (wantTransit && po.status !== 'payment_done') { await client.query('ROLLBACK'); return fail(res, 400, 'An order can be marked in transit once its payment is done (this one is "' + po.status + '")'); }
+    if (!changed.length && !wantTransit) { await client.query('ROLLBACK'); return fail(res, 400, 'Nothing was changed'); }
+    const hadDetails = !!(old.tracking_number || old.vehicle_number || old.transporter);
+    if (changed.length && hadDetails && reason.length < 5) { await client.query('ROLLBACK'); return fail(res, 400, 'Say why the details are changing (at least 5 characters)'); }
+    if (changed.length) {
+      await client.query('UPDATE purchase_orders SET transporter = $1, tracking_number = $2, vehicle_number = $3, dispatch_date = $4, tracking_url = $5, updated_at = NOW() WHERE id = $6',
+        [d.transporter, d.tracking_number, d.vehicle_number, d.dispatch_date, d.tracking_url, id]);
+      await client.query("INSERT INTO po_delivery_log (po_id, kind, old_values, new_values, reason, by_id, by_name) VALUES ($1,'dispatch',$2,$3,$4,$5,$6)", [id, JSON.stringify(old), JSON.stringify(d), reason || null, req.user.id, req.user.name]);
+    }
+    if (wantTransit) await client.query("UPDATE purchase_orders SET status = 'in_transit', updated_at = NOW() WHERE id = $1", [id]);
+    await audit(client, req, { action: 'po.dispatch', entity: 'purchase_order', id, summary: `${po.po_number}: dispatch details ${hadDetails ? 'updated' : 'entered'}${d.transporter ? ' (' + d.transporter + ')' : ''}${d.tracking_number ? ', tracking ' + d.tracking_number : ''}${wantTransit ? ', marked in transit' : ''}`, before: old, after: d, reason: reason || undefined });
+    await client.query('COMMIT');
+    notify({ ...told(po), subject: 'Dispatch details for ' + po.po_number, text: `${po.po_number} (${po.supplier_name}) has been dispatched${d.transporter ? ' with ' + d.transporter : ''}${d.tracking_number ? ', tracking ' + d.tracking_number : ''}${d.vehicle_number ? ', vehicle ' + d.vehicle_number : ''}.${po.delivery_date ? ' Expected ' + po.delivery_date + '.' : ''}` });
+    res.json({ success: true, status: wantTransit ? 'in_transit' : po.status });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('po dispatch failed:', err); fail(res, 500, 'Could not save the dispatch details');
+  } finally { client.release(); }
 });
 
 // ------------------------------------------------------------

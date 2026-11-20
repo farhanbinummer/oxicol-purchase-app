@@ -28,6 +28,7 @@ const KEYS = {
   PO_CREATE: 'po.create',
   PO_VIEW: 'po.view',
   PO_UPDATE_STATUS: 'po.update_status',
+  PO_UPDATE_DELIVERY: 'po.update_delivery', // change a purchase order's expected delivery date and enter its dispatch / tracking details
   PO_DELETE: 'po.delete',
 
   PAYMENT_CREATE: 'payment.create',
@@ -96,6 +97,7 @@ const CATALOG = [
   { key: KEYS.PO_CREATE, module: 'Purchase Orders', action: 'Create a PO' },
   { key: KEYS.PO_VIEW, module: 'Purchase Orders', action: 'View POs' },
   { key: KEYS.PO_UPDATE_STATUS, module: 'Purchase Orders', action: 'Change PO status' },
+  { key: KEYS.PO_UPDATE_DELIVERY, module: 'Purchase Orders', action: 'Update the expected delivery date and the dispatch and tracking details' },
   { key: KEYS.PO_DELETE, module: 'Purchase Orders', action: 'Delete a PO' },
 
   { key: KEYS.PAYMENT_CREATE, module: 'Payments', action: 'Record an advance payment' },
@@ -151,7 +153,7 @@ const KINDS = {
   'branch_request.create': 'create', 'branch_request.view': 'view', 'branch_request.approve': 'approve', 'branch_request.delete': 'cancel', 'branch_request.confirm_delivery': 'edit',
   'production_indent.create': 'create', 'production_indent.view': 'view', 'production_indent.approve': 'approve', 'production_indent.delete': 'cancel',
   'consolidate.view': 'view', 'consolidate.create_po': 'create',
-  'po.create': 'create', 'po.view': 'view', 'po.update_status': 'edit', 'po.delete': 'cancel',
+  'po.create': 'create', 'po.view': 'view', 'po.update_status': 'edit', 'po.update_delivery': 'edit', 'po.delete': 'cancel',
   'payment.create': 'create', 'payment.view_by_po': 'view', 'payment.view_all': 'view', 'payment.approve': 'approve',
   'grn.create': 'create', 'grn.view': 'view', 'grn.approve': 'approve',
   'invoice.upload': 'create', 'invoice.view': 'view', 'invoice.match': 'edit',
@@ -181,7 +183,7 @@ const DEFAULTS = {
   ],
   purchase: [
     KEYS.CONSOLIDATE_VIEW, KEYS.CONSOLIDATE_CREATE_PO,
-    KEYS.PO_CREATE, KEYS.PO_VIEW, KEYS.PO_UPDATE_STATUS, KEYS.PO_DELETE,
+    KEYS.PO_CREATE, KEYS.PO_VIEW, KEYS.PO_UPDATE_STATUS, KEYS.PO_UPDATE_DELIVERY, KEYS.PO_DELETE,
     KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW,
     KEYS.SUPPLIERS_VIEW, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW,
@@ -202,7 +204,7 @@ const DEFAULTS = {
   manager: [
     KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE, KEYS.BRANCH_REQUEST_CONFIRM,
     KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_APPROVE,
-    KEYS.PO_VIEW, KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
+    KEYS.PO_VIEW, KEYS.PO_UPDATE_DELIVERY, KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW, KEYS.SUPPLIERS_VIEW,
     KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.FIELD_PRICES
   ]
