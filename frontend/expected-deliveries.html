@@ -9,86 +9,147 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .ed-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .ed-top input[type=search] { flex: 1 1 260px; max-width: 460px; }
+    .ed-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--s3); } .ed-chips button { min-height: 40px; padding: 0 14px; border-radius: 999px; }
+    .ed-chips button[aria-pressed=true] { background: var(--accent); color: #fff; border-color: var(--accent); } .ed-chips b { margin-left: 6px; font-variant-numeric: tabular-nums; }
+    .ed-chips button.bad:not([aria-pressed=true]) b { color: var(--danger); }
+    .ed-card { border: 1px solid var(--border); border-left: 6px solid var(--info); border-radius: var(--r-card, 14px); background: var(--surface); margin: 0 0 var(--s3); padding: 14px 16px; box-shadow: var(--shadow-sm); }
+    .ed-card.late { border-left-color: var(--danger); } .ed-card.today { border-left-color: var(--warn); } .ed-card.soon { border-left-color: var(--info); } .ed-card.way { border-left-color: var(--success); } .ed-card.nodate { border-left-color: var(--text-2); }
+    .ed-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin: 0 0 10px; } .ed-head .po { font-size: 18px; font-weight: 700; } .ed-head .sup { color: var(--text-2); }
+    .ed-head .when { margin-left: auto; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 13px; background: var(--surface-2); color: var(--text-2); }
+    .ed-card.late .when { background: var(--danger-bg); color: var(--danger); } .ed-card.today .when { background: var(--warn-bg); color: var(--warn); } .ed-card.way .when { background: var(--success-bg); color: var(--success); }
+    .ed-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 12px; } @media (max-width: 720px) { .ed-grid { grid-template-columns: 1fr; } }
+    .ed-box { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--surface-2, transparent); } .ed-box h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+    .ed-big { font-size: 20px; font-weight: 700; line-height: 1.2; } .ed-sub { color: var(--text-2); font-size: 14px; margin-top: 2px; }
+    .ed-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 14px; margin: 0; } .ed-kv dt { font-size: 12px; color: var(--text-2); } .ed-kv dd { margin: 1px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+    .ed-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; } .ed-acts button, .ed-acts a { min-height: 40px; }
+    .ed-copied { color: var(--success); font-size: 13px; }
+    .ed-items { margin: 10px 0 0; } .ed-items summary { cursor: pointer; font-weight: 600; } .ed-items table { margin-top: 8px; }
+    .ed-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .ed-foot .grow { flex: 1; color: var(--text-2); font-size: 14px; }
+    .ed-warn { color: var(--danger); font-weight: 600; font-size: 14px; }
+  </style>
 </head>
 <body>
   <p><a href="index.html">&larr; Home</a> | <a href="grn-form.html" id="receiveLink" hidden>+ Receive goods</a></p>
   <h1>Expected Deliveries</h1>
-  <p class="oxi-page-sub">Purchase orders still waiting for goods, with what was ordered and what is left to arrive. Prices are never shown here.</p>
-  <p id="message"></p>
+  <p class="oxi-page-sub">Purchase orders still waiting for goods: when each is due, who is bringing it, and how to track it. Prices are never shown here.</p>
+  <p id="message" role="status"></p>
 
-  <div class="oxi-chips" id="whenChips" role="group" aria-label="Show deliveries">
-    <button type="button" class="oxi-chip" data-when="all">All waiting</button>
-    <button type="button" class="oxi-chip" data-when="today">Due today</button>
-    <button type="button" class="oxi-chip" data-when="soon">Due in 7 days</button>
-    <button type="button" class="oxi-chip" data-when="overdue">Overdue</button>
+  <div class="ed-top">
+    <input type="search" id="edSearch" placeholder="Find by order, supplier, tracking number, vehicle or item" aria-label="Find a delivery by order, supplier, tracking number, vehicle or item" autocomplete="off">
   </div>
+  <div class="ed-chips" id="whenChips" role="group" aria-label="Show deliveries"></div>
+  <p class="oxi-section-sub" id="summary" aria-live="polite"></p>
   <div id="list" aria-live="polite"></div>
 
   <script src="common.js"></script>
+  <script src="po-delivery.js"></script>
   <script>
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     const $ = (id) => document.getElementById(id);
-    const WORDS = { all: 'waiting for goods', today: 'due today', soon: 'due in the next 7 days', overdue: 'overdue' };
-    let when = new URLSearchParams(location.search).get('when');
-    if (!WORDS[when]) when = 'all';
-    const fmtDay = (d) => { if (!d) return 'No date set'; const p = d.split('-'); return p[2] + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(p[1]) - 1] + ' ' + p[0]; };
+    const FILTERS = [['all', 'All waiting'], ['overdue', 'Overdue'], ['today', 'Due today'], ['soon', 'Due in 7 days'], ['way', 'On its way'], ['nodate', 'No date set']];
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let when = new URLSearchParams(location.search).get('when'); if (when === 'dispatched') when = 'way'; if (!FILTERS.some(f => f[0] === when)) when = 'all';
+    let ALL = [], term = '', canDate = false, canReceive = false;
+    const fmtDay = (d) => { if (!d) return ''; const p = d.split('-'); return DAYS[new Date(d + 'T00:00:00Z').getUTCDay()] + ', ' + Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1] + ' ' + p[0]; };
+    const shortDay = (d) => { if (!d) return ''; const p = d.split('-'); return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1]; };
     const qty = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const sent = (p) => !!(p.transporter || p.tracking_number || p.vehicle_number);
+    // days_late comes from the server's own date: above 0 = late, 0 = today, below 0 = still to come
+    const kind = (p) => (!p.delivery_date ? 'nodate' : p.days_late > 0 ? 'late' : p.days_late === 0 ? 'today' : p.days_late >= -7 ? 'soon' : 'later');
+    const matches = (p, f) => f === 'all' || (f === 'overdue' && kind(p) === 'late') || (f === 'today' && kind(p) === 'today') || (f === 'soon' && ['today', 'soon'].includes(kind(p))) || (f === 'way' && sent(p)) || (f === 'nodate' && !p.delivery_date);
+    const hay = (p) => [p.po_number, p.supplier_name, p.transporter, p.tracking_number, p.vehicle_number, ...(p.items || []).map(i => i.item_name)].filter(Boolean).join(' ').toLowerCase();
+    function whenText(p) {
+      if (!p.delivery_date) return 'No expected date';
+      const n = p.days_late; if (n > 0) return plural(n, 'day') + ' late'; if (n === 0) return 'Due today'; if (n === -1) return 'Due tomorrow'; return 'Due in ' + (-n) + ' days';
+    }
+    const ago = (d) => { if (!d) return ''; const n = Math.round((Date.now() - new Date(d + 'T00:00:00Z').getTime()) / 864e5); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : n + ' days ago'; };
 
-    api('/api/workspace/me').then(me => { if (me.success && (me.is_admin || (me.permissions || []).includes('grn.create'))) $('receiveLink').hidden = false; });
-
-    function paintChips() {
-      document.querySelectorAll('#whenChips .oxi-chip').forEach(c => {
-        const on = c.dataset.when === when;
-        c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on));
-      });
+    function copy(text, note) {
+      const done = () => { note.textContent = 'Copied'; setTimeout(() => { note.textContent = ''; }, 2000); };
+      const old = () => { const t = el('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; } t.remove(); if (ok) done(); else note.textContent = 'Could not copy: select it and copy by hand'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, old); else old();
     }
 
+    function card(p) {
+      const k = kind(p), c = el('article', 'ed-card ' + (k === 'late' ? 'late' : k === 'today' ? 'today' : sent(p) ? 'way' : k === 'nodate' ? 'nodate' : 'soon'));
+      c.setAttribute('aria-label', 'Order ' + p.po_number + ', ' + p.supplier_name + ', ' + whenText(p));
+      const head = el('div', 'ed-head'); const a = el('a', 'po', p.po_number); a.href = 'po-detail.html?id=' + p.id; head.append(a, el('span', 'sup', p.supplier_name));
+      if (p.earlier_rejected) head.appendChild(el('span', 'badge badge-bad', 'An earlier delivery was rejected'));
+      head.appendChild(el('span', 'when', whenText(p))); c.appendChild(head);
+
+      const grid = el('div', 'ed-grid');
+      // 1) when it is expected
+      const b1 = el('section', 'ed-box'); b1.setAttribute('aria-label', 'Expected delivery'); b1.appendChild(el('h3', null, 'Expected delivery'));
+      b1.appendChild(el('div', 'ed-big', p.delivery_date ? fmtDay(p.delivery_date) : 'Not set'));
+      b1.appendChild(el('div', 'ed-sub', p.delivery_date ? (k === 'late' ? plural(p.days_late, 'day') + ' past the date. Ask the supplier.' : k === 'today' ? 'Expected today' : 'In ' + (-p.days_late) + (p.days_late === -1 ? ' day' : ' days')) : 'Nobody has entered a date yet.'));
+      if (canDate) { const acts = el('div', 'ed-acts'); const bt = el('button', 'oxi-btn-secondary', p.delivery_date ? 'Change date' : 'Set date'); bt.type = 'button'; bt.setAttribute('aria-label', (p.delivery_date ? 'Change' : 'Set') + ' the expected date of ' + p.po_number); bt.onclick = () => oxiPoDelivery.dateDialog(p, refresh); acts.appendChild(bt); b1.appendChild(acts); }
+      grid.appendChild(b1);
+
+      // 2) who is bringing it and how to follow it
+      const b2 = el('section', 'ed-box'); b2.setAttribute('aria-label', 'Dispatch and tracking'); b2.appendChild(el('h3', null, 'Dispatch and tracking'));
+      if (sent(p)) {
+        const dl = el('dl', 'ed-kv'); const kv = (key, val) => { if (!val) return; const w = el('div'); w.append(el('dt', null, key), el('dd', null, val)); dl.appendChild(w); };
+        kv('Transporter / courier', p.transporter); kv('Tracking / LR number', p.tracking_number); kv('Vehicle', p.vehicle_number);
+        kv('Dispatched', p.dispatch_date ? shortDay(p.dispatch_date) + ' (' + ago(p.dispatch_date) + ')' : ''); b2.appendChild(dl);
+        const acts = el('div', 'ed-acts'), note = el('span', 'ed-copied'); note.setAttribute('role', 'status');
+        if (p.tracking_url) { const t = el('a', 'oxi-btn', 'Track shipment'); t.href = p.tracking_url; t.target = '_blank'; t.rel = 'noopener noreferrer'; t.setAttribute('aria-label', 'Track shipment ' + (p.tracking_number || p.po_number) + ' (opens in a new tab)'); acts.appendChild(t); }
+        if (p.tracking_number) { const cp = el('button', 'oxi-btn-secondary', 'Copy tracking number'); cp.type = 'button'; cp.onclick = () => copy(p.tracking_number, note); acts.appendChild(cp); }
+        if (canDate) { const ub = el('button', 'oxi-btn-secondary', 'Update details'); ub.type = 'button'; ub.setAttribute('aria-label', 'Update the dispatch details of ' + p.po_number); ub.onclick = () => oxiPoDelivery.dispatchDialog(p, refresh); acts.appendChild(ub); }
+        acts.appendChild(note); b2.appendChild(acts);
+      } else {
+        b2.appendChild(el('div', 'ed-big', 'Not dispatched yet'));
+        b2.appendChild(el('div', 'ed-sub', canDate ? 'Add the transporter, tracking number and vehicle when the supplier sends it.' : 'Purchase will add the transporter and tracking number when the supplier sends it.'));
+        if (canDate) { const acts = el('div', 'ed-acts'); const ab = el('button', null, 'Add dispatch details'); ab.type = 'button'; ab.setAttribute('aria-label', 'Add dispatch details for ' + p.po_number); ab.onclick = () => oxiPoDelivery.dispatchDialog(p, refresh); acts.appendChild(ab); b2.appendChild(acts); }
+      }
+      grid.appendChild(b2); c.appendChild(grid);
+
+      // what is on the order
+      const det = el('details', 'ed-items'); det.appendChild(el('summary', null, plural(p.items.length, 'item') + ': ' + p.items.slice(0, 2).map(i => i.item_name + ' ' + qty(i.remaining) + ' ' + i.unit).join(', ') + (p.items.length > 2 ? ' and ' + (p.items.length - 2) + ' more' : '')));
+      const t = el('table'); const hr = el('tr'); ['Item', 'Ordered', 'Rejected earlier', 'Still to arrive'].forEach((h, i) => { const th = el('th', i ? 'oxi-num' : null, h); th.scope = 'col'; hr.appendChild(th); }); const hd = el('thead'); hd.appendChild(hr); t.appendChild(hd);
+      const tb = el('tbody'); p.items.forEach(i => { const tr = el('tr'); tr.appendChild(el('td', null, i.item_name)); [i.ordered, i.rejected_earlier, i.remaining].forEach(v => tr.appendChild(el('td', 'oxi-num', qty(v) + ' ' + i.unit))); tb.appendChild(tr); }); t.appendChild(tb);
+      const w = el('div', 'oxi-table-scroll'); w.appendChild(t); det.appendChild(w); c.appendChild(det);
+
+      const foot = el('div', 'ed-foot'); foot.appendChild(el('span', 'grow', p.po_date ? 'Ordered ' + shortDay(p.po_date) : ''));
+      if (canReceive) { const r = el('a', 'oxi-btn', 'Receive goods'); r.href = 'grn-form.html?po=' + p.id; r.setAttribute('aria-label', 'Receive goods for ' + p.po_number); foot.appendChild(r); }
+      const o = el('a', 'oxi-btn oxi-btn-secondary', 'Open order'); o.href = 'po-detail.html?id=' + p.id; foot.appendChild(o); c.appendChild(foot);
+      return c;
+    }
+
+    function paint() {
+      const q = term.trim().toLowerCase(), pool = q ? ALL.filter(p => hay(p).includes(q)) : ALL;
+      const chips = $('whenChips'); chips.innerHTML = '';
+      FILTERS.forEach(([f, label]) => { const n = pool.filter(p => matches(p, f)).length; const b = el('button', 'oxi-btn-secondary' + (f === 'overdue' && n ? ' bad' : ''), label); b.type = 'button'; b.setAttribute('aria-pressed', String(f === when)); b.appendChild(el('b', null, String(n)));
+        b.onclick = () => { when = f; history.replaceState(null, '', 'expected-deliveries.html?when=' + f); paint(); }; chips.appendChild(b); });
+      const rows = pool.filter(p => matches(p, when)), box = $('list'); box.innerHTML = '';
+      const late = ALL.filter(p => kind(p) === 'late').length, today = ALL.filter(p => kind(p) === 'today').length;
+      $('summary').textContent = ALL.length ? plural(ALL.length, 'order') + ' waiting for goods' + (late ? ' · ' + late + ' overdue' : '') + (today ? ' · ' + today + ' due today' : '') + (q ? ' · showing ' + rows.length + ' match' + (rows.length === 1 ? '' : 'es') : '') : '';
+      if (!rows.length) { box.appendChild(el('p', 'oxi-empty-line', ALL.length ? (q ? 'Nothing matches "' + term + '" here.' : 'No orders in this view.') : 'No orders are waiting. Orders appear here once they are placed and disappear when goods are received.')); return; }
+      rows.forEach(p => box.appendChild(card(p)));
+    }
     async function load() {
-      paintChips();
-      const box = $('list'); box.innerHTML = ''; box.appendChild(skeletonBlock(90)); box.appendChild(skeletonBlock(90));
-      const d = await api('/api/workspace/expected-deliveries?when=' + when);
-      box.innerHTML = '';
+      const box = $('list'); box.innerHTML = ''; box.appendChild(skeletonBlock(120)); box.appendChild(skeletonBlock(120));
+      const d = await api('/api/workspace/expected-deliveries?when=all');
       if (!d.success) {
-        const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load deliveries.'));
+        box.innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load deliveries.'));
         const b = el('button', null, 'Try again'); b.type = 'button'; b.onclick = load; e.appendChild(b); box.appendChild(e); return;
       }
-      box.appendChild(el('p', 'oxi-section-sub', d.count + (d.count === 1 ? ' order is ' : ' orders are ') + WORDS[when] + '.'));
-      if (!d.count) { box.appendChild(el('p', 'oxi-empty-line', 'No orders in this view. Orders appear here once they are placed and disappear when goods are received.')); return; }
-      d.deliveries.forEach(p => {
-        const late = p.days_late > 0;
-        const card = el('div', 'oxi-delivery' + (late ? ' late' : ''));
-        const head = el('div', 'oxi-delivery-head');
-        const a = el('a', null, p.po_number); a.href = 'po-detail.html?id=' + p.id;
-        head.append(a, el('span', null, p.supplier_name), el('span', late ? 'oxi-late' : null, 'Expected ' + fmtDay(p.delivery_date) + (late ? ' (' + p.days_late + (p.days_late === 1 ? ' day' : ' days') + ' late)' : '')));
-        head.appendChild(badge(p.status));
-        if (p.earlier_rejected) head.appendChild(el('span', 'badge badge-bad', 'An earlier delivery was rejected'));
-        card.appendChild(head);
-        // dispatch details entered by Purchase: who is bringing it, the tracking number and the vehicle, so Stores knows what is on its way
-        if (p.transporter || p.tracking_number || p.vehicle_number) {
-          const dl = el('p', 'oxi-section-note'); dl.style.margin = '6px 0'; dl.append(document.createTextNode('On its way' + (p.dispatch_date ? ' since ' + fmtDay(p.dispatch_date) : '') + (p.transporter ? ' with ' + p.transporter : '') + (p.tracking_number ? ', tracking ' : '')));
-          if (p.tracking_number) { if (p.tracking_url) { const a = el('a', null, p.tracking_number); a.href = p.tracking_url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.setAttribute('aria-label', 'Track ' + p.tracking_number + ' (opens in a new tab)'); dl.appendChild(a); } else dl.appendChild(document.createTextNode(p.tracking_number)); }
-          if (p.vehicle_number) dl.appendChild(document.createTextNode(', vehicle ' + p.vehicle_number));
-          card.appendChild(dl);
-        } else if (!p.delivery_date) { const nd = el('p', 'oxi-section-note', 'No expected date has been entered yet.'); nd.style.margin = '6px 0'; card.appendChild(nd); }
-        const t = el('table'); const thead = el('thead'); const hr = el('tr');
-        ['Item', 'Ordered', 'Rejected earlier', 'Remaining'].forEach((h, i) => { const th = el('th', i ? 'oxi-num' : null, h); hr.appendChild(th); });
-        thead.appendChild(hr); t.appendChild(thead);
-        const tb = el('tbody');
-        p.items.forEach(i => {
-          const tr = el('tr');
-          tr.append(el('td', null, i.item_name));
-          [i.ordered, i.rejected_earlier, i.remaining].forEach(v => tr.appendChild(el('td', 'oxi-num', qty(v) + ' ' + i.unit)));
-          tb.appendChild(tr);
-        });
-        t.appendChild(tb); card.appendChild(t);
-        box.appendChild(card);
-      });
+      ALL = d.deliveries; paint();
     }
+    const refresh = async () => { const d = await api('/api/workspace/expected-deliveries?when=all'); if (d.success) { ALL = d.deliveries; paint(); } };
+    $('edSearch').addEventListener('input', () => { term = $('edSearch').value; paint(); });
 
-    document.querySelectorAll('#whenChips .oxi-chip').forEach(c => c.addEventListener('click', () => {
-      when = c.dataset.when; history.replaceState(null, '', 'expected-deliveries.html?when=' + when); load();
-    }));
-    load();
+    (async () => {
+      const me = await api('/api/workspace/me');
+      if (me.success) {
+        const has = (k) => me.is_admin || (me.permissions || []).includes(k);
+        canReceive = has('grn.create'); canDate = has('po.update_delivery'); $('receiveLink').hidden = !canReceive;
+      }
+      load();
+    })();
   </script>
 </body>
 </html>
