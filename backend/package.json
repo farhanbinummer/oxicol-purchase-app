@@ -17,6 +17,7 @@
     "test:po-delivery": "node --test tests/po-delivery.test.js",
     "test:suppliers": "node --test tests/suppliers.test.js",
     "test:po-print": "node --test tests/po-print.test.js",
+    "test:po-edit": "node --test tests/po-edit.test.js",
     "test:indent-edit": "node --test tests/indent-edit.test.js",
     "test:branch-delivery": "node --test tests/branch-delivery.test.js",
     "test:admin-records": "node --test tests/admin-records.test.js",

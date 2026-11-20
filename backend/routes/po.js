@@ -3,6 +3,7 @@
 //   GET    /api/po             list all POs
 //   GET    /api/po/:id         one PO with items, payments and GRNs
 //   PUT    /api/po/:id/status  move PO status forward
+//   PUT    /api/po/:id         edit a PO (before any payment or goods receipt)
 //   DELETE /api/po/:id         delete a PO (only if not paid yet)
 
 const express = require('express');
@@ -54,6 +55,23 @@ function validatePO(body) {
     if (!isFinite(rate) || rate <= 0) return `Item ${n}: rate must be greater than 0`;
   }
   return null;
+}
+
+/** Lines and totals for a PO body (server-side maths; raw materials chosen from the list keep one spelling). Returns { error } or { lines, subtotal, cgst, sgst, total }. */
+async function priceLines(client, items) {
+  const mats = await resolveMaterials(client, items);
+  if (mats.error) return { error: mats.error };
+  const lines = items.map((it) => { const m = it.material_id ? mats.map.get(Number(it.material_id)) : null; return ({
+    item_name: m ? m.name : String(it.item_name).trim(),
+    quantity: Number(it.quantity),
+    unit: String(it.unit).trim(),
+    rate: Number(it.rate),
+    hsn_code: it.hsn_code ? String(it.hsn_code).trim() : (m && m.hsn_code ? m.hsn_code : null),
+    line_amount: round2(Number(it.quantity) * Number(it.rate))
+  }); });
+  const subtotal = round2(lines.reduce((sum, l) => sum + l.line_amount, 0));
+  const cgst = round2(subtotal * CGST_RATE / 100), sgst = round2(subtotal * SGST_RATE / 100);
+  return { lines, subtotal, cgst, sgst, total: round2(subtotal + cgst + sgst) };
 }
 
 // ------------------------------------------------------------
@@ -321,6 +339,55 @@ router.put('/:id/dispatch', requirePermission(KEYS.PO_UPDATE_DELIVERY), async (r
     await client.query('ROLLBACK').catch(() => {});
     console.error('po dispatch failed:', err); fail(res, 500, 'Could not save the dispatch details');
   } finally { client.release(); }
+});
+
+// ------------------------------------------------------------
+// PUT /api/po/:id - edit supplier, items, rates, delivery date and notes.
+// Only while no payment (other than a failed one) and no goods receipt exists: after that the money and the stock already depend on the order.
+// ------------------------------------------------------------
+router.put('/:id', requirePermission(KEYS.PO_EDIT), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid PO id');
+  if (!fieldAccess(req.access).prices) return fail(res, 403, 'Editing an order means seeing its prices, which this role may not');
+  const problem = validatePO(req.body);
+  if (problem) return fail(res, 400, problem);
+  const { supplier_id, delivery_date, notes, items } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = (await client.query('SELECT * FROM purchase_orders WHERE id = $1 FOR UPDATE', [id])).rows[0];
+    if (!cur) { await client.query('ROLLBACK'); return fail(res, 404, 'PO not found'); }
+    const pay = await client.query("SELECT 1 FROM payments WHERE po_id = $1 AND status <> 'failed' LIMIT 1", [id]);
+    const grn = await client.query("SELECT 1 FROM grn_notes WHERE po_id = $1 AND status <> 'rejected' LIMIT 1", [id]);
+    if (!['created', 'payment_pending'].includes(cur.status) || pay.rowCount || grn.rowCount) {
+      await client.query('ROLLBACK');
+      return fail(res, 400, 'This PO can no longer be edited: it already has a payment or goods receipt, or has moved on. Delete it and make a new one if the order itself was wrong.');
+    }
+    const sup = await client.query("SELECT id FROM suppliers WHERE (id = $1 AND status = 'active') OR id = $2", [supplier_id, cur.supplier_id]);
+    if (!sup.rows.some(r => r.id === Number(supplier_id))) { await client.query('ROLLBACK'); return fail(res, 400, 'Supplier not found'); }
+    const p = await priceLines(client, items);
+    if (p.error) { await client.query('ROLLBACK'); return fail(res, 400, p.error); }
+    const before = { supplier_id: cur.supplier_id, delivery_date: cur.delivery_date, notes: cur.notes, total_amount: Number(cur.total_amount),
+      items: (await client.query('SELECT item_name, quantity, unit, rate, line_amount FROM po_items WHERE po_id = $1 ORDER BY id', [id])).rows };
+    await client.query(
+      `UPDATE purchase_orders SET supplier_id = $1, delivery_date = $2, notes = $3, subtotal = $4, cgst_amount = $5, sgst_amount = $6, igst_amount = 0, total_amount = $7 WHERE id = $8`,
+      [supplier_id, delivery_date || null, notes ? String(notes).trim() : null, p.subtotal, p.cgst, p.sgst, p.total, id]);
+    await client.query('DELETE FROM po_items WHERE po_id = $1', [id]);
+    for (const l of p.lines) {
+      await client.query('INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount, hsn_code) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [id, l.item_name, l.quantity, l.unit, l.rate, l.line_amount, l.hsn_code]);
+    }
+    await audit(client, req, { action: 'po.edit', entity: 'purchase_order', id, summary: `${cur.po_number} edited: total Rs ${before.total_amount} -> Rs ${p.total}, ${p.lines.length} item(s)`,
+      before, after: { supplier_id: Number(supplier_id), delivery_date: delivery_date || null, notes: notes || null, total_amount: p.total, items: p.lines } });
+    await client.query('COMMIT');
+    res.json({ success: true, po_id: id, po_number: cur.po_number, subtotal: p.subtotal, cgst_amount: p.cgst, sgst_amount: p.sgst, total_amount: p.total });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Edit PO failed:', err);
+    fail(res, 500, 'Could not save the changes');
+  } finally {
+    client.release();
+  }
 });
 
 // ------------------------------------------------------------
