@@ -63,6 +63,13 @@
         head.appendChild(badge(p.status));
         if (p.earlier_rejected) head.appendChild(el('span', 'badge badge-bad', 'An earlier delivery was rejected'));
         card.appendChild(head);
+        // dispatch details entered by Purchase: who is bringing it, the tracking number and the vehicle, so Stores knows what is on its way
+        if (p.transporter || p.tracking_number || p.vehicle_number) {
+          const dl = el('p', 'oxi-section-note'); dl.style.margin = '6px 0'; dl.append(document.createTextNode('On its way' + (p.dispatch_date ? ' since ' + fmtDay(p.dispatch_date) : '') + (p.transporter ? ' with ' + p.transporter : '') + (p.tracking_number ? ', tracking ' : '')));
+          if (p.tracking_number) { if (p.tracking_url) { const a = el('a', null, p.tracking_number); a.href = p.tracking_url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.setAttribute('aria-label', 'Track ' + p.tracking_number + ' (opens in a new tab)'); dl.appendChild(a); } else dl.appendChild(document.createTextNode(p.tracking_number)); }
+          if (p.vehicle_number) dl.appendChild(document.createTextNode(', vehicle ' + p.vehicle_number));
+          card.appendChild(dl);
+        } else if (!p.delivery_date) { const nd = el('p', 'oxi-section-note', 'No expected date has been entered yet.'); nd.style.margin = '6px 0'; card.appendChild(nd); }
         const t = el('table'); const thead = el('thead'); const hr = el('tr');
         ['Item', 'Ordered', 'Rejected earlier', 'Remaining'].forEach((h, i) => { const th = el('th', i ? 'oxi-num' : null, h); hr.appendChild(th); });
         thead.appendChild(hr); t.appendChild(thead);

@@ -9,6 +9,11 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    #dlvList { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 18px; margin: 0 0 10px; } #dlvList div { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+    #dlvList dt { font-size: 12px; color: var(--text-2); } #dlvList dd { margin: 2px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+    @media print { #dlvActions, #dlvLog, #deliveryBox h4 { display: none; } }
+  </style>
 </head>
 <body>
   <p><a href="index.html">&larr; Home</a> | <a href="po-list.html">&larr; All POs</a></p>
@@ -30,6 +35,15 @@
       <tr><td>Status</td><td id="status"></td></tr>
       <tr><td>Notes</td><td id="notes"></td></tr>
     </table>
+
+    <section id="deliveryBox" aria-labelledby="dlvTitle" style="margin:16px 0">
+      <h3 id="dlvTitle">Delivery and tracking</h3>
+      <dl class="oxi-kv-list" id="dlvList"></dl>
+      <div class="oxi-actions" id="dlvActions"></div>
+      <h4>Changes</h4>
+      <ul id="dlvLog" style="list-style:none;margin:0;padding:0;display:grid;gap:6px"></ul>
+      <p id="dlvMsg" role="alert"></p>
+    </section>
 
     <h3>Items</h3>
     <table>
@@ -80,6 +94,66 @@
   <script>
     // money() / day() / badge() / show() come from common.js.
     const id = new URLSearchParams(location.search).get('id');
+
+    // ---------------- expected delivery date and dispatch (tracking) details ----------------
+    const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const dmsg = (t, ok) => { const m = document.getElementById('dlvMsg'); m.textContent = t || ''; m.className = t ? (ok ? 'success' : 'error') : ''; };
+    const nice = (v) => (v ? day(v) : '-');
+    function dlgForm(title, build, okText, submit) {
+      const dlg = mk('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'dlgT'); const f = mk('form'); f.method = 'dialog'; f.style.display = 'grid'; f.style.gap = '10px';
+      const h = mk('h3', null, title); h.id = 'dlgT'; f.appendChild(h); const read = build(f);
+      const err = mk('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const row = mk('div', 'row');
+      const no = mk('button', 'oxi-btn-secondary', 'Cancel'); no.type = 'button'; no.onclick = () => dlg.close(); const ok = mk('button', null, okText); ok.type = 'submit'; row.append(no, ok); f.append(err, row); dlg.appendChild(f); document.body.appendChild(dlg);
+      const back = document.activeElement;
+      f.onsubmit = async (e) => { e.preventDefault(); err.hidden = true; ok.disabled = true; const r = await submit(read()); ok.disabled = false; if (!r.success) { err.textContent = r.error || 'Could not save.'; err.hidden = false; return; } dlg.close(); dmsg('Saved.', true); await reload(); };
+      dlg.addEventListener('close', () => { dlg.remove(); if (back && document.contains(back)) back.focus(); }); dlg.showModal(); return dlg;
+    }
+    const lab = (f, text, input, id, hint) => { const l = mk('label', null, text); l.htmlFor = id; input.id = id; f.append(l, input); if (hint) f.appendChild(mk('small', 'oxi-section-note', hint)); };
+    function dateDialog(po) {
+      dlgForm(po.delivery_date ? 'Change the expected delivery date' : 'Set the expected delivery date', (f) => {
+        const d = mk('input'); d.type = 'date'; d.value = po.delivery_date ? String(po.delivery_date).slice(0, 10) : ''; d.min = String(po.po_date).slice(0, 10); lab(f, 'Expected delivery date', d, 'dlvDate');
+        const r = mk('textarea'); r.rows = 2; r.maxLength = 300; lab(f, po.delivery_date ? 'Why is it changing? (needed)' : 'Note (optional)', r, 'dlvWhy', po.delivery_date ? 'For example: supplier said 3 days late.' : '');
+        return () => ({ delivery_date: d.value, reason: r.value });
+      }, 'Save date', (v) => api('/api/po/' + id + '/delivery-date', 'PUT', v));
+    }
+    function dispatchDialog(po) {
+      const had = !!(po.tracking_number || po.vehicle_number || po.transporter);
+      dlgForm(had ? 'Update the dispatch details' : 'Enter the dispatch details', (f) => {
+        const t = mk('input'); t.type = 'text'; t.maxLength = 100; t.value = po.transporter || ''; lab(f, 'Transporter or courier', t, 'dlvTr', 'For example: VRL Logistics, DTDC, the supplier\'s own vehicle');
+        const n = mk('input'); n.type = 'text'; n.maxLength = 80; n.value = po.tracking_number || ''; lab(f, 'Tracking number or LR number', n, 'dlvNo');
+        const v = mk('input'); v.type = 'text'; v.maxLength = 30; v.value = po.vehicle_number || ''; lab(f, 'Vehicle number', v, 'dlvVeh');
+        const dd = mk('input'); dd.type = 'date'; dd.value = po.dispatch_date ? String(po.dispatch_date).slice(0, 10) : ''; dd.max = new Date().toISOString().slice(0, 10); lab(f, 'Dispatch date', dd, 'dlvDisp');
+        const u = mk('input'); u.type = 'url'; u.maxLength = 300; u.value = po.tracking_url || ''; u.placeholder = 'https://'; lab(f, 'Tracking link (optional)', u, 'dlvUrl', 'A web address starting with https:// that opens the tracking page.');
+        let why = null; if (had) { why = mk('textarea'); why.rows = 2; why.maxLength = 300; lab(f, 'Why are the details changing? (needed)', why, 'dlvWhy2'); }
+        let ck = null; if (po.status === 'payment_done') { const cl = mk('label'); cl.style.cssText = 'display:flex;gap:8px;align-items:center;font-weight:400'; ck = mk('input'); ck.type = 'checkbox'; ck.style.cssText = 'width:20px;height:20px'; cl.append(ck, mk('span', null, 'Also mark this order as In transit')); f.appendChild(cl); }
+        return () => ({ transporter: t.value, tracking_number: n.value, vehicle_number: v.value, dispatch_date: dd.value, tracking_url: u.value, reason: why ? why.value : '', mark_in_transit: ck ? ck.checked : false });
+      }, 'Save', (v) => api('/api/po/' + id + '/dispatch', 'PUT', v));
+    }
+    function renderDelivery(d) {
+      const po = d.po, dl = document.getElementById('dlvList'); dl.innerHTML = '';
+      const row = (k, v) => { const w = mk('div'); w.append(mk('dt', null, k)); const dd = mk('dd'); if (v instanceof Node) dd.appendChild(v); else dd.textContent = v; w.appendChild(dd); dl.appendChild(w); };
+      row('Expected delivery', po.delivery_date ? nice(po.delivery_date) : 'Not set');
+      const hasDetails = !!(po.tracking_number || po.vehicle_number || po.transporter);
+      row('Transporter or courier', po.transporter || '-');
+      let tn = po.tracking_number || '-'; if (po.tracking_number && po.tracking_url) { tn = mk('a', null, po.tracking_number); tn.href = po.tracking_url; tn.target = '_blank'; tn.rel = 'noopener noreferrer'; tn.setAttribute('aria-label', 'Track ' + po.tracking_number + ' (opens in a new tab)'); }
+      else if (!po.tracking_number && po.tracking_url) { tn = mk('a', null, 'Open tracking page'); tn.href = po.tracking_url; tn.target = '_blank'; tn.rel = 'noopener noreferrer'; }
+      row('Tracking / LR number', tn); row('Vehicle', po.vehicle_number || '-'); row('Dispatched on', nice(po.dispatch_date));
+      const act = document.getElementById('dlvActions'); act.innerHTML = '';
+      if (d.can_update_delivery) {
+        const b1 = mk('button', 'oxi-btn-secondary', po.delivery_date ? 'Update expected date' : 'Set expected date'); b1.type = 'button'; b1.onclick = () => dateDialog(po);
+        const b2 = mk('button', 'oxi-btn-secondary', hasDetails ? 'Update dispatch details' : 'Enter dispatch details'); b2.type = 'button'; b2.onclick = () => dispatchDialog(po); act.append(b1, b2);
+      }
+      const log = document.getElementById('dlvLog'); log.innerHTML = '';
+      if (!d.delivery_log.length) log.appendChild(mk('li', 'oxi-section-note', 'No changes yet.'));
+      d.delivery_log.forEach(x => {
+        const li = mk('li'); li.style.cssText = 'padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px';
+        const nv = x.new_values || {}, ov = x.old_values || {};
+        const what = x.kind === 'date' ? 'Expected date ' + (ov.delivery_date ? 'changed from ' + nice(ov.delivery_date) + ' to ' + nice(nv.delivery_date) : 'set to ' + nice(nv.delivery_date))
+          : 'Dispatch details ' + (ov.tracking_number || ov.vehicle_number || ov.transporter ? 'updated' : 'entered') + ': ' + [nv.transporter, nv.tracking_number && 'No. ' + nv.tracking_number, nv.vehicle_number && 'Vehicle ' + nv.vehicle_number].filter(Boolean).join(', ');
+        li.appendChild(mk('strong', null, what)); const s = mk('small', null, day(x.at) + ' - ' + x.by_name + (x.reason ? ' - ' + x.reason : '')); s.style.display = 'block'; s.style.color = 'var(--text-2)'; li.appendChild(s); log.appendChild(li);
+      });
+    }
+    async function reload() { const d = await api('/api/po/' + encodeURIComponent(id)); if (d.success) { renderDelivery(d); const s = document.getElementById('delivery'); if (s) s.textContent = d.po.delivery_date ? day(d.po.delivery_date) : 'Not set'; } }
     // administrators only: a careful "remove this record" card at the bottom (the server checks again)
     window.addEventListener('load', () => { const d = document.getElementById('detail'); if (d) oxiAdminRemove({ kind: 'po', id, mount: d, listHref: 'po-list.html' }); });
     const set = (elId, text) => { document.getElementById(elId).textContent = text; };
@@ -118,7 +192,8 @@
         set('title', po.po_number);
         set('supplier', po.supplier_name);
         set('podate', day(po.po_date));
-        set('delivery', day(po.delivery_date));
+        set('delivery', day(po.delivery_date) || 'Not set');
+        renderDelivery(d);
         setBadge('status', po.status);
         rebuildStatusOptions(po.status);
         set('notes', po.notes || '-');

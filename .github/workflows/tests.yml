@@ -57,12 +57,12 @@ jobs:
           curl -fs http://localhost:3100/api/health
           # The server starts listening before its start-up database updates finish, so wait for the last one to be logged.
           for i in $(seq 1 60); do
-            if grep -q "031_raw_material_list" ../server-boot.log; then break; fi
+            if grep -q "032_po_delivery_tracking" ../server-boot.log; then break; fi
             sleep 1
           done
           kill $pid || true
           grep -q "014_rd_stage_work_review" ../server-boot.log
-          grep -q "031_raw_material_list" ../server-boot.log
+          grep -q "032_po_delivery_tracking" ../server-boot.log
 
       - name: Unit tests
         working-directory: backend
@@ -89,6 +89,9 @@ jobs:
       - name: Remove any record tests
         working-directory: backend
         run: npm run test:admin-records
+      - name: PO delivery and tracking tests
+        working-directory: backend
+        run: npm run test:po-delivery
       - name: TaskFlow summary tests
         working-directory: backend
         run: npm run test:taskflow && node --test tests/taskflow-api.test.js
