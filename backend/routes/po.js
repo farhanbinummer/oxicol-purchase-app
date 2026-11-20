@@ -14,6 +14,7 @@ const { KEYS } = require('../permissions');
 const { can, fieldAccess, redactPo, redactItems } = require('../access');
 const { resolveMaterials } = require('../materials');
 const { audit } = require('../audit');
+const { buildPrint } = require('../po-print');
 const RD = require('../rd-logic');
 const router = express.Router();
 
@@ -159,6 +160,22 @@ router.get('/', requirePermission(KEYS.PO_VIEW), async (req, res) => {
 // ------------------------------------------------------------
 // GET /api/po/:id - one PO with supplier, items, payments and GRNs
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// GET /api/po/:id/print - everything the printed purchase order needs (money included, so it needs price access)
+// ------------------------------------------------------------
+router.get('/:id/print', requirePermission(KEYS.PO_VIEW), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid PO id');
+  if (!fieldAccess(req.access).prices) return fail(res, 403, 'The printed purchase order shows prices, so it needs price access');
+  try {
+    const po = (await pool.query(
+      `SELECT po.*, s.name AS supplier_name, s.address AS supplier_address, s.gst_number AS supplier_gst FROM purchase_orders po JOIN suppliers s ON s.id = po.supplier_id WHERE po.id = $1`, [id])).rows[0];
+    if (!po) return fail(res, 404, 'PO not found');
+    const items = (await pool.query('SELECT item_name, quantity, unit, rate, line_amount FROM po_items WHERE po_id = $1 ORDER BY id', [id])).rows;
+    res.json({ success: true, po_number: po.po_number, ...buildPrint(po, items, { name: po.supplier_name, address: po.supplier_address, gst_number: po.supplier_gst }) });
+  } catch (err) { console.error('po print failed:', err); fail(res, 500, 'Could not prepare the printout'); }
+});
+
 router.get('/:id', requirePermission(KEYS.PO_VIEW), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid PO id');

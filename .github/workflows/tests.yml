@@ -57,13 +57,14 @@ jobs:
           curl -fs http://localhost:3100/api/health
           # The server starts listening before its start-up database updates finish, so wait for the last one to be logged.
           for i in $(seq 1 60); do
-            if grep -q "034_indent_edit" ../server-boot.log; then break; fi
+            if grep -q "035_po_print_template" ../server-boot.log; then break; fi
             sleep 1
           done
           kill $pid || true
           grep -q "014_rd_stage_work_review" ../server-boot.log
           grep -q "033_suppliers_manage" ../server-boot.log
           grep -q "034_indent_edit" ../server-boot.log
+          grep -q "035_po_print_template" ../server-boot.log
 
       - name: Unit tests
         working-directory: backend
@@ -99,6 +100,9 @@ jobs:
       - name: Suppliers tests
         working-directory: backend
         run: npm run test:suppliers
+      - name: Purchase order print tests
+        working-directory: backend
+        run: npm run test:po-print
       - name: Production request edit tests
         working-directory: backend
         run: npm run test:indent-edit

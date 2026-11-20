@@ -835,6 +835,41 @@ const STEPS = [
     async run(db) {
       await db.query('ALTER TABLE production_indents ADD COLUMN IF NOT EXISTS edit_count INTEGER NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ');
     }
+  },
+  {
+    // The printed purchase order (copy of the company's own template) needs the supplier's address and a reference like "PO/26-27/028":
+    // PO, the financial year (April to March), and a running number inside that year. The reference is given by the database itself when an
+    // order is inserted (a trigger, so every way of creating an order gets one, and two at the same moment never share a number).
+    // Existing orders are numbered once, oldest first. The app's own order number (OXI-PO-...) is not changed.
+    name: '035_po_print_template',
+    async run(db) {
+      await db.query('ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS address TEXT');
+      await db.query('ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS po_ref VARCHAR(20)');
+      await db.query(`
+        CREATE OR REPLACE FUNCTION set_po_ref() RETURNS trigger AS $$
+        DECLARE yy int; fy text; n int;
+        BEGIN
+          IF NEW.po_ref IS NOT NULL THEN RETURN NEW; END IF;
+          yy := EXTRACT(YEAR FROM NEW.po_date)::int;
+          IF EXTRACT(MONTH FROM NEW.po_date) < 4 THEN yy := yy - 1; END IF;
+          fy := lpad((yy % 100)::text, 2, '0') || '-' || lpad(((yy + 1) % 100)::text, 2, '0');
+          PERFORM pg_advisory_xact_lock(hashtext('po_ref_' || fy));
+          SELECT COALESCE(MAX(substring(po_ref from '[0-9]+$')::int), 0) + 1 INTO n FROM purchase_orders WHERE po_ref LIKE 'PO/' || fy || '/%';
+          NEW.po_ref := 'PO/' || fy || '/' || lpad(n::text, 3, '0');
+          RETURN NEW;
+        END $$ LANGUAGE plpgsql`);
+      // number the orders that already exist (oldest first, per financial year); the trigger is not on yet, so nothing else moves
+      const old = (await db.query('SELECT id, po_date::text AS d FROM purchase_orders WHERE po_ref IS NULL ORDER BY po_date, id')).rows, serial = new Map();
+      for (const o of old) {
+        const y = Number(o.d.slice(0, 4)), m = Number(o.d.slice(5, 7)), yy = m < 4 ? y - 1 : y, fy = String(yy % 100).padStart(2, '0') + '-' + String((yy + 1) % 100).padStart(2, '0');
+        const n = (serial.get(fy) || (await db.query("SELECT COALESCE(MAX(substring(po_ref from '[0-9]+$')::int), 0) AS n FROM purchase_orders WHERE po_ref LIKE $1", ['PO/' + fy + '/%'])).rows[0].n) + 1;
+        serial.set(fy, n);
+        await db.query('UPDATE purchase_orders SET po_ref = $1 WHERE id = $2', ['PO/' + fy + '/' + String(n).padStart(3, '0'), o.id]);
+      }
+      await db.query('CREATE UNIQUE INDEX IF NOT EXISTS ux_purchase_orders_po_ref ON purchase_orders(po_ref)');
+      await db.query('DROP TRIGGER IF EXISTS trg_set_po_ref ON purchase_orders');
+      await db.query('CREATE TRIGGER trg_set_po_ref BEFORE INSERT ON purchase_orders FOR EACH ROW EXECUTE FUNCTION set_po_ref()');
+    }
   }
 ];
 

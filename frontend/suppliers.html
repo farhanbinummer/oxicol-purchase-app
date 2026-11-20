@@ -13,7 +13,7 @@
     .sp-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .sp-bar input[type=search] { flex: 1 1 240px; max-width: 400px; }
     .sp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--s3); } .sp-chips button { min-height: 38px; padding: 0 14px; border-radius: 999px; } .sp-chips button[aria-pressed=true] { background: var(--accent); color: #fff; border-color: var(--accent); } .sp-chips b { margin-left: 6px; }
     .sp-num { white-space: nowrap; font-variant-numeric: tabular-nums; } .sp-small { font-size: 13px; color: var(--text-2); display: block; overflow-wrap: anywhere; } .sp-off td { opacity: .65; }
-    .sp-form { display: grid; gap: 10px; } .sp-form label { font-weight: 600; } .sp-form input[type=text], .sp-form input[type=email], .sp-form input[type=tel] { width: 100%; }
+    .sp-form { display: grid; gap: 10px; } .sp-form label { font-weight: 600; } .sp-form input[type=text], .sp-form input[type=email], .sp-form input[type=tel], .sp-form textarea { width: 100%; }
     .sp-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } @media (max-width: 520px) { .sp-two { grid-template-columns: 1fr; } }
     .sp-sec { margin: 6px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-weight: 700; } .sp-check { display: flex; gap: 8px; align-items: center; font-weight: 400 !important; } .sp-check input { width: 20px; height: 20px; }
     dialog.oxi-dlg { max-height: 92vh; overflow-y: auto; }
@@ -44,6 +44,7 @@
       const contact = input('text', 'spContact', adding ? '' : s.contact_person, 100), phone = input('tel', 'spPhone', adding ? '' : s.phone, 20); phone.inputMode = 'tel';
       const two = el('div', 'sp-two'); two.append(row('Contact person', contact), row('Phone', phone)); f.appendChild(two);
       f.appendChild(row('Email', input('email', 'spEmail', adding ? '' : s.email, 150)));
+      const addr = el('textarea'); addr.id = 'spAddress'; addr.rows = 3; addr.maxLength = 500; addr.value = adding ? '' : (s.address || ''); f.appendChild(row('Address (printed on the purchase order)', addr, 'One line per row, up to 6 lines.'));
       f.appendChild(row('GST number (optional)', input('text', 'spGst', adding ? '' : s.gst_number, 15, { placeholder: '32ABCDE1234F1Z5' }), '15 characters. It is checked and cannot be used for two suppliers.'));
       let bank = null;
       if (DATA.can_bank) {
@@ -59,7 +60,7 @@
       const back = document.activeElement;
       f.onsubmit = async (e) => {
         e.preventDefault(); err.hidden = true; ok.disabled = true;
-        const body = { name: name.value, contact_person: contact.value, phone: phone.value, email: $('spEmail').value, gst_number: $('spGst').value };
+        const body = { name: name.value, contact_person: contact.value, phone: phone.value, email: $('spEmail').value, address: $('spAddress').value, gst_number: $('spGst').value };
         if (bank) { body.bank_name = bank.bn.value; body.account_number = bank.ac.value; body.ifsc_code = bank.ifs.value; }
         if (act) body.active = act.checked;
         const r = adding ? await api('/api/suppliers', 'POST', body) : await api('/api/suppliers/' + s.id, 'PUT', body);
