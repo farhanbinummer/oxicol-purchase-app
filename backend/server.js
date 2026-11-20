@@ -79,6 +79,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/bom', require('./routes/bom'));
 app.use('/api/catalog', require('./routes/catalog'));
 app.use('/api/admin', requireRole('admin'), require('./routes/admin'));
+app.use('/api/admin/data/records', requireRole('admin'), require('./routes/admin-records'));
 app.use('/api/admin/data', requireRole('admin'), require('./routes/admin-data'));        // removing data: administrator only, with a typed confirmation and a reason
 app.use('/api/search', require('./routes/search'));
 app.use('/api/workspace', require('./routes/workspace'));

@@ -14,6 +14,7 @@
     "test:grn-files": "node --test tests/grn-attachments.test.js",
     "test:materials": "node --test tests/materials.test.js",
     "test:branch-delivery": "node --test tests/branch-delivery.test.js",
+    "test:admin-records": "node --test tests/admin-records.test.js",
     "test:taskflow": "node --test tests/taskflow.test.js",
     "test:workspaces": "node --test tests/workspaces.test.js",
     "test:all": "node --test --test-concurrency=1 \"tests/*.test.js\""
