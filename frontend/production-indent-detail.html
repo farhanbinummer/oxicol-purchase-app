@@ -70,6 +70,7 @@
         c2.textContent = 'First needed ' + day(dates[0]); chips.appendChild(c2); }
       if (d.items.length) { const c3 = document.createElement('span'); c3.className = 'oxi-meta-chip';
         c3.textContent = 'Highest priority: ' + top; chips.appendChild(c3); }
+      if (r.edit_count > 0) { const c4 = document.createElement('span'); c4.className = 'oxi-meta-chip'; c4.textContent = 'Changed ' + (r.edit_count === 1 ? 'once' : r.edit_count + ' times') + ' by its requester, last ' + day(r.edited_at); chips.appendChild(c4); }
 
       const tiles = document.getElementById('tiles'); tiles.innerHTML = '';
       tiles.append(tile('Production head', r.production_head), tile('Created', day(r.created_at)),
@@ -94,16 +95,18 @@
       const actions = document.getElementById('actions'); actions.innerHTML = '';
       if (r.status === 'pending') {
         const ok = document.createElement('button'); ok.textContent = 'Approve';
-        ok.onclick = async () => { const x = await api('/api/production-indent/' + r.id + '/approve', 'PUT', {});
-          if (x.success) { show('Approved', true); load(); } else show(x.error, false); };
+        ok.onclick = async () => { const x = await api('/api/production-indent/' + r.id + '/approve', 'PUT', { version: r.edit_count });     // approves the version that is on screen
+          if (x.success) { show('Approved', true); load(); } else { show(x.error, false); if (x.error && /changed/.test(x.error)) load(); } };
         const del = document.createElement('button'); del.textContent = 'Delete';
         del.onclick = async () => { if (!confirm('Delete this indent?')) return;
           const x = await api('/api/production-indent/' + r.id, 'DELETE');
           if (x.success) location.href = 'production-indent-list.html'; else show(x.error, false); };
         actions.append(ok, del);
+        if (d.can_edit) { const ed = document.createElement('a'); ed.href = 'production-indent-form.html?edit=' + r.id; ed.className = 'oxi-view-btn'; ed.textContent = 'Change this request'; actions.prepend(ed); }
       }
       document.getElementById('detail').hidden = false;
     }
+    if (new URLSearchParams(location.search).get('saved') === '1') show('Your changes were saved. The approver has been told.', true);
     load();
   </script>
 </body>

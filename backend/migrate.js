@@ -818,6 +818,13 @@ const STEPS = [
       await db.query('CREATE INDEX IF NOT EXISTS idx_po_delivery_log_po ON po_delivery_log(po_id, id)');
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'po.update_delivery'), ('manager', 'po.update_delivery') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // A production request can be edited by the person who raised it until it is approved. edit_count is the version an approver saw.
+    name: '034_indent_edit',
+    async run(db) {
+      await db.query('ALTER TABLE production_indents ADD COLUMN IF NOT EXISTS edit_count INTEGER NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ');
+    }
   }
 ];
 
