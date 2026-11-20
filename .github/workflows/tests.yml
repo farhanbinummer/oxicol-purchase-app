@@ -89,6 +89,9 @@ jobs:
       - name: Remove any record tests
         working-directory: backend
         run: npm run test:admin-records
+      - name: Raw material screen tests
+        working-directory: backend
+        run: npm run test:materials-admin
       - name: TaskFlow summary tests
         working-directory: backend
         run: npm run test:taskflow && node --test tests/taskflow-api.test.js

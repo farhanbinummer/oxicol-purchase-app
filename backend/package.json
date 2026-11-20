@@ -13,6 +13,7 @@
     "test:admin-data": "node --test tests/admin-data.test.js",
     "test:grn-files": "node --test tests/grn-attachments.test.js",
     "test:materials": "node --test tests/materials.test.js",
+    "test:materials-admin": "node --test tests/materials-admin.test.js",
     "test:branch-delivery": "node --test tests/branch-delivery.test.js",
     "test:admin-records": "node --test tests/admin-records.test.js",
     "test:taskflow": "node --test tests/taskflow.test.js",

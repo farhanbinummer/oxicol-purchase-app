@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Raw Materials</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .rm-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .rm-bar input[type=search] { flex: 1 1 240px; max-width: 380px; }
+    .rm-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--s3); } .rm-chips button { min-height: 36px; padding: 0 14px; border-radius: 999px; }
+    .rm-chips button[aria-pressed=true] { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .rm-num { white-space: nowrap; font-variant-numeric: tabular-nums; } .rm-sel { min-width: 44px; } .rm-sel input { width: 20px; height: 20px; }
+    .rm-warn { color: var(--warn); font-weight: 600; } .rm-off { color: var(--text-2); } tr.rm-off-row td { opacity: .65; }
+    .rm-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 var(--s3); padding: 10px 12px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 10px; }
+    .rm-form { display: grid; gap: 10px; } .rm-form label { font-weight: 600; } .rm-form input[type=text], .rm-form input[type=number], .rm-form select { width: 100%; }
+    .rm-check { display: flex; gap: 8px; align-items: center; } .rm-check input { width: 20px; height: 20px; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="recipes.html">Recipes</a></p>
+  <h1>Raw Materials</h1>
+  <p class="oxi-page-sub">The list people choose from when they type on a purchase order or a production request. Fix names and units, or switch a material off so it is no longer offered.</p>
+  <p id="message" role="status"></p>
+  <div id="page" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    let DATA = null, filter = 'all', q = '', chosen = new Set();
+    function note(text, ok) { const m = $('message'); m.textContent = text; m.className = text ? (ok ? 'success' : 'error') : ''; if (text && !ok) m.scrollIntoView({ block: 'nearest' }); }
+
+    function field(label, input, id) { const w = el('div'); const l = el('label', null, label); input.id = id; l.htmlFor = id; w.append(l, input); return w; }
+    function materialDialog(m) {
+      const adding = !m, dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'rmT'); const f = el('form', 'rm-form'); f.method = 'dialog';
+      const h = el('h3', null, adding ? 'Add a raw material' : 'Edit ' + m.code); h.id = 'rmT'; f.appendChild(h);
+      const code = el('input'); code.type = 'text'; code.maxLength = 30; if (adding) f.appendChild(field('Item code (from the billing software)', code, 'rmCode'));
+      const name = el('input'); name.type = 'text'; name.maxLength = 200; name.value = adding ? '' : m.name; f.appendChild(field('Name', name, 'rmName'));
+      const unit = el('select'); const u0 = el('option', null, adding || !m.unit ? 'Choose a unit' : m.unit); u0.value = ''; unit.appendChild(u0);
+      DATA.units.forEach(u => { const o = el('option', null, u); o.value = u; if (!adding && m.unit === u) o.selected = true; unit.appendChild(o); }); if (!adding && m.unit) u0.remove(); f.appendChild(field('Unit', unit, 'rmUnit'));
+      const cat = el('select'); DATA.categories.forEach(c => { const o = el('option', null, c); o.value = c; if (!adding && m.category === c) o.selected = true; cat.appendChild(o); }); f.appendChild(field('Category', cat, 'rmCat'));
+      const hsn = el('input'); hsn.type = 'text'; hsn.inputMode = 'numeric'; hsn.maxLength = 8; hsn.value = adding ? '' : (m.hsn_code || ''); f.appendChild(field('HSN code (4 to 8 digits, optional)', hsn, 'rmHsn'));
+      const gst = el('input'); gst.type = 'number'; gst.min = '0'; gst.max = '40'; gst.step = 'any'; gst.value = adding || m.gst_rate == null ? '' : m.gst_rate; f.appendChild(field('GST rate % (optional)', gst, 'rmGst'));
+      const act = el('input'); act.type = 'checkbox'; act.id = 'rmAct'; act.checked = adding ? true : m.active; const al = el('label', 'rm-check'); al.htmlFor = 'rmAct'; al.append(act, el('span', null, 'Offered when people type (switch off to hide it)')); f.appendChild(al);
+      if (!adding && m.recipe_lines) f.appendChild(el('p', 'oxi-section-note', 'Used in ' + m.recipe_lines + ' recipe line' + (m.recipe_lines === 1 ? '' : 's') + '. Changing the name changes it there too; switching it off does not remove it from recipes.'));
+      const err = el('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const row = el('div', 'row');
+      const no = el('button', 'oxi-btn-secondary', 'Cancel'); no.type = 'button'; no.onclick = () => dlg.close(); const ok = el('button', null, adding ? 'Add' : 'Save'); ok.type = 'submit'; row.append(no, ok); f.append(err, row); dlg.appendChild(f); document.body.appendChild(dlg);
+      const back = document.activeElement;
+      f.onsubmit = async (e) => {
+        e.preventDefault(); err.hidden = true; ok.disabled = true;
+        const body = { name: name.value, unit: unit.value, category: cat.value, hsn_code: hsn.value, gst_rate: gst.value, active: act.checked };
+        if (adding) body.code = code.value;
+        const r = adding ? await api('/api/admin/materials', 'POST', body) : await api('/api/admin/materials/' + m.id, 'PUT', body);
+        ok.disabled = false; if (!r.success) { err.textContent = r.error || 'Could not save.'; err.hidden = false; return; }
+        dlg.close(); note(adding ? 'Added.' : 'Saved.', true); load();
+      };
+      dlg.addEventListener('close', () => { dlg.remove(); if (back && document.contains(back)) back.focus(); }); dlg.showModal(); (adding ? code : name).focus();
+    }
+
+    function render() {
+      const page = $('page'); page.innerHTML = ''; page.setAttribute('aria-busy', 'false'); const t = DATA.totals;
+      const chips = el('div', 'rm-chips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Show');
+      [['all', 'All (' + t.total + ')'], ['no_unit', 'No unit yet (' + t.no_unit + ')'], ['off', 'Switched off (' + t.off + ')']].forEach(([k, label]) => { const b = el('button', 'oxi-btn-secondary', label); b.type = 'button'; b.setAttribute('aria-pressed', String(filter === k)); b.onclick = () => { filter = k; chosen = new Set(); load(); }; chips.appendChild(b); });
+      const bar = el('div', 'rm-bar'); const s = el('input'); s.type = 'search'; s.id = 'rmSearch'; s.placeholder = 'Search by name or code'; s.value = q; s.setAttribute('aria-label', 'Search raw materials'); s.onkeydown = (e) => { if (e.key === 'Enter') { q = s.value.trim(); load(); } };
+      const go = el('button', 'oxi-btn-secondary', 'Search'); go.type = 'button'; go.onclick = () => { q = s.value.trim(); load(); };
+      const add = el('button', null, 'Add a material'); add.type = 'button'; add.onclick = () => materialDialog(null); bar.append(s, go, add);
+      page.append(chips, bar);
+      const rows = DATA.materials, noUnit = rows.filter(r => !r.unit);
+      if (noUnit.length) {
+        const bulk = el('div', 'rm-bulk'); bulk.appendChild(el('span', null, 'Give the same unit to the ticked materials that have none:'));
+        const us = el('select'); us.setAttribute('aria-label', 'Unit to set'); DATA.units.forEach(u => { const o = el('option', null, u); o.value = u; us.appendChild(o); });
+        const set = el('button', null, 'Set unit for ' + chosen.size + ' selected'); set.type = 'button'; set.disabled = !chosen.size; bulk.append(us, set); bulk.id = 'rmBulk';
+        set.onclick = async () => { set.disabled = true; const r = await api('/api/admin/materials/set-unit', 'POST', { ids: [...chosen], unit: us.value }); if (!r.success) { note(r.error || 'Could not set the units.', false); set.disabled = false; return; } chosen = new Set(); note('Unit set for ' + r.changed + ' material' + (r.changed === 1 ? '' : 's') + '.', true); load(); };
+        page.appendChild(bulk);
+      }
+      if (!rows.length) page.appendChild(el('p', 'oxi-section-note', 'Nothing found.')); else {
+        if (DATA.materials.length >= 400) page.appendChild(el('p', 'oxi-section-note', 'The first 400 are shown: search to narrow the list.'));
+        const w = el('div', 'oxi-table-scroll'); const tb = el('table'); tb.appendChild(el('caption', 'oxi-sr-only', 'Raw materials'));
+        const hr = el('tr'); const th0 = el('th', 'rm-sel'); th0.scope = 'col'; hr.appendChild(th0);
+        ['Code', 'Name', 'Unit', 'Category', 'HSN', 'GST %', 'In recipes', 'Status', ''].forEach(x => { const th = el('th', null, x); th.scope = 'col'; hr.appendChild(th); }); const hd = el('thead'); hd.appendChild(hr); tb.appendChild(hd);
+        const body = el('tbody');
+        rows.forEach(r => {
+          const tr = el('tr', r.active ? '' : 'rm-off-row'); const td = el('td', 'rm-sel');
+          if (!r.unit) { const cb = el('input'); cb.type = 'checkbox'; cb.checked = chosen.has(r.id); cb.setAttribute('aria-label', 'Select ' + r.name); cb.onchange = () => { cb.checked ? chosen.add(r.id) : chosen.delete(r.id); const b = document.querySelector('#rmBulk button'); if (b) { b.textContent = 'Set unit for ' + chosen.size + ' selected'; b.disabled = !chosen.size; } }; td.appendChild(cb); }
+          tr.appendChild(td);
+          tr.append(el('td', 'rm-num', r.code), el('td', null, r.name), el('td', r.unit ? '' : 'rm-warn', r.unit || 'not set'), el('td', null, r.category), el('td', 'rm-num', r.hsn_code || '-'), el('td', 'rm-num', r.gst_rate == null ? '-' : r.gst_rate), el('td', 'rm-num', r.recipe_lines || '-'), el('td', r.active ? '' : 'rm-off', r.active ? 'Active' : 'Switched off'));
+          const act = el('td'); const e = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Edit'); e.type = 'button'; e.setAttribute('aria-label', 'Edit ' + r.name); e.onclick = () => materialDialog(r); act.appendChild(e); tr.appendChild(act); body.appendChild(tr);
+        });
+        tb.appendChild(body); w.appendChild(tb); page.appendChild(w);
+      }
+      page.appendChild(el('p', 'oxi-section-note', 'The item code comes from the billing software and is not changed here. To take a material out of the app completely, use Remove Data (it cannot be removed while a recipe uses it: switch it off instead).'));
+    }
+    async function load() {
+      const d = await api('/api/admin/materials?filter=' + filter + '&q=' + encodeURIComponent(q));
+      if (!d.success) { $('page').innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load this page. Only administrators can open it.')); $('page').appendChild(e); return; }
+      DATA = d; chosen = new Set([...chosen].filter(id => d.materials.some(r => r.id === id && !r.unit))); render();
+    }
+    load().catch(() => note('Could not reach the server.', false));
+  </script>
+</body>
+</html>
