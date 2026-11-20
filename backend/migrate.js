@@ -870,6 +870,14 @@ const STEPS = [
       await db.query('DROP TRIGGER IF EXISTS trg_set_po_ref ON purchase_orders');
       await db.query('CREATE TRIGGER trg_set_po_ref BEFORE INSERT ON purchase_orders FOR EACH ROW EXECUTE FUNCTION set_po_ref()');
     }
+  },
+  {
+    // Orders deleted before the request was put back left it saying "PO raised" with no order behind it.
+    name: '036_reset_orphan_po_raised',
+    run: async (db) => {
+      await db.query("UPDATE production_indents SET status = 'approved' WHERE status = 'po_raised' AND NOT EXISTS (SELECT 1 FROM po_source_links l WHERE l.source_type = 'production' AND l.source_id = production_indents.id)");
+      await db.query("UPDATE branch_stock_requests SET status = 'approved' WHERE status = 'po_raised' AND NOT EXISTS (SELECT 1 FROM po_source_links l WHERE l.source_type = 'branch' AND l.source_id = branch_stock_requests.id)");
+    }
   }
 ];
 
