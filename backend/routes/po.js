@@ -339,7 +339,20 @@ router.delete('/:id', requirePermission(KEYS.PO_DELETE), async (req, res) => {
         !['created', 'payment_pending'].includes(cur.rows[0].status)) {
       return fail(res, 400, 'Cannot delete: this PO already has a payment or goods receipt');
     }
-    await pool.query('DELETE FROM purchase_orders WHERE id = $1', [id]); // items cascade
+    // a request or production request whose only order is this one is waiting for an order again
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const links = (await client.query('SELECT DISTINCT source_type, source_id FROM po_source_links WHERE po_id = $1', [id])).rows;
+      await client.query('DELETE FROM purchase_orders WHERE id = $1', [id]); // items and links go with it
+      for (const l of links) {
+        const left = (await client.query('SELECT 1 FROM po_source_links WHERE source_type = $1 AND source_id = $2 LIMIT 1', [l.source_type, l.source_id])).rowCount;
+        if (left) continue;
+        if (l.source_type === 'branch') await client.query("UPDATE branch_stock_requests SET status = 'approved' WHERE id = $1 AND status = 'po_raised'", [l.source_id]);
+        else await client.query("UPDATE production_indents SET status = 'approved' WHERE id = $1 AND status = 'po_raised'", [l.source_id]);
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
     res.json({ success: true, deleted_po_id: id });
   } catch (err) {
     console.error(err);

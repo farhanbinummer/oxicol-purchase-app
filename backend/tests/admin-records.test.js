@@ -173,3 +173,17 @@ test('several at once need "DELETE n ..." and are all-or-nothing; the audit hist
   const res = await fetch(`${BASE}/api/admin/data/records/audit_log/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok.admin }, body: JSON.stringify({ ids: [1], confirm: 'DELETE', reason: 'try to hide it' }) });
   assert.equal(res.status, 404, 'there is no way to remove audit entries');
 });
+
+test('deleting an order from the order page also puts its production request back to "approved" (and the repair step fixes old leftovers)', async () => {
+  const ind = await mkIndent('po_raised'), sid = await mkSupplier();
+  const po = (await one("INSERT INTO purchase_orders (po_number, supplier_id, subtotal, total_amount, status) VALUES ($1,$2,100,118,'created') RETURNING id", [`${TAG}-PO${++seq}`, sid])).id; made.pos.push(po);
+  await pool.query("INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,'production',$2)", [po, ind.id]);
+  const r = await api(tok.admin, 'DELETE', '/api/po/' + po); assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal((await one('SELECT status FROM production_indents WHERE id = $1', [ind.id])).status, 'approved');
+  // an old leftover: says "PO raised" but no order is behind it
+  const old = await mkIndent('po_raised'), live = await mkIndent('po_raised'), po2 = (await one("INSERT INTO purchase_orders (po_number, supplier_id, subtotal, total_amount, status) VALUES ($1,$2,1,1,'created') RETURNING id", [`${TAG}-PO${++seq}`, sid])).id; made.pos.push(po2);
+  await pool.query("INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,'production',$2)", [po2, live.id]);
+  const step = require('../migrate').STEPS.find(x => x.name === '036_reset_orphan_po_raised'); const cl = await pool.connect(); try { await step.run(cl); } finally { cl.release(); }
+  assert.equal((await one('SELECT status FROM production_indents WHERE id = $1', [old.id])).status, 'approved');
+  assert.equal((await one('SELECT status FROM production_indents WHERE id = $1', [live.id])).status, 'po_raised', 'one with a live order is untouched');
+});
