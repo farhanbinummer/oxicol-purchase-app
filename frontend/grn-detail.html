@@ -46,8 +46,11 @@
   </div>
 
   <script src="common.js"></script>
+  <script src="admin-remove.js"></script>
   <script>
     const id = new URLSearchParams(location.search).get('id');
+    // administrators only: a careful "remove this record" card at the bottom (the server checks again)
+    window.addEventListener('load', () => { const d = document.getElementById('detail'); if (d) oxiAdminRemove({ kind: 'grn', id, mount: d, listHref: 'grn-list.html' }); });
     const set = (i, t) => { document.getElementById(i).textContent = t; };
     const setBadge = (i, status) => { const el = document.getElementById(i); el.innerHTML = ''; el.appendChild(badge(status)); };
 

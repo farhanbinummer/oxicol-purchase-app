@@ -135,3 +135,5 @@ router.post('/notice-log/clear', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.countsFor = countsFor;
+module.exports.summarise = summarise;

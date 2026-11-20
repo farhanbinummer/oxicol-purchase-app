@@ -128,6 +128,7 @@ function svgIcon(name, size) {
     try { const u = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); return u ? JSON.parse(localStorage.getItem(meKey(u.id)) || 'null') : null; } catch (e) { return null; }
   }
   window.oxiMe = cachedMe;
+  window.oxiIsAdmin = () => { const m = cachedMe(); return !!(m && m.is_admin); };
   window.oxiCan = (key) => { const m = cachedMe(); return !!m && (m.is_admin || (m.permissions || []).includes(key)); };
   window.oxiScope = () => { const m = cachedMe(); return m ? m.scope.branches : []; }; // null means every branch
 

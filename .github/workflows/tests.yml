@@ -77,6 +77,9 @@ jobs:
       - name: Remove data tests
         working-directory: backend
         run: npm run test:admin-data
+      - name: Remove any record tests
+        working-directory: backend
+        run: npm run test:admin-records
       - name: TaskFlow summary tests
         working-directory: backend
         run: npm run test:taskflow && node --test tests/taskflow-api.test.js

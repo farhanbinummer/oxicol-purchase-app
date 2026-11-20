@@ -43,8 +43,11 @@
   </div>
 
   <script src="common.js"></script>
+  <script src="admin-remove.js"></script>
   <script>
     const id = new URLSearchParams(location.search).get('id');
+    // administrators only: a careful "remove this record" card at the bottom (the server checks again)
+    window.addEventListener('load', () => { const d = document.getElementById('detail'); if (d) oxiAdminRemove({ kind: 'branch_request', id, mount: d, listHref: 'branch-request-list.html' }); });
     const tile = (label, value) => { const d = document.createElement('div'); d.className = 'oxi-info-tile';
       const s = document.createElement('small'); s.textContent = label; const b = document.createElement('b'); b.textContent = value;
       d.append(s, b); return d; };
