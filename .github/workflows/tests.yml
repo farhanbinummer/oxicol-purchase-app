@@ -92,6 +92,9 @@ jobs:
       - name: PO delivery and tracking tests
         working-directory: backend
         run: npm run test:po-delivery
+      - name: Raw material screen tests
+        working-directory: backend
+        run: npm run test:materials-admin
       - name: TaskFlow summary tests
         working-directory: backend
         run: npm run test:taskflow && node --test tests/taskflow-api.test.js

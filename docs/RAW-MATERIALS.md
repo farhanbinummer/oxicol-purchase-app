@@ -16,7 +16,14 @@ The raw material list from the billing software (SherSoft report, 241 items) is 
 - Running the import again changes nothing and never undoes an administrator's edit.
 - The billing list's category is a single "RAW MATIRIALS" for everything, so no packaging/raw split was inferred for the new items.
 
-**Keeping the list up to date:** an administrator can add a material (Recipes page) or change one through `PUT /api/bom/materials/:id`; switched-off materials (`active = false`) are not offered. A screen for editing the list is not built yet. To load a newer SherSoft export, send it and the list file is regenerated; existing materials are not overwritten.
+**Keeping the list up to date: Master Data, Raw Materials** (administrators only)
+- Search by name or code; chips show **All**, **No unit yet** and **Switched off** with their counts.
+- **Edit** a material: name, unit (Kg, Litre, Nos, Box or Drum), category (Raw material or Packaging), HSN code (4 to 8 digits), GST rate, and whether it is offered when people type. Names are tidied and cannot repeat (capital letters do not matter). The item code comes from the billing software and is not changed.
+- **No unit yet:** tick several and give them all one unit in one step. This only fills empty units; it never changes a unit that is already set.
+- **Switching a material off** hides it from the type-and-choose list. Recipes and old orders that use it are untouched, and it can be switched back on.
+- **Add a material** that is not in the billing list yet (code, name and unit are needed).
+- Every change is in the Audit History with the old and new values. Taking a material out of the app completely is on Remove Data (not possible while a recipe uses it).
+- To load a newer SherSoft export, send it and the list file is regenerated; existing materials are not overwritten.
 
 **New items with no unit yet (39)**
 
