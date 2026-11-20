@@ -90,7 +90,8 @@ test('search: type a few letters, get suggestions; a code or a full name comes f
 });
 test('search: with nothing typed the first ten are listed; the number is capped; switched-off materials are never offered', async () => {
   let r = await api(tok.purchase, 'GET', '/api/catalog/materials/search'); assert.equal(r.materials.length, 10);
-  assert.deepEqual(names(r), [...names(r)].sort((a, b) => a.localeCompare(b)), 'alphabetical');
+  const dbOrder = (await pool.query('SELECT name FROM raw_materials WHERE active ORDER BY name LIMIT 10')).rows.map(x => x.name);
+  assert.deepEqual(names(r), dbOrder, 'alphabetical, in the database\'s own order (it differs between machines: some ignore spaces)');
   r = await api(tok.purchase, 'GET', '/api/catalog/materials/search?limit=500'); assert.equal(r.materials.length, 20);
   r = await api(tok.purchase, 'GET', '/api/catalog/materials/search?q=' + 'x'.repeat(500)); assert.equal(r.status, 200);
   const g = await byCode('R003'); await pool.query('UPDATE raw_materials SET active = false WHERE id = $1', [g.id]);
