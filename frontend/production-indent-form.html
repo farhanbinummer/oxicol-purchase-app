@@ -32,7 +32,7 @@
   <script src="material-picker.js"></script>
   <script>
     const tbody = document.querySelector('#items tbody');
-    function addRow() {
+    function addRow(pre) {
       const tr = document.createElement('tr');
       tr.innerHTML =
         '<td><input class="name" size="24" aria-label="Chemical name: type to search raw materials"></td>' +
@@ -42,11 +42,32 @@
         '<td><select class="pri"><option>low</option><option selected>normal</option><option>high</option><option>urgent</option></select></td>' +
         '<td><button type="button" class="del">X</button></td>';
       tbody.appendChild(tr);
+      if (pre) {                                             // editing: start from what was saved
+        tr.querySelector('.name').value = pre.item_name; tr.querySelector('.qty').value = Number(pre.quantity);
+        const u = tr.querySelector('.unit'); if (![...u.options].some(o => o.value === pre.unit || o.text === pre.unit)) { const o = document.createElement('option'); o.textContent = pre.unit; u.appendChild(o); } u.value = pre.unit;
+        if (pre.required_by) tr.querySelector('.req').value = String(pre.required_by).slice(0, 10); tr.querySelector('.pri').value = pre.priority || 'normal';
+      }
       tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) tr.remove(); };
       oxiMaterialPicker(tr.querySelector('.name'), { onPick: (m) => { const u = tr.querySelector('.unit'); if (m.unit && [...u.options].some(o => o.value === m.unit || o.text === m.unit)) u.value = m.unit; tr.querySelector('.qty').focus(); } });
     }
-    document.getElementById('addRow').onclick = addRow;
-    addRow();
+    document.getElementById('addRow').onclick = () => addRow();
+    const editId = new URLSearchParams(location.search).get('edit');
+    let version = 0;
+    if (editId) {
+      // changing a request that is already raised: only its requester, and only while it is pending (the server checks again)
+      document.getElementById('indForm').hidden = true;
+      document.querySelector('h1').textContent = 'Change production request';
+      api('/api/production-indent/' + encodeURIComponent(editId)).then(d => {
+        if (!d.success || !d.can_edit) {
+          show(d.success ? 'This request can no longer be changed. Only the person who raised it can change it, and only before it is approved.' : d.error, false);
+          const a = document.createElement('a'); a.href = 'production-indent-detail.html?id=' + encodeURIComponent(editId); a.textContent = 'Back to the request'; document.getElementById('message').appendChild(document.createTextNode(' ')); document.getElementById('message').appendChild(a); return;
+        }
+        document.querySelector('h1').textContent = 'Change ' + d.indent.indent_number;
+        document.querySelector('.oxi-page-sub').textContent = 'You can change this request until it is approved. The approver is told when you save.';
+        document.getElementById('head').value = d.indent.production_head; version = d.indent.edit_count;
+        tbody.innerHTML = ''; d.items.forEach(i => addRow(i)); document.getElementById('saveBtn').textContent = 'Save changes'; document.getElementById('indForm').hidden = false;
+      });
+    } else addRow();
 
     document.getElementById('indForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -59,6 +80,12 @@
         priority: tr.querySelector('.pri').value
       }));
       const btn = document.getElementById('saveBtn'); btn.disabled = true;
+      if (editId) {
+        const r = await api('/api/production-indent/' + encodeURIComponent(editId), 'PUT', { production_head: document.getElementById('head').value, items, version });
+        btn.disabled = false;
+        if (r.success) location.href = 'production-indent-detail.html?id=' + encodeURIComponent(editId) + '&saved=1'; else show('Error: ' + r.error, false);
+        return;
+      }
       const d = await api('/api/production-indent/create', 'POST', {
         production_head: document.getElementById('head').value, items
       });
