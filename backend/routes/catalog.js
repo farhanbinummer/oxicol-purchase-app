@@ -1,5 +1,6 @@
 // routes/catalog.js - finished-product master data.
 //   GET    /api/catalog/products/search?q=     suggestions while typing (active products only)
+//   GET    /api/catalog/materials/search?q=    raw material suggestions while typing
 //   GET    /api/catalog/products               full list with recipe status
 //   POST   /api/catalog/products               (admin) add a product
 //   PUT    /api/catalog/products/:id           (admin) edit name/category/pack size/active
@@ -49,6 +50,16 @@ router.get('/products/search', requirePermission(KEYS.CATALOG_VIEW), async (req,
     res.json({ success: true, products: hits.map(({ id, code, name, category, pack_size, base_unit, has_recipe, matched_via }) =>
       ({ id, code, name, category, pack_size, base_unit, has_recipe, matched_via })) });
   } catch (err) { console.error(err); fail(res, 500, 'Could not search products'); }
+});
+
+// Raw material suggestions while typing (production requests and purchase orders). Open to anyone who can see the catalogue or
+// raise a production request or a purchase order.
+const { can } = require('../access');
+const { searchMaterials } = require('../materials');
+const needMaterialSearch = (req, res, next) => ([KEYS.CATALOG_VIEW, KEYS.PO_CREATE, KEYS.PRODUCTION_INDENT_CREATE].some(k => can(req.access, k)) ? next() : fail(res, 403, 'Your role is not allowed to do this'));
+router.get('/materials/search', needMaterialSearch, async (req, res) => {
+  try { res.json({ success: true, materials: await searchMaterials(pool, req.query.q, req.query.limit) }); }
+  catch (err) { console.error(err); fail(res, 500, 'Could not search raw materials'); }
 });
 
 router.get('/products', requirePermission(KEYS.CATALOG_VIEW), async (req, res) => {

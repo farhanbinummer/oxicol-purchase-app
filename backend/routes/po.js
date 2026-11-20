@@ -12,6 +12,7 @@ const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../u
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const { can, fieldAccess, redactPo, redactItems } = require('../access');
+const { resolveMaterials } = require('../materials');
 const router = express.Router();
 
 // Order of statuses. A PO can only move FORWARD in this list.
@@ -72,15 +73,18 @@ router.post('/create', requirePermission(KEYS.PO_CREATE), async (req, res) => {
       return fail(res, 400, 'Supplier not found');
     }
 
+    // A line may carry a raw material chosen from the list: its name (and HSN code) then come from the list, so one material is always spelt one way
+    const mats = await resolveMaterials(client, items);
+    if (mats.error) { await client.query('ROLLBACK'); return fail(res, 400, mats.error); }
     // Calculate line amounts and totals on the server (never trust the browser's maths)
-    const lines = items.map((it) => ({
-      item_name: String(it.item_name).trim(),
+    const lines = items.map((it) => { const m = it.material_id ? mats.map.get(Number(it.material_id)) : null; return ({
+      item_name: m ? m.name : String(it.item_name).trim(),
       quantity: Number(it.quantity),
       unit: String(it.unit).trim(),
       rate: Number(it.rate),
-      hsn_code: it.hsn_code ? String(it.hsn_code).trim() : null,
+      hsn_code: it.hsn_code ? String(it.hsn_code).trim() : (m && m.hsn_code ? m.hsn_code : null),
       line_amount: round2(Number(it.quantity) * Number(it.rate))
-    }));
+    }); });
     const subtotal = round2(lines.reduce((sum, l) => sum + l.line_amount, 0));
     const cgst = round2(subtotal * CGST_RATE / 100);
     const sgst = round2(subtotal * SGST_RATE / 100);

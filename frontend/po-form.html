@@ -46,6 +46,7 @@
     <p><button type="submit" id="saveBtn">Save PO</button></p>
   </form>
   <script src="common.js"></script>
+  <script src="material-picker.js"></script>
 
   <script>
     // money() / show() come from common.js.
@@ -66,7 +67,7 @@
     function addRow() {
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><input class="name" size="28"></td>' +
+        '<td><input class="name" size="28" aria-label="Item name: type to search raw materials"></td>' +
         '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
         '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
         '<td><input class="rate" type="number" min="0" step="any" style="width:90px"></td>' +
@@ -75,6 +76,8 @@
       tbody.appendChild(tr);
       tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) { tr.remove(); recalc(); } };
       tr.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc));
+      // type a few letters and choose the raw material: its unit is filled in when the list has one (you can still change it)
+      oxiMaterialPicker(tr.querySelector('.name'), { onPick: (m) => { const u = tr.querySelector('.unit'); if (m.unit && [...u.options].some(o => o.value === m.unit || o.text === m.unit)) u.value = m.unit; tr.querySelector('.qty').focus(); } });
     }
 
     // Updates line amounts and totals on screen (the server recalculates on save).
@@ -100,6 +103,7 @@
       e.preventDefault();
       const items = [...tbody.rows].map(tr => ({
         item_name: tr.querySelector('.name').value,
+        material_id: tr.querySelector('.name').dataset.materialId || undefined,
         quantity: tr.querySelector('.qty').value,
         unit: tr.querySelector('.unit').value,
         rate: tr.querySelector('.rate').value

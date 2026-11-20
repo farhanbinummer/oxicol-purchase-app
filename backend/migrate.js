@@ -773,6 +773,23 @@ const STEPS = [
       await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipt_items_item ON branch_receipt_items(request_item_id)');
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('branch', 'branch_request.confirm_delivery'), ('manager', 'branch_request.confirm_delivery') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // The raw material list from the billing software (database/raw-materials-sher.json), so people can type and choose a material.
+    // Materials already in the app (the recipes use them) are NEVER renamed or re-united: only their HSN code and GST rate are filled in
+    // when empty. New materials are added with the unit the billing list gives; where it gives none the unit stays empty (nothing is
+    // guessed) and an administrator sets it in Recipes. Safe to run again.
+    name: '031_raw_material_list',
+    async run(db) {
+      await db.query('ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(10), ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5,2)');
+      const list = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'database', 'raw-materials-sher.json'), 'utf8'));
+      for (const m of list) {
+        await db.query(
+          `INSERT INTO raw_materials (code, name, unit, category, hsn_code, gst_rate) VALUES ($1,$2,$3,'Raw material',$4,$5)
+           ON CONFLICT (code) DO UPDATE SET hsn_code = COALESCE(raw_materials.hsn_code, EXCLUDED.hsn_code), gst_rate = COALESCE(raw_materials.gst_rate, EXCLUDED.gst_rate)`,
+          [String(m.code).slice(0, 30), String(m.name).slice(0, 200), String(m.unit || '').slice(0, 20), m.hsn ? String(m.hsn).slice(0, 10) : null, m.gst == null ? null : Number(m.gst)]);
+      }
+    }
   }
 ];
 
