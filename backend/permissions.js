@@ -46,6 +46,7 @@ const KEYS = {
 
   THREE_WAY_MATCH_VIEW: 'three_way_match.view',
   SUPPLIERS_VIEW: 'suppliers.view',
+  SUPPLIERS_MANAGE: 'suppliers.manage', // add and edit suppliers, switch them on or off
 
   TALLY_SYNC: 'tally.sync',
   TALLY_VIEW_LOG: 'tally.view_log',
@@ -115,6 +116,7 @@ const CATALOG = [
   { key: KEYS.THREE_WAY_MATCH_VIEW, module: 'Invoice & 3-Way Match', action: "View a PO's match history" },
 
   { key: KEYS.SUPPLIERS_VIEW, module: 'Suppliers', action: 'View supplier list' },
+  { key: KEYS.SUPPLIERS_MANAGE, module: 'Suppliers', action: 'Add and edit suppliers, and switch them on or off' },
 
   { key: KEYS.TALLY_SYNC, module: 'Tally Sync', action: 'Sync a PO to Tally (mock log)' },
   { key: KEYS.TALLY_VIEW_LOG, module: 'Tally Sync', action: 'View the Tally sync log' },
@@ -157,7 +159,7 @@ const KINDS = {
   'payment.create': 'create', 'payment.view_by_po': 'view', 'payment.view_all': 'view', 'payment.approve': 'approve',
   'grn.create': 'create', 'grn.view': 'view', 'grn.approve': 'approve',
   'invoice.upload': 'create', 'invoice.view': 'view', 'invoice.match': 'edit',
-  'three_way_match.view': 'view', 'suppliers.view': 'view',
+  'three_way_match.view': 'view', 'suppliers.view': 'view', 'suppliers.manage': 'edit',
   'tally.sync': 'export', 'tally.view_log': 'view',
   'dashboard.view': 'view', 'catalog.view': 'view', 'catalog.map_items': 'edit',
   'field.prices': 'field', 'field.supplier_bank': 'field',
@@ -186,7 +188,7 @@ const DEFAULTS = {
     KEYS.PO_CREATE, KEYS.PO_VIEW, KEYS.PO_UPDATE_STATUS, KEYS.PO_UPDATE_DELIVERY, KEYS.PO_DELETE,
     KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW,
-    KEYS.SUPPLIERS_VIEW, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW,
+    KEYS.SUPPLIERS_VIEW, KEYS.SUPPLIERS_MANAGE, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW,
     KEYS.FIELD_PRICES, KEYS.FIELD_SUPPLIER_BANK
   ],
   accounts: [
@@ -205,7 +207,7 @@ const DEFAULTS = {
     KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE, KEYS.BRANCH_REQUEST_CONFIRM,
     KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_APPROVE,
     KEYS.PO_VIEW, KEYS.PO_UPDATE_DELIVERY, KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
-    KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW, KEYS.SUPPLIERS_VIEW,
+    KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW, KEYS.SUPPLIERS_VIEW, KEYS.SUPPLIERS_MANAGE,
     KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.FIELD_PRICES
   ]
 };

@@ -820,6 +820,16 @@ const STEPS = [
     }
   },
   {
+    // Suppliers can be added and edited in the app: an optional GST number (unique when given) and the key suppliers.manage for
+    // Purchase and the Manager. Existing suppliers are untouched.
+    name: '033_suppliers_manage',
+    async run(db) {
+      await db.query('ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS gst_number VARCHAR(15)');
+      await db.query('CREATE UNIQUE INDEX IF NOT EXISTS ux_suppliers_gst ON suppliers(gst_number) WHERE gst_number IS NOT NULL');
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'suppliers.manage'), ('manager', 'suppliers.manage') ON CONFLICT DO NOTHING");
+    }
+  },
+  {
     // A production request can be edited by the person who raised it until it is approved. edit_count is the version an approver saw.
     name: '034_indent_edit',
     async run(db) {

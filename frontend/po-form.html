@@ -21,6 +21,7 @@
       <label>Supplier<br>
         <select id="supplier" required><option value="">Loading...</option></select>
       </label>
+      <a href="suppliers.html?add=1" id="addSupplier" hidden style="margin-left:10px">+ Add a new supplier</a>
     </p>
     <p>
       <label>Delivery date<br><input type="date" id="delivery"></label>
@@ -62,6 +63,9 @@
         sel.appendChild(o);
       });
     }).catch(() => show('Could not load suppliers. Is the server running?', false));
+
+    // Purchase and the Manager can add a supplier that is not in the list yet
+    api('/api/workspace/me').then(me => { if (me.success && (me.is_admin || (me.permissions || []).includes('suppliers.manage'))) document.getElementById('addSupplier').hidden = false; });
 
     // Adds one empty item row to the table.
     function addRow() {

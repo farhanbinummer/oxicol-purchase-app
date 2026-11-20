@@ -15,6 +15,7 @@
     "test:materials": "node --test tests/materials.test.js",
     "test:materials-admin": "node --test tests/materials-admin.test.js",
     "test:po-delivery": "node --test tests/po-delivery.test.js",
+    "test:suppliers": "node --test tests/suppliers.test.js",
     "test:indent-edit": "node --test tests/indent-edit.test.js",
     "test:branch-delivery": "node --test tests/branch-delivery.test.js",
     "test:admin-records": "node --test tests/admin-records.test.js",
