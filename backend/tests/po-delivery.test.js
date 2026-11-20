@@ -104,7 +104,7 @@ test('dispatch details: transporter, tracking number, vehicle, date and link are
   assert.equal(ok.status, 200, JSON.stringify(ok)); const r = await row(p.id);
   assert.deepEqual([r.transporter, r.tracking_number, r.vehicle_number, r.dispatch_date, r.tracking_url, r.status], ['VRL Logistics', 'LR 778-12/A', 'KL 10 AB 1234', d(-1), 'https://track.example.test/lr?no=77812', 'payment_done'], 'spaces tidied, the vehicle in capitals, the status untouched');
   const e = (await api(tok.store, 'GET', '/api/workspace/expected-deliveries')).deliveries.find(x => x.id === p.id);
-  assert.equal(e.tracking_number, 'LR 778-12/A'); assert.equal(e.transporter, 'VRL Logistics'); assert.equal(e.vehicle_number, 'KL 10 AB 1234'); assert.equal(e.dispatch_date, d(-1)); assert.equal(e.tracking_url, 'https://track.example.test/lr?no=77812');
+  assert.equal(e.po_date, d(-4), 'the order date comes too, so the date form can stop earlier dates'); assert.equal(e.tracking_number, 'LR 778-12/A'); assert.equal(e.transporter, 'VRL Logistics'); assert.equal(e.vehicle_number, 'KL 10 AB 1234'); assert.equal(e.dispatch_date, d(-1)); assert.equal(e.tracking_url, 'https://track.example.test/lr?no=77812');
   const log = (await get(tok.store, p.id)).delivery_log.find(x => x.kind === 'dispatch'); assert.equal(log.by_name, 'Test purchase'); assert.equal(log.new_values.tracking_number, 'LR 778-12/A');
   assert.equal((await pool.query("SELECT COUNT(*)::int AS n FROM audit_log WHERE action = 'po.dispatch' AND entity_id = $1", [p.id])).rows[0].n, 1);
 });

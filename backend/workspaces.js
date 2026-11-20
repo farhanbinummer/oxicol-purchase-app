@@ -82,7 +82,7 @@ function expectedWhere(when) {
 async function expectedDeliveries(when, limit) {
   const r = await pool.query(
     `SELECT po.id, po.po_number, to_char(po.delivery_date,'YYYY-MM-DD') AS delivery_date, po.status, s.name AS supplier_name,
-            po.transporter, po.tracking_number, po.vehicle_number, to_char(po.dispatch_date,'YYYY-MM-DD') AS dispatch_date, po.tracking_url,
+            to_char(po.po_date,'YYYY-MM-DD') AS po_date, po.transporter, po.tracking_number, po.vehicle_number, to_char(po.dispatch_date,'YYYY-MM-DD') AS dispatch_date, po.tracking_url,
             (CURRENT_DATE - po.delivery_date) AS days_late,
             (SELECT COUNT(*)::int FROM po_items i WHERE i.po_id = po.id) AS lines,
             EXISTS (SELECT 1 FROM grn_notes g WHERE g.po_id = po.id AND g.status = 'rejected') AS earlier_rejected
