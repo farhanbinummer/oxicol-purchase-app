@@ -12,7 +12,7 @@
   <style>
     #dlvList { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 18px; margin: 0 0 10px; } #dlvList div { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
     #dlvList dt { font-size: 12px; color: var(--text-2); } #dlvList dd { margin: 2px 0 0; font-weight: 600; overflow-wrap: anywhere; }
-    @media print { #dlvActions, #dlvLog, #deliveryBox h4 { display: none; } }
+    @media print { #dlvActions, #dlvLog, #deliveryBox h4, #printRow { display: none; } }
   </style>
 </head>
 <body>
@@ -35,6 +35,8 @@
       <tr><td>Status</td><td id="status"></td></tr>
       <tr><td>Notes</td><td id="notes"></td></tr>
     </table>
+
+    <p id="printRow" hidden><a id="printLink" class="oxi-view-btn" target="_blank" rel="noopener">Print purchase order (PDF)</a></p>
 
     <section id="deliveryBox" aria-labelledby="dlvTitle" style="margin:16px 0">
       <h3 id="dlvTitle">Delivery and tracking</h3>
@@ -166,6 +168,8 @@
         set('podate', day(po.po_date));
         set('delivery', day(po.delivery_date) || 'Not set');
         renderDelivery(d);
+        // the printed purchase order shows prices, so only people with price access are offered it
+        if (d.fields && d.fields.prices) { const a = document.getElementById('printLink'); a.href = 'po-print.html?id=' + encodeURIComponent(id); document.getElementById('printRow').hidden = false; }
         setBadge('status', po.status);
         rebuildStatusOptions(po.status);
         set('notes', po.notes || '-');

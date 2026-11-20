@@ -23,7 +23,7 @@ const IFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 router.get('/', requirePermission(KEYS.SUPPLIERS_VIEW), async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, contact_person, phone, email, gst_number, bank_name, account_number, ifsc_code " +
+      "SELECT id, name, contact_person, phone, email, address, gst_number, bank_name, account_number, ifsc_code " +
       "FROM suppliers WHERE status = 'active' ORDER BY name"
     );
     const fa = fieldAccess(req.access);
@@ -39,7 +39,7 @@ router.get('/list', requirePermission(KEYS.SUPPLIERS_VIEW), async (req, res) => 
   try {
     const q = tidy(req.query.q, 80), filter = req.query.filter === 'off' ? 'off' : 'all', fa = fieldAccess(req.access);
     const rows = (await pool.query(
-      `SELECT s.id, s.name, s.contact_person, s.phone, s.email, s.gst_number, s.bank_name, s.account_number, s.ifsc_code, s.status, s.created_at::date::text AS created,
+      `SELECT s.id, s.name, s.contact_person, s.phone, s.email, s.address, s.gst_number, s.bank_name, s.account_number, s.ifsc_code, s.status, s.created_at::date::text AS created,
               (SELECT COUNT(*)::int FROM purchase_orders po WHERE po.supplier_id = s.id) AS orders, (SELECT COUNT(*)::int FROM payments y WHERE y.supplier_id = s.id) AS payments
          FROM suppliers s WHERE ($1 = '' OR s.name ILIKE '%' || $1 || '%' OR s.gst_number ILIKE '%' || $1 || '%' OR s.contact_person ILIKE '%' || $1 || '%' OR s.phone ILIKE '%' || $1 || '%')
           AND ($2 = 'all' OR s.status = 'inactive') ORDER BY s.name LIMIT 400`, [q, filter])).rows;
@@ -56,6 +56,12 @@ function clean(b, access, creating) {
   if (b.contact_person !== undefined) set.contact_person = tidy(b.contact_person, 100) || null;
   if (b.phone !== undefined) { const p = tidy(b.phone, 20); if (p && (!/^[0-9+()\- ]+$/.test(p) || p.replace(/\D/g, '').length < 7)) return { error: 'The phone number can only have digits, spaces, + - ( ) and needs at least 7 digits' }; set.phone = p || null; }
   if (b.email !== undefined) { const e = tidy(b.email, 150).toLowerCase(); if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return { error: 'That email address does not look right' }; set.email = e || null; }
+  if (b.address !== undefined) {
+    const lines = String(b.address == null ? '' : b.address).split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (lines.length > 6) return { error: 'The address can have at most 6 lines' };
+    if (lines.some(l => l.length > 80)) return { error: 'Each address line can have at most 80 characters (use a new line for the next part)' };
+    set.address = lines.join('\n') || null;
+  }
   if (b.gst_number !== undefined) { const g = tidy(b.gst_number, 20).toUpperCase().replace(/\s/g, ''); if (g && !GSTIN.test(g)) return { error: 'The GST number must be 15 characters, like 32ABCDE1234F1Z5' }; set.gst_number = g || null; }
   const sentBank = BANK.filter(k => b[k] !== undefined && String(b[k]).trim() !== '');
   if ((sentBank.length || BANK.some(k => b[k] !== undefined)) && !fa.supplier_bank) { if (sentBank.length) return { error: 'You do not have access to bank details', status: 403 }; }

@@ -226,6 +226,7 @@ function svgIcon(name, size) {
   // Builds the sidebar + top bar shell around whatever the page already put in <body>.
   document.addEventListener('DOMContentLoaded', () => {
     if (PUBLIC_PAGES.includes(page)) return;
+    if (document.documentElement.hasAttribute('data-bare')) return;        // a printable sheet that must not get the sidebar and top bar (the purchase order printout)
     let user = null;
     try { user = JSON.parse(localStorage.getItem('oxicol_user') || 'null'); } catch (e) {}
     if (!user) return;

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en" data-bare>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Purchase Order</title>
+  <script src="theme-init.js"></script>
+  <style>
+    /* The printed purchase order: a copy of the company's own template. Everything on the sheet is placed by measurement (points on an
+       A4 page), so what prints is the template, not an approximation. Do not restyle it. */
+    @page { size: A4; margin: 0; }
+    html, body { margin: 0; padding: 0; background: #d9dde3; }
+    .bar { position: sticky; top: 0; z-index: 5; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 14px; background: #142235; color: #fff; font: 14px/1.3 system-ui, Arial, sans-serif; }
+    .bar a { color: #fff; } .bar button { min-height: 38px; padding: 0 16px; border: 0; border-radius: 8px; background: #0f766e; color: #fff; font: 600 14px system-ui, Arial, sans-serif; cursor: pointer; }
+    .bar .msg { margin-left: auto; opacity: .9; }
+    #err { margin: 24px auto; max-width: 560px; padding: 14px 16px; background: #fff; border: 1px solid #b91c1c; color: #b91c1c; border-radius: 10px; font: 15px system-ui, Arial, sans-serif; }
+    .sheet { position: relative; width: 594.75pt; height: 841.5pt; background: #fff; margin: 14px auto; overflow: hidden; color: #000; box-shadow: 0 1px 8px rgba(0, 0, 0, .25);
+             font-family: Arial, "Liberation Sans", Helvetica, sans-serif; break-after: page; }
+    .sheet:last-of-type { break-after: auto; }
+    .t { position: absolute; white-space: pre; line-height: 1; margin: 0; padding: 0; }
+    .hl { position: absolute; height: 0.24pt; background: #000; } .vl { position: absolute; width: 0.24pt; background: #000; }
+    .logo { position: absolute; display: block; }
+    @media print {
+      html, body { background: #fff; }
+      .bar, #err { display: none !important; }
+      .sheet { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bar" id="bar"><a href="po-list.html">&larr; Purchase orders</a> <button type="button" id="printBtn">Print / Save as PDF</button>
+    <span class="msg">In the print window choose &ldquo;Save as PDF&rdquo; to get the file. Turn off &ldquo;Headers and footers&rdquo;.</span></div>
+  <div id="sheets" aria-live="polite"></div>
+
+  <script src="common.js"></script>
+  <script>
+    const PAGE_W = 594.75, BASE = 84.65;            // BASE: where the text baseline sits inside a line box, in percent of the font size (Arial/Liberation Sans)
+    const CAP = 0.716;                              // cap height of Arial as a fraction of the font size
+    const mctx = document.createElement('canvas').getContext('2d');
+    const widthPt = (text, size, bold, italic) => { mctx.font = (italic ? 'italic ' : '') + (bold ? 'bold ' : '') + size + 'pt Arial, "Liberation Sans", Helvetica, sans-serif'; return mctx.measureText(text).width * 0.75; };
+    function wrap(text, size, bold, maxW) {
+      const out = [];
+      String(text).split('\n').forEach(par => {
+        let line = '';
+        par.split(/\s+/).filter(Boolean).forEach(w => { const t = line ? line + ' ' + w : w; if (!line || widthPt(t, size, bold) <= maxW) line = t; else { out.push(line); line = w; } });
+        out.push(line);
+      });
+      return out;
+    }
+
+    /** One piece of text. y = the top of the capital letters, in points from the top of the page. */
+    function T(sheet, text, o) {
+      if (text === '' || text == null) return;
+      const size = o.size || 9.8, sy = o.sy || 1, e = document.createElement('div'); e.className = 't'; e.textContent = text;
+      e.style.fontSize = size + 'pt'; if (o.b) e.style.fontWeight = '700'; if (o.i) e.style.fontStyle = 'italic';
+      const baseline = o.y + CAP * size * sy, top = baseline - (BASE / 100) * size;
+      e.style.top = top + 'pt';
+      let sx = o.sx || 1;
+      if (o.fit) { const nat = widthPt(text, size, o.b, o.i); if (nat * sx > o.fit) sx = o.fit / nat; }      // squeeze to a fixed width, like the template does for quantities
+      let origin;
+      if (o.r != null) { e.style.right = (PAGE_W - o.r) + 'pt'; origin = '100% ' + BASE + '%'; }
+      else if (o.cx != null) { e.style.left = o.cx + 'pt'; e.style.transform = 'translateX(-50%)'; origin = '50% ' + BASE + '%'; }
+      else { e.style.left = o.x + 'pt'; origin = '0% ' + BASE + '%'; }
+      e.style.transformOrigin = origin;
+      if (sx !== 1 || sy !== 1) e.style.transform = (e.style.transform ? e.style.transform + ' ' : '') + 'scale(' + sx + ',' + sy + ')';
+      sheet.appendChild(e);
+    }
+    // Table lines are drawn as one vector drawing (a browser draws a thin CSS border far too thick when printing; a stroke keeps its 0.24 pt width).
+    // y / x are the start of the line's pixel on the scan; the stroke is centred on it.
+    const HAIR = 0.24;
+    const H = (sheet, y, x0, x1) => { (sheet._d = sheet._d || []).push('M' + x0.toFixed(3) + ' ' + (y + HAIR / 2).toFixed(3) + 'H' + x1.toFixed(3)); };
+    const V = (sheet, x, y0, y1) => { (sheet._d = sheet._d || []).push('M' + (x + HAIR / 2).toFixed(3) + ' ' + y0.toFixed(3) + 'V' + y1.toFixed(3)); };
+    function drawLines(sheet) {
+      const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'), path = document.createElementNS(NS, 'path');
+      svg.setAttribute('viewBox', '0 0 ' + PAGE_W + ' 841.5'); svg.setAttribute('width', PAGE_W + 'pt'); svg.setAttribute('height', '841.5pt'); svg.setAttribute('aria-hidden', 'true');
+      svg.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none';
+      path.setAttribute('d', (sheet._d || []).join('')); path.setAttribute('stroke', '#000'); path.setAttribute('stroke-width', HAIR); path.setAttribute('fill', 'none');
+      svg.appendChild(path); sheet.insertBefore(svg, sheet.firstChild);
+    }
+
+    // ---- the frame, exactly as measured on the template ----
+    // Line positions are the template's own, in pixels of its 300 dpi scan (1 px = 0.24 pt), so every line sits where it does on the original.
+    const P = (px) => px * 0.24;
+    function frame(s, last) {
+      const L = 153, R = 2196, TOP = 189, BOT = 2953;
+      H(s, P(TOP), P(L), P(R + 1)); H(s, P(BOT), P(L), P(R + 1)); V(s, P(L), P(TOP), P(BOT + 1)); V(s, P(R), P(TOP), P(BOT + 1));
+      V(s, P(1179), P(TOP), P(1399)); V(s, P(1687), P(TOP), P(614));
+      [295, 401, 507, 613].forEach(y => H(s, P(y), P(1181), P(2195))); H(s, P(525), P(L), P(1180)); H(s, P(961), P(L), P(1180));
+      H(s, P(1398), P(L), P(R + 1)); H(s, P(1401), P(L), P(R + 1)); H(s, P(1498), P(L), P(R));
+      // the last page ends the goods table with the Total row; an earlier page lets the columns run down to the bottom of the frame
+      [213, 1199, 1384, 1593, 1802, 1893].forEach(x => V(s, P(x), P(1398), P(last ? 2115 : BOT)));
+      if (last) { H(s, P(2052), P(L), P(R + 1)); H(s, P(2114), P(L), P(R + 1)); H(s, P(2776), P(1175), P(R)); V(s, P(1175), P(2776), P(BOT)); }
+      const img = document.createElement('img'); img.className = 'logo'; img.src = 'icons/po-logo.png'; img.alt = ''; img.style.cssText = 'left:36.72pt;top:45.36pt;width:73.68pt;height:61.44pt'; s.appendChild(img);
+    }
+
+    // Rows of goods per page. The last page also carries the taxes, the total, the amount in words and the signature, so it holds fewer rows;
+    // earlier pages continue the table down to the bottom of the frame. A long description takes more than one row (at most three).
+    const ROW = 11.55, ROWS_ON_LAST = 5, ROWS_FULL = 26, NAME_W = 229;
+    const itemLines = (it) => (it._lines = it._lines || wrap(it.name, 9.82, true, NAME_W).slice(0, 3));
+    function paginate(items) {
+      const rows = (a, b) => { let n = 0; for (let k = a; k < b; k++) n += itemLines(items[k]).length; return n; };
+      const pages = []; let i = 0;
+      while (rows(i, items.length) > ROWS_ON_LAST) {
+        let j = i, n = 0; while (j < items.length - 1 && n + itemLines(items[j]).length <= ROWS_FULL) { n += itemLines(items[j]).length; j++; }
+        if (j === i) j = i + 1;                       // (an item is never split across pages)
+        pages.push([i, j]); i = j;
+      }
+      pages.push([i, items.length]); return pages;
+    }
+
+    function drawSheet(d, range, last, pageNo, pages) {
+      const s = document.createElement('section'); s.className = 'sheet'; s.setAttribute('aria-label', 'Purchase order page ' + pageNo + ' of ' + pages);
+      frame(s, last);
+      // Text styles measured on the template: it draws letters a little taller than they are wide, so each size below is the HEIGHT size
+      // and sx narrows the letters to the measured width. LAB = labels, TXT = ordinary text, BLD = bold values.
+      const LAB = { size: 9.08, sx: 0.97 }, TXT = { size: 9.8, sx: 1 }, BLD = { size: 9.82, sx: 1, b: true };
+      T(s, 'PURCHASE ORDER', { x: 223.7, y: 21.1, size: 12.7, sx: 0.933, b: true });
+      const c = d.company;
+      // Invoice To (to the right of the logo): the name is normal height, the address lines are squashed the way the template draws them
+      T(s, 'Invoice To', { ...LAB, x: 113.5, y: 50.2 }); T(s, c.name, { ...BLD, x: 113.5, y: 63.6 });
+      const SQ = { ...TXT, sy: 0.74 };
+      let y = 74.6; c.address.forEach(l => { T(s, l, { ...SQ, x: 113.5, y }); y += 8.6; });
+      T(s, 'GSTIN/UIN: ' + c.gstin, { ...SQ, x: 113.5, y }); y += 8.6; T(s, 'State Name :  ' + c.state + ', Code : ' + c.state_code, { ...SQ, x: 113.5, y }); y += 8.6; T(s, 'E-Mail : ' + c.email, { ...SQ, x: 113.5, y });
+      // Consignee (Ship to) = the company
+      T(s, 'Consignee (Ship to)', { ...LAB, x: 40.1, y: 127.9 }); T(s, c.name, { ...BLD, x: 40.1, y: 141.4 });
+      y = 152.9; c.address.forEach(l => { T(s, l, { ...TXT, x: 40.1, y }); y += 11.5; });
+      const kv = (sh, label, val, yy) => { T(sh, label, { ...TXT, x: 40.1, y: yy }); T(sh, ':', { ...TXT, x: 120.6, y: yy }); T(sh, val, { ...TXT, x: 127.7, y: yy }); };
+      kv(s, 'GSTIN/UIN', c.gstin, y); kv(s, 'State Name', c.state + ', Code : ' + c.state_code, y + 11.5);
+      // Supplier (Bill from)
+      const sp = d.supplier; T(s, 'Supplier (Bill from)', { ...LAB, x: 40.1, y: 232.6 });
+      // a line a little wider than the box is squeezed to fit (as the template does); a much longer one is wrapped onto the next line
+      y = 246.0; wrap(sp.name, 9.82, true, 262).slice(0, 2).forEach(w => { T(s, w, { ...BLD, x: 40.1, y, fit: 241 }); y += 11.5; });
+      y += 0.1;                                   // the first address line sits at 257.6 on the template
+      sp.address.forEach(l => wrap(l, 10.0, false, 262).forEach(w => { if (y < 300) { T(s, w, { ...TXT, x: 40.1, y, fit: 239.4 }); y += 11.4; } }));
+      if (sp.gstin) kv(s, 'GSTIN/UIN', sp.gstin, y); if (sp.state) kv(s, 'State Name', sp.state + ', Code : ' + sp.state_code, y + 11.5);
+      // the boxes on the right
+      const p = d.po;
+      T(s, 'Voucher No.', { ...LAB, x: 286.5, y: 47.3 }); T(s, p.voucher_no, { ...BLD, x: 286.5, y: 61.2 });
+      T(s, 'Dated', { ...LAB, x: 408.5, y: 47.3 }); T(s, p.date, { ...BLD, x: 408.5, y: 61.2 });
+      T(s, 'Mode/Terms of Payment', { ...LAB, x: 408.5, y: 72.7 });
+      T(s, 'Reference No. & Date.', { ...LAB, x: 286.8, y: 98.2 }); T(s, p.reference, { ...BLD, x: 286.8, y: 112.1 });
+      T(s, 'Other References', { ...LAB, x: 408.2, y: 98.2 });
+      T(s, 'Dispatched through', { ...LAB, x: 286.8, y: 123.6 }); T(s, p.dispatched_through, { ...BLD, x: 286.8, y: 137.5 });
+      T(s, 'Destination', { ...LAB, x: 408.5, y: 123.6 });
+      T(s, 'Terms of Delivery', { ...LAB, x: 286.3, y: 149.0 });
+      y = 162.0; p.terms_of_delivery.forEach(l => wrap(l, 10.0, false, 236).forEach(w => { if (y < 326) { T(s, w, { ...TXT, x: 286.3, y }); y += 11.5; } }));
+      // goods table header
+      T(s, 'SI', { size: 10.06, sx: 0.81, x: 40.1, y: 338.4 }); T(s, 'No.', { size: 10.06, sx: 0.58, x: 40.1, y: 349.9 });
+      T(s, 'Description of Goods', { ...LAB, sx: 0.975, cx: 169.5, y: 338.2 }); T(s, 'Due on', { ...LAB, sx: 0.94, cx: 310.0, y: 338.2 }); T(s, 'Quantity', { ...LAB, sx: 0.96, cx: 357.25, y: 338.2 });
+      T(s, 'Rate', { ...LAB, sx: 0.93, cx: 407.4, y: 338.2 }); T(s, 'per', { ...LAB, sx: 0.93, cx: 443.4, y: 338.2 }); T(s, 'Amount', { ...LAB, sx: 0.99, cx: 490.65, y: 338.2 });
+      // goods lines
+      let row = 0;
+      for (let k = range[0]; k < range[1]; k++) {
+        const it = d.items[k], yy = 367.4 + ROW * row;
+        T(s, String(it.n), { ...TXT, r: 48.2, y: yy });
+        itemLines(it).forEach((w, j) => T(s, w, { ...BLD, x: 54.5, y: yy + ROW * j }));           // a long name continues on the next line
+        T(s, it.due, { size: 9.78, sx: 0.955, i: true, x: 290.9, y: yy, fit: 40.9 }); T(s, it.qty + ' ' + it.unit, { ...BLD, sx: 1, r: 378.7, y: yy, fit: 43.0 });
+        T(s, it.rate, { ...LAB, sx: 0.944, r: 429.4, y: yy, fit: 44 }); T(s, it.unit, { ...LAB, sx: 0.92, x: 439.7, y: yy, fit: 12.6 }); T(s, it.amount, { ...BLD, r: 523.9, y: yy, fit: 66 });
+        row += itemLines(it).length;
+      }
+      if (!last) { T(s, 'continued ...', { ...TXT, i: true, r: 523.9, y: 694.0 }); }
+      else {
+        // the sub-total, taxes and round off follow the last goods line, at the same distances as on the template (they are not at a fixed height)
+        const t = d.totals, lastRow = 367.4 + ROW * (row - 1);
+        H(s, lastRow + 15.3, P(1904), P(2187)); T(s, t.subtotal, { ...TXT, sx: 0.967, r: 523.9, y: lastRow + 17.6 });
+        y = lastRow + 34.9; t.taxes.forEach(x => { T(s, x.label, { ...BLD, sx: 0.98, i: true, r: 286.1, y }); T(s, x.amount, { ...BLD, r: 523.9, y }); y += 11.5; });
+        if (t.round_off) { T(s, 'ROUND OFF', { ...BLD, sx: 0.98, i: true, r: 286.1, y }); T(s, t.round_off, { ...BLD, r: 523.9, y }); }
+        T(s, 'Total', { ...LAB, sx: 0.99, r: 284.4, y: 494.4 }); T(s, t.total_quantity, { ...BLD, sx: 1, r: 378.7, y: 494.6, fit: 43.0 });
+        T(s, '₹ ' + t.total, { size: 12.4, sx: 0.93, b: true, r: 523.9, y: 495.6, fit: 66 });
+        T(s, 'Amount Chargeable (in words)', { size: 8.5, sx: 0.975, x: 39.6, y: 509.3 }); T(s, 'E. & O.E', { ...LAB, i: true, r: 524.6, y: 509.3 });
+        T(s, t.words, { size: 9.18, sx: 0.975, b: true, x: 40.1, y: 522.7 });
+        T(s, 'for ' + c.name, { size: 8.5, sx: 0.975, b: true, r: 522.2, y: 668.4 }); T(s, 'Authorised Signatory', { size: 8.47, sx: 0.97, r: 523.7, y: 700.1 });
+      }
+      T(s, 'This is a Computer Generated Document', { size: 9.2, sx: 0.97, x: 198.0, y: 716.4 });
+      drawLines(s);
+      return s;
+    }
+
+    function render(d) {
+      const box = document.getElementById('sheets'); box.innerHTML = '';
+      const pages = paginate(d.items);
+      pages.forEach((r, i) => box.appendChild(drawSheet(d, r, i === pages.length - 1, i + 1, pages.length)));
+      document.title = 'Purchase Order ' + (d.po.reference || d.po_number).replace(/[\\/:*?"<>|]+/g, '-');   // the browser suggests this as the PDF's file name
+    }
+
+    (async () => {
+      const id = new URLSearchParams(location.search).get('id');
+      document.getElementById('printBtn').onclick = () => window.print();
+      const d = await api('/api/po/' + encodeURIComponent(id) + '/print');
+      if (!d.success) { const e = document.createElement('div'); e.id = 'err'; e.setAttribute('role', 'alert'); e.textContent = d.error || 'Could not prepare the printout.'; document.body.appendChild(e); document.getElementById('printBtn').hidden = true; return; }
+      render(d); window.oxiPoPrintReady = true;
+    })();
+  </script>
+</body>
+</html>
