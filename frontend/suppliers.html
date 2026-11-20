@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Suppliers</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .sp-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .sp-bar input[type=search] { flex: 1 1 240px; max-width: 400px; }
+    .sp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--s3); } .sp-chips button { min-height: 38px; padding: 0 14px; border-radius: 999px; } .sp-chips button[aria-pressed=true] { background: var(--accent); color: #fff; border-color: var(--accent); } .sp-chips b { margin-left: 6px; }
+    .sp-num { white-space: nowrap; font-variant-numeric: tabular-nums; } .sp-small { font-size: 13px; color: var(--text-2); display: block; overflow-wrap: anywhere; } .sp-off td { opacity: .65; }
+    .sp-form { display: grid; gap: 10px; } .sp-form label { font-weight: 600; } .sp-form input[type=text], .sp-form input[type=email], .sp-form input[type=tel] { width: 100%; }
+    .sp-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } @media (max-width: 520px) { .sp-two { grid-template-columns: 1fr; } }
+    .sp-sec { margin: 6px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-weight: 700; } .sp-check { display: flex; gap: 8px; align-items: center; font-weight: 400 !important; } .sp-check input { width: 20px; height: 20px; }
+    dialog.oxi-dlg { max-height: 92vh; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="po-form.html">New purchase order</a></p>
+  <h1>Suppliers</h1>
+  <p class="oxi-page-sub">The suppliers you can raise purchase orders against. Add a new supplier, correct their details, or switch one off so it is no longer offered on new orders.</p>
+  <p id="message" role="status"></p>
+  <div id="page" aria-busy="true"><div class="oxi-skeleton" style="height:96px"></div></div>
+
+  <script src="common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    let DATA = null, filter = 'all', q = '';
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    function note(text, ok) { const m = $('message'); m.textContent = text; m.className = text ? (ok ? 'success' : 'error') : ''; if (text && !ok) m.scrollIntoView({ block: 'nearest' }); }
+
+    function input(type, id, value, max, extra) { const i = el('input'); i.type = type; i.id = id; i.maxLength = max || 150; i.value = value || ''; i.autocomplete = 'off'; if (extra) Object.assign(i, extra); return i; }
+    function row(label, inp, hint) { const w = el('div'); const l = el('label', null, label); l.htmlFor = inp.id; w.append(l, inp); if (hint) w.appendChild(el('small', 'oxi-section-note', hint)); return w; }
+
+    function supplierDialog(s) {
+      const adding = !s, dlg = el('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'spT'); const f = el('form', 'sp-form'); f.method = 'dialog';
+      const h = el('h3', null, adding ? 'Add a supplier' : 'Edit ' + s.name); h.id = 'spT'; f.appendChild(h);
+      const name = input('text', 'spName', adding ? '' : s.name, 150); f.appendChild(row('Supplier name (required)', name));
+      const contact = input('text', 'spContact', adding ? '' : s.contact_person, 100), phone = input('tel', 'spPhone', adding ? '' : s.phone, 20); phone.inputMode = 'tel';
+      const two = el('div', 'sp-two'); two.append(row('Contact person', contact), row('Phone', phone)); f.appendChild(two);
+      f.appendChild(row('Email', input('email', 'spEmail', adding ? '' : s.email, 150)));
+      f.appendChild(row('GST number (optional)', input('text', 'spGst', adding ? '' : s.gst_number, 15, { placeholder: '32ABCDE1234F1Z5' }), '15 characters. It is checked and cannot be used for two suppliers.'));
+      let bank = null;
+      if (DATA.can_bank) {
+        f.appendChild(el('div', 'sp-sec', 'Bank details'));
+        const bn = input('text', 'spBank', adding ? '' : s.bank_name, 100), ac = input('text', 'spAcc', adding ? '' : s.account_number, 30), ifs = input('text', 'spIfsc', adding ? '' : s.ifsc_code, 15, { placeholder: 'SBIN0001234' });
+        f.appendChild(row('Bank name', bn)); const t2 = el('div', 'sp-two'); t2.append(row('Account number', ac), row('IFSC code', ifs)); f.appendChild(t2); bank = { bn, ac, ifs };
+      }
+      let act = null;
+      if (!adding) { act = el('input'); act.type = 'checkbox'; act.id = 'spActive'; act.checked = s.status === 'active'; const al = el('label', 'sp-check'); al.htmlFor = 'spActive'; al.append(act, el('span', null, 'Offered on new purchase orders (untick to switch off)')); f.appendChild(al);
+        if (s.orders || s.payments) f.appendChild(el('p', 'oxi-section-note', 'Has ' + plural(s.orders, 'purchase order') + ' and ' + plural(s.payments, 'payment') + '. Switching it off keeps them.')); }
+      const err = el('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const rw = el('div', 'row');
+      const no = el('button', 'oxi-btn-secondary', 'Cancel'); no.type = 'button'; no.onclick = () => dlg.close(); const ok = el('button', null, adding ? 'Add supplier' : 'Save'); ok.type = 'submit'; rw.append(no, ok); f.append(err, rw); dlg.appendChild(f); document.body.appendChild(dlg);
+      const back = document.activeElement;
+      f.onsubmit = async (e) => {
+        e.preventDefault(); err.hidden = true; ok.disabled = true;
+        const body = { name: name.value, contact_person: contact.value, phone: phone.value, email: $('spEmail').value, gst_number: $('spGst').value };
+        if (bank) { body.bank_name = bank.bn.value; body.account_number = bank.ac.value; body.ifsc_code = bank.ifs.value; }
+        if (act) body.active = act.checked;
+        const r = adding ? await api('/api/suppliers', 'POST', body) : await api('/api/suppliers/' + s.id, 'PUT', body);
+        ok.disabled = false; if (!r.success) { err.textContent = r.error || 'Could not save.'; err.hidden = false; return; }
+        dlg.close(); note(adding ? 'Supplier added.' : 'Saved.', true); load();
+      };
+      dlg.addEventListener('close', () => { dlg.remove(); if (back && document.contains(back)) back.focus(); }); dlg.showModal(); name.focus();
+    }
+
+    function render() {
+      const page = $('page'); page.innerHTML = ''; page.setAttribute('aria-busy', 'false'); const t = DATA.totals;
+      const chips = el('div', 'sp-chips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Show');
+      [['all', 'All suppliers', t.total], ['off', 'Switched off', t.off]].forEach(([k, label, n]) => { const b = el('button', 'oxi-btn-secondary', label); b.type = 'button'; b.setAttribute('aria-pressed', String(filter === k)); b.appendChild(el('b', null, String(n))); b.onclick = () => { filter = k; load(); }; chips.appendChild(b); });
+      const bar = el('div', 'sp-bar'); const s = el('input'); s.type = 'search'; s.id = 'spSearch'; s.placeholder = 'Search by name, GST number, contact or phone'; s.value = q; s.setAttribute('aria-label', 'Search suppliers'); s.onkeydown = (e) => { if (e.key === 'Enter') { q = s.value.trim(); load(); } };
+      const go = el('button', 'oxi-btn-secondary', 'Search'); go.type = 'button'; go.onclick = () => { q = s.value.trim(); load(); }; bar.append(s, go);
+      if (DATA.can_manage) { const add = el('button', null, 'Add a supplier'); add.type = 'button'; add.id = 'spAdd'; add.onclick = () => supplierDialog(null); bar.appendChild(add); }
+      page.append(chips, bar);
+      const rows = DATA.suppliers;
+      if (!rows.length) page.appendChild(el('p', 'oxi-section-note', q || filter === 'off' ? 'No suppliers found.' : 'There are no suppliers yet.' + (DATA.can_manage ? ' Use "Add a supplier".' : '')));
+      else {
+        const w = el('div', 'oxi-table-scroll'); const tb = el('table'); tb.appendChild(el('caption', 'oxi-sr-only', 'Suppliers'));
+        const hr = el('tr'); ['Supplier', 'Contact', 'GST number', 'Orders', 'Payments', 'Status', ''].forEach(x => { const th = el('th', null, x); th.scope = 'col'; hr.appendChild(th); }); const hd = el('thead'); hd.appendChild(hr); tb.appendChild(hd);
+        const body = el('tbody');
+        rows.forEach(r => {
+          const tr = el('tr', r.status === 'active' ? '' : 'sp-off'); tr.appendChild(el('td', null, r.name));
+          const c = el('td'); c.appendChild(document.createTextNode(r.contact_person || '-')); if (r.phone) c.appendChild(el('span', 'sp-small', r.phone)); if (r.email) c.appendChild(el('span', 'sp-small', r.email)); tr.appendChild(c);
+          tr.append(el('td', 'sp-num', r.gst_number || '-'), el('td', 'sp-num', String(r.orders)), el('td', 'sp-num', String(r.payments)), el('td', null, r.status === 'active' ? 'Active' : 'Switched off'));
+          const a = el('td'); if (DATA.can_manage) { const e = el('button', 'oxi-btn-secondary oxi-btn-sm', 'Edit'); e.type = 'button'; e.setAttribute('aria-label', 'Edit ' + r.name); e.onclick = () => supplierDialog(r); a.appendChild(e); } tr.appendChild(a); body.appendChild(tr);
+        });
+        tb.appendChild(body); w.appendChild(tb); page.appendChild(w);
+      }
+      if (!DATA.can_manage) page.appendChild(el('p', 'oxi-section-note', 'You can see the suppliers. Purchase and the Manager add and change them.'));
+      if (DATA.can_bank) page.appendChild(el('p', 'oxi-section-note', 'Bank details are shown only to people allowed to see them. They are not shown in this table.'));
+    }
+    let first = true;
+    async function load() {
+      const d = await api('/api/suppliers/list?filter=' + filter + '&q=' + encodeURIComponent(q));
+      if (!d.success) { $('page').innerHTML = ''; const e = el('div', 'oxi-error-state'); e.setAttribute('role', 'alert'); e.appendChild(el('p', null, d.error || 'Could not load the suppliers.')); $('page').appendChild(e); return; }
+      DATA = d; render();
+      if (first) { first = false; if (new URLSearchParams(location.search).get('add') === '1' && d.can_manage) supplierDialog(null); }
+    }
+    load().catch(() => note('Could not reach the server.', false));
+  </script>
+</body>
+</html>

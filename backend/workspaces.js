@@ -151,7 +151,8 @@ const WORKSPACES = {
       { title: 'Buying', items: [
         { label: 'Purchase Requirements', href: 'consolidate.html', icon: 'consolidate', perm: KEYS.CONSOLIDATE_VIEW },
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html', 'po-form.html'] },
-        { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW } ] },
+        { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
+        { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW } ] },
       { title: 'Progress', items: [
         { label: 'Goods Receipts', href: 'grn-list.html', icon: 'grn', perm: KEYS.GRN_VIEW, also: ['grn-detail.html'] },
         { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL } ] },
@@ -218,7 +219,8 @@ const WORKSPACES = {
       { title: 'Finance', items: [
         { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL, also: ['payment-form.html'] },
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html'] },
-        { label: 'Goods Receipts', href: 'grn-list.html', icon: 'grn', perm: KEYS.GRN_VIEW, also: ['grn-detail.html'] } ] },
+        { label: 'Goods Receipts', href: 'grn-list.html', icon: 'grn', perm: KEYS.GRN_VIEW, also: ['grn-detail.html'] },
+        { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW } ] },
       { title: 'Reports', items: [{ label: 'Finance Variances', href: 'variance-report.html', icon: 'variance', perm: KEYS.DASHBOARD_VIEW }] }
     ]
   },
@@ -235,6 +237,7 @@ const WORKSPACES = {
       { title: 'Progress', items: [
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html'] },
         { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
+        { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW },
         { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL } ] },
       { title: 'Reports', items: [{ label: 'Variances', href: 'variance-report.html', icon: 'variance', perm: KEYS.DASHBOARD_VIEW }, { label: 'Team Performance', href: 'team-performance.html', icon: 'dashboard', perm: KEYS.KPI_VIEW_ALL }] }
     ]
@@ -269,7 +272,8 @@ const WORKSPACES = {
         { label: 'Finished Products', href: 'catalog.html', icon: 'tag', perm: KEYS.CATALOG_VIEW },
         { label: 'Recipes / Bill of Materials', href: 'recipes.html', icon: 'book', perm: KEYS.PRODUCTION_INDENT_VIEW },
         { label: 'Catalogue Review', href: 'catalog-review.html', icon: 'link', perm: KEYS.CATALOG_MAP_ITEMS },
-        { label: 'Raw Materials', href: 'raw-materials.html', icon: 'tag', admin: true } ] },
+        { label: 'Raw Materials', href: 'raw-materials.html', icon: 'tag', admin: true },
+        { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', admin: true } ] },
       { title: 'Reports', items: [{ label: 'Team Performance', href: 'team-performance.html', icon: 'dashboard', perm: KEYS.KPI_VIEW_ALL }] },
       { title: 'System', items: [{ label: 'Integration Settings', href: 'system.html', icon: 'server', admin: true }, { label: 'Remove Data', href: 'data-cleanup.html', icon: 'shield', admin: true }] }
     ]

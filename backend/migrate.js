@@ -818,6 +818,16 @@ const STEPS = [
       await db.query('CREATE INDEX IF NOT EXISTS idx_po_delivery_log_po ON po_delivery_log(po_id, id)');
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'po.update_delivery'), ('manager', 'po.update_delivery') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // Suppliers can be added and edited in the app: an optional GST number (unique when given) and the key suppliers.manage for
+    // Purchase and the Manager. Existing suppliers are untouched.
+    name: '033_suppliers_manage',
+    async run(db) {
+      await db.query('ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS gst_number VARCHAR(15)');
+      await db.query('CREATE UNIQUE INDEX IF NOT EXISTS ux_suppliers_gst ON suppliers(gst_number) WHERE gst_number IS NOT NULL');
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'suppliers.manage'), ('manager', 'suppliers.manage') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 
