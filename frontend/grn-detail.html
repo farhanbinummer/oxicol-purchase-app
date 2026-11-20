@@ -9,6 +9,15 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .gf-files { list-style: none; margin: 0 0 var(--s3); padding: 0; display: grid; gap: 8px; } .gf-file { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: 10px; }
+    .gf-thumb { width: 64px; height: 64px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; overflow: hidden; font-weight: 700; color: var(--text-2); } .gf-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .gf-info { min-width: 0; overflow-wrap: anywhere; } .gf-info small { display: block; color: var(--text-2); } .gf-act { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .gf-add { display: grid; gap: 8px; max-width: 520px; padding: 12px; border: 1px dashed var(--border-strong, var(--border)); border-radius: 10px; margin: 0 0 var(--s3); }
+    .gf-add label { font-weight: 600; } .gf-kind { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--surface-2); color: var(--text-2); } .gf-kind.damage { background: var(--danger-bg); color: var(--danger); }
+    @media (max-width: 560px) { .gf-file { grid-template-columns: 56px 1fr; } .gf-act { grid-column: 1 / -1; justify-content: flex-start; } }
+    @media print { #filesBox { display: none; } }
+  </style>
 </head>
 <body>
   <p><a href="index.html">&larr; Home</a> | <a href="grn-list.html">&larr; GRN history</a></p>
@@ -39,6 +48,14 @@
       <tbody id="items"></tbody>
     </table>
 
+    <section id="filesBox" aria-labelledby="filesTitle">
+      <h2 id="filesTitle">Photos and files</h2>
+      <p class="oxi-section-note">Delivery challan, invoice copy, or photos of damaged or short goods. They stay with this receipt.</p>
+      <ul class="gf-files" id="files"></ul>
+      <div id="addBox" hidden></div>
+      <p id="fileMsg" role="alert"></p>
+    </section>
+
     <div class="oxi-print-signatures">
       <div>Received &amp; checked by (Store)</div>
       <div>QC / Warehouse in-charge</div>
@@ -54,9 +71,80 @@
     const set = (i, t) => { document.getElementById(i).textContent = t; };
     const setBadge = (i, status) => { const el = document.getElementById(i); el.innerHTML = ''; el.appendChild(badge(status)); };
 
-    (async () => {
+    // ---------------- photos and files ----------------
+    const KIND_LABEL = { challan: 'Delivery challan / invoice copy', damage: 'Damaged or short goods', other: 'Other' };
+    const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+    let LIM = { attach_max_bytes: 5 * 1048576, attach_max_per_grn: 10 };
+    const fmsg = (t, ok) => { const m = document.getElementById('fileMsg'); m.textContent = t || ''; m.className = t ? (ok ? 'success' : 'error') : ''; };
+    /** Photographs are shrunk in the browser first (longest side 1800 px, JPEG) so a phone photo uploads quickly and stays under the limit. */
+    async function prepare(file) {
+      const limit = LIM.attach_max_bytes;
+      if (file.type === 'application/pdf') { if (file.size > limit) throw new Error(file.name + ' is larger than ' + kb(limit)); return { blob: file, name: file.name }; }
+      if (!/^image\/(jpeg|png)$/.test(file.type)) throw new Error(file.name + ' is not a JPEG, PNG or PDF');
+      let blob = file, name = file.name;
+      const bmp = await createImageBitmap(file).catch(() => null);
+      if (bmp && (Math.max(bmp.width, bmp.height) > 1800 || file.size > 1.5 * 1048576)) {
+        const k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+        const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+        const out = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85)); if (out) { blob = out; name = name.replace(/\.[a-z0-9]+$/i, '') + '.jpg'; }
+      }
+      if (blob.size > limit) throw new Error(file.name + ' is still larger than ' + kb(limit) + ' after shrinking');
+      return { blob, name };
+    }
+    async function upload(file, kind, note) {
+      const f = await prepare(file);
+      const res = await fetch('/api/grn/' + encodeURIComponent(id) + '/attachments', { method: 'POST', headers: { 'Content-Type': f.blob.type, 'X-File-Name': encodeURIComponent(f.name), 'X-File-Kind': kind, 'X-File-Note': encodeURIComponent(note || '') }, body: f.blob });
+      const r = await res.json().catch(() => ({})); if (!res.ok || !r.success) throw new Error(r.error || 'Could not save ' + file.name);
+    }
+    function askRemove(a) {
+      const dlg = mk('dialog', 'oxi-dlg'); dlg.setAttribute('aria-labelledby', 'rmT'); const f = mk('form'); f.method = 'dialog';
+      const h = mk('h3', null, 'Remove ' + a.file_name + '?'); h.id = 'rmT'; const l = mk('label', null, 'Why is it being removed? (kept in the history)'); const ta = mk('textarea'); ta.rows = 2; ta.maxLength = 1000; ta.id = 'rmWhy'; l.htmlFor = 'rmWhy';
+      const err = mk('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const row = mk('div', 'row');
+      const no = mk('button', 'oxi-btn-secondary', 'Cancel'); no.type = 'button'; no.onclick = () => dlg.close(); const ok = mk('button', null, 'Remove'); ok.type = 'submit'; row.append(no, ok);
+      f.append(h, mk('p', 'oxi-section-note', 'The file stops being shown here. It is kept, with your name and the reason, in the audit history.'), l, ta, err, row); dlg.appendChild(f); document.body.appendChild(dlg); const back = document.activeElement;
+      f.onsubmit = async (e) => { e.preventDefault(); if (ta.value.trim().length < 5) { err.textContent = 'Please write a few words (at least 5 letters).'; err.hidden = false; ta.focus(); return; }
+        ok.disabled = true; const r = await api('/api/grn/' + encodeURIComponent(id) + '/attachments/' + a.id + '/remove', 'POST', { reason: ta.value }); if (!r.success) { ok.disabled = false; err.textContent = r.error || 'Could not remove it.'; err.hidden = false; return; }
+        dlg.close(); fmsg('Removed.', true); load(); };
+      dlg.addEventListener('close', () => { dlg.remove(); if (back && document.contains(back)) back.focus(); }); dlg.showModal(); ta.focus();
+    }
+    const urls = [];
+    function renderFiles(d) {
+      urls.splice(0).forEach(u => URL.revokeObjectURL(u));
+      const ul = document.getElementById('files'); ul.innerHTML = '';
+      if (!d.attachments.length) ul.appendChild(mk('li', 'oxi-section-note', 'No photos or files yet.'));
+      d.attachments.forEach(a => {
+        const li = mk('li', 'gf-file'), th = mk('div', 'gf-thumb', a.mime === 'application/pdf' ? 'PDF' : '...');
+        const info = mk('div', 'gf-info'); const s = mk('strong', null, a.file_name); const k = mk('span', 'gf-kind' + (a.kind === 'damage' ? ' damage' : ''), KIND_LABEL[a.kind] || 'Other'); k.style.marginLeft = '8px';
+        info.append(s, k, mk('small', null, kb(a.size_bytes) + ' - ' + a.by + ' - ' + day(a.at))); if (a.note) info.appendChild(mk('small', null, a.note));
+        const get = async () => { const res = await fetch('/api/grn/' + encodeURIComponent(id) + '/attachments/' + a.id); if (!res.ok) throw new Error('Could not load the file'); const u = URL.createObjectURL(await res.blob()); urls.push(u); return u; };
+        if (a.mime !== 'application/pdf') get().then(u => { const im = mk('img'); im.src = u; im.alt = 'Photo ' + a.file_name; th.textContent = ''; th.appendChild(im); }).catch(() => { th.textContent = '!'; });
+        const act = mk('div', 'gf-act'); const open = mk('button', 'oxi-btn-secondary oxi-btn-sm', a.mime === 'application/pdf' ? 'Download' : 'View'); open.type = 'button'; open.setAttribute('aria-label', (a.mime === 'application/pdf' ? 'Download ' : 'View ') + a.file_name);
+        open.onclick = async () => { try { const u = await get(); if (a.mime === 'application/pdf') { const l = document.createElement('a'); l.href = u; l.download = a.file_name; l.click(); } else window.open(u, '_blank', 'noopener'); } catch (e) { fmsg(e.message, false); } };
+        act.appendChild(open);
+        if (d.can_attach) { const rm = mk('button', 'oxi-btn-secondary oxi-btn-sm', 'Remove'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove ' + a.file_name); rm.onclick = () => askRemove(a); act.appendChild(rm); }
+        li.append(th, info, act); ul.appendChild(li);
+      });
+      const box = document.getElementById('addBox'); box.innerHTML = ''; box.hidden = !d.can_attach; if (!d.can_attach) return;
+      const wrap = mk('div', 'gf-add'); const kl = mk('label', null, 'What is it?'); kl.htmlFor = 'fKind'; const ks = mk('select'); ks.id = 'fKind';
+      Object.entries(KIND_LABEL).forEach(([v, t]) => { const o = mk('option', null, t); o.value = v; ks.appendChild(o); });
+      const nl = mk('label', null, 'Note (optional)'); nl.htmlFor = 'fNote'; const nt = mk('input'); nt.type = 'text'; nt.id = 'fNote'; nt.maxLength = 150; nt.placeholder = 'For example: 3 drums leaking';
+      const inp = mk('input'); inp.type = 'file'; inp.accept = 'image/jpeg,image/png,application/pdf'; inp.multiple = true; inp.id = 'fFiles'; inp.className = 'oxi-sr-only';
+      const lab = mk('label', 'oxi-btn oxi-btn-secondary', 'Take a photo or choose files'); lab.htmlFor = 'fFiles'; lab.tabIndex = 0; lab.setAttribute('role', 'button'); lab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inp.click(); } });
+      wrap.append(kl, ks, nl, nt, lab, inp, mk('small', 'oxi-section-note', 'JPEG, PNG or PDF, up to ' + kb(LIM.attach_max_bytes) + ' each and ' + LIM.attach_max_per_grn + ' per receipt. Photos are shrunk before they are sent.')); box.appendChild(wrap);
+      inp.onchange = async () => {
+        const files = [...inp.files]; if (!files.length) return; fmsg(''); lab.textContent = 'Uploading...'; const bad = [];
+        for (const f of files) { try { await upload(f, ks.value, nt.value); } catch (e) { bad.push(e.message); } }
+        if (bad.length) fmsg(bad.join(' '), false); else fmsg('Saved.', true); await load(true);
+      };
+    }
+
+    async function load(keepMsg) {
       const d = await api('/api/grn/' + encodeURIComponent(id));
       if (!d.success) { show(d.error, false); return; }
+      if (d.limits) LIM = d.limits;
+      renderFiles(d);
+      if (document.getElementById('items').children.length) { document.getElementById('detail').hidden = false; return; }   // reload after a file change: nothing else to redraw
       const g = d.grn;
       set('title', g.grn_number);
       set('po', g.po_number);
@@ -83,7 +171,8 @@
         tbody.appendChild(tr);
       });
       document.getElementById('detail').hidden = false;
-    })();
+    }
+    load();
   </script>
 </body>
 </html>

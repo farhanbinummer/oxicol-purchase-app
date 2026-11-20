@@ -720,6 +720,76 @@ const STEPS = [
     async run(db) {
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('manager', 'tasks.summary_view') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // Photos and files on goods receipts (delivery challan, photos of damaged or short goods). Stored in the database; removing a file only
+    // hides it and records who and why. No new permission: whoever may record or decide a receipt may add files; whoever may see it sees them.
+    name: '029_grn_attachments',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS grn_attachments (
+          id               SERIAL PRIMARY KEY,
+          grn_id           INTEGER NOT NULL REFERENCES grn_notes(id) ON DELETE CASCADE,
+          kind             VARCHAR(12) NOT NULL DEFAULT 'other' CHECK (kind IN ('challan', 'damage', 'other')),
+          note             VARCHAR(150),
+          file_name        VARCHAR(150) NOT NULL,
+          mime             VARCHAR(40) NOT NULL CHECK (mime IN ('image/jpeg', 'image/png', 'application/pdf')),
+          size_bytes       INTEGER NOT NULL CHECK (size_bytes > 0),
+          data             BYTEA NOT NULL,
+          uploaded_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          uploaded_by_name VARCHAR(150) NOT NULL,
+          created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          removed_at       TIMESTAMPTZ,
+          removed_by_name  VARCHAR(150),
+          removed_reason   TEXT
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_grn_attachments_grn ON grn_attachments(grn_id, id)');
+    }
+  },
+  {
+    // The branch confirms what arrived of a stock request (in parts if needed, with damage reported). Records only: nothing is ever
+    // changed on the request itself. The new key goes to the Branch role and the Manager (who can confirm for any branch); an administrator holds every key.
+    name: '030_branch_delivery',
+    async run(db) {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS branch_receipts (
+          id               SERIAL PRIMARY KEY,
+          request_id       INTEGER NOT NULL REFERENCES branch_stock_requests(id) ON DELETE CASCADE,
+          received_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          received_by_name VARCHAR(150) NOT NULL,
+          received_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          note             VARCHAR(300),
+          is_final         BOOLEAN NOT NULL DEFAULT FALSE
+        )`);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS branch_receipt_items (
+          id               SERIAL PRIMARY KEY,
+          receipt_id       INTEGER NOT NULL REFERENCES branch_receipts(id) ON DELETE CASCADE,
+          request_item_id  INTEGER NOT NULL REFERENCES branch_request_items(id) ON DELETE CASCADE,
+          qty              NUMERIC(12,3) NOT NULL CHECK (qty >= 0),
+          damaged_qty      NUMERIC(12,3) NOT NULL DEFAULT 0 CHECK (damaged_qty >= 0 AND damaged_qty <= qty)
+        )`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipts_req ON branch_receipts(request_id, id)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_branch_receipt_items_item ON branch_receipt_items(request_item_id)');
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('branch', 'branch_request.confirm_delivery'), ('manager', 'branch_request.confirm_delivery') ON CONFLICT DO NOTHING");
+    }
+  },
+  {
+    // The raw material list from the billing software (database/raw-materials-sher.json), so people can type and choose a material.
+    // Materials already in the app (the recipes use them) are NEVER renamed or re-united: only their HSN code and GST rate are filled in
+    // when empty. New materials are added with the unit the billing list gives; where it gives none the unit stays empty (nothing is
+    // guessed) and an administrator sets it in Recipes. Safe to run again.
+    name: '031_raw_material_list',
+    async run(db) {
+      await db.query('ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(10), ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5,2)');
+      const list = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'database', 'raw-materials-sher.json'), 'utf8'));
+      for (const m of list) {
+        await db.query(
+          `INSERT INTO raw_materials (code, name, unit, category, hsn_code, gst_rate) VALUES ($1,$2,$3,'Raw material',$4,$5)
+           ON CONFLICT (code) DO UPDATE SET hsn_code = COALESCE(raw_materials.hsn_code, EXCLUDED.hsn_code), gst_rate = COALESCE(raw_materials.gst_rate, EXCLUDED.gst_rate)`,
+          [String(m.code).slice(0, 30), String(m.name).slice(0, 200), String(m.unit || '').slice(0, 20), m.hsn ? String(m.hsn).slice(0, 10) : null, m.gst == null ? null : Number(m.gst)]);
+      }
+    }
   }
 ];
 

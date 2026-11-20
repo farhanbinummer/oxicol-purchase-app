@@ -12,7 +12,8 @@ const { audit } = require('../audit');
 const { fail, isValidDate, todayISO, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
-const { branchScope, inBranchScope } = require('../access');
+const { branchScope, inBranchScope, can } = require('../access');
+const D = require('../delivery');
 const router = express.Router();
 
 const BRANCHES = ['Kannur', 'Thrissur', 'Trivandrum', 'Ernakulam'];
@@ -101,7 +102,9 @@ router.get('/', requirePermission(KEYS.BRANCH_REQUEST_VIEW), async (req, res) =>
     const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
     const result = await pool.query(
       `SELECT * FROM branch_stock_requests ${where} ORDER BY id DESC`, params);
-    res.json({ success: true, count: result.rowCount, requests: result.rows });
+    const dl = await D.deliveryFor(pool, result.rows.map(r => r.id));
+    const rows = result.rows.map(r => { const d = dl.get(r.id); return { ...r, delivery: { state: d.state, text: D.deliveryText(d), requested: d.requested, received: d.received, has_problem: d.has_problem } }; });
+    res.json({ success: true, count: result.rowCount, requests: rows });
   } catch (err) {
     console.error(err);
     fail(res, 500, 'Could not load branch requests');
@@ -123,11 +126,58 @@ router.get('/:id', requirePermission(KEYS.BRANCH_REQUEST_VIEW), async (req, res)
       `SELECT po.id, po.po_number FROM po_source_links l
          JOIN purchase_orders po ON po.id = l.po_id
         WHERE l.source_type = 'branch' AND l.source_id = $1`, [id]);
-    res.json({ success: true, request: r.rows[0], items: items.rows, linked_pos: po.rows });
+    const dl = (await D.deliveryFor(pool, [id])).get(id);
+    const receipts = await pool.query(
+      `SELECT r.id, r.received_by_name AS by, r.received_at AS at, r.note, r.is_final,
+              COALESCE(json_agg(json_build_object('item_id', ri.request_item_id, 'qty', ri.qty::float, 'damaged_qty', ri.damaged_qty::float) ORDER BY ri.id) FILTER (WHERE ri.id IS NOT NULL), '[]') AS lines
+         FROM branch_receipts r LEFT JOIN branch_receipt_items ri ON ri.receipt_id = r.id WHERE r.request_id = $1 GROUP BY r.id ORDER BY r.id`, [id]);
+    const confirmScope = branchScope(req.access, KEYS.BRANCH_REQUEST_CONFIRM);
+    const canConfirm = can(req.access, KEYS.BRANCH_REQUEST_CONFIRM) && inBranchScope(confirmScope, r.rows[0].branch) && D.canStillConfirm(r.rows[0].status, dl.state);
+    res.json({ success: true, request: r.rows[0], items: items.rows, linked_pos: po.rows,
+      delivery: { state: dl.state, text: D.deliveryText(dl), requested: dl.requested, received: dl.received, damaged: dl.damaged, has_problem: dl.has_problem, lines: dl.lines, receipts: receipts.rows, can_confirm: canConfirm } });
   } catch (err) {
     console.error(err);
     fail(res, 500, 'Could not load branch request');
   }
+});
+
+// ------------------------------------------------------------
+// POST /api/branch-request/:id/receipts - the branch confirms what arrived
+// body: { items: [{ item_id, qty, damaged_qty }], note, final }   (final = "nothing more is coming")
+// Quantities are checked against what is still expected, in one transaction with the request locked, so two confirmations at once
+// can never receive more than was requested. Nothing on the request itself is changed.
+// ------------------------------------------------------------
+router.post('/:id/receipts', requirePermission(KEYS.BRANCH_REQUEST_CONFIRM), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return fail(res, 400, 'Invalid request id');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = (await client.query('SELECT id, status, branch, request_number FROM branch_stock_requests WHERE id = $1 FOR UPDATE', [id])).rows[0];
+    if (!r) { await client.query('ROLLBACK'); return fail(res, 404, 'Branch request not found'); }
+    if (!inBranchScope(branchScope(req.access, KEYS.BRANCH_REQUEST_CONFIRM), r.branch)) { await client.query('ROLLBACK'); return fail(res, 403, 'That request belongs to a different branch'); }
+    if (!D.CONFIRMABLE_STATUS.includes(r.status)) { await client.query('ROLLBACK'); return fail(res, 409, r.status === 'pending' ? 'This request has not been approved yet, so nothing can have arrived.' : 'This request was not approved, so there is nothing to confirm.'); }
+    const now = (await client.query(
+      `SELECT i.id, i.item_name, i.quantity::float AS quantity, COALESCE((SELECT SUM(ri.qty) FROM branch_receipt_items ri WHERE ri.request_item_id = i.id), 0)::float AS received
+         FROM branch_request_items i WHERE i.request_id = $1 ORDER BY i.id`, [id])).rows;
+    const before = (await D.deliveryFor(client, [id])).get(id);
+    if (!D.canStillConfirm(r.status, before.state)) { await client.query('ROLLBACK'); return fail(res, 409, before.state === 'complete' ? 'Everything on this request has already been confirmed as received.' : 'This request was already closed.'); }
+    const v = D.validateReceipt(req.body, now);
+    if (v.error) { await client.query('ROLLBACK'); return fail(res, 400, v.error); }
+    const rec = (await client.query('INSERT INTO branch_receipts (request_id, received_by, received_by_name, note, is_final) VALUES ($1,$2,$3,$4,$5) RETURNING id', [id, req.user.id, req.user.name, v.note || null, v.final])).rows[0];
+    for (const l of v.lines) await client.query('INSERT INTO branch_receipt_items (receipt_id, request_item_id, qty, damaged_qty) VALUES ($1,$2,$3,$4)', [rec.id, l.item_id, l.qty, l.damaged_qty]);
+    const after = (await D.deliveryFor(client, [id])).get(id);
+    await audit(client, req, { action: 'request.delivery', entity: 'branch_request', id, summary: `${r.request_number} (${r.branch}): ${D.deliveryText(after)}${v.lines.some(l => l.damaged_qty > 0) ? ', damage reported' : ''}${v.final && after.state !== 'complete' ? ', branch says nothing more is coming' : ''}`,
+      before: { state: before.state, received: before.received }, after: { state: after.state, received: after.received, damaged: after.damaged }, reason: v.note || undefined });
+    await client.query('COMMIT');
+    if (after.has_problem) {
+      notify({ roles: ['manager', 'purchase'], subject: 'Branch reports a delivery problem', text: `${r.branch} confirmed delivery for ${r.request_number}: ${D.deliveryText(after)}${after.damaged > 0 ? ', ' + after.damaged + ' damaged' : ''}.${v.note ? ' Note: ' + v.note : ''}`, path: 'branch-request-detail.html?id=' + id });
+    }
+    res.status(201).json({ success: true, receipt_id: rec.id, state: after.state, text: D.deliveryText(after) });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('branch receipt failed:', err); fail(res, 500, 'Could not save the confirmation. Nothing was saved.');
+  } finally { client.release(); }
 });
 
 router.put('/:id/approve', requirePermission(KEYS.BRANCH_REQUEST_APPROVE), async (req, res) => {

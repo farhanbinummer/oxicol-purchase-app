@@ -10,6 +10,7 @@ const { pool } = require('../database');
 const { notify } = require('../notify');
 const { fail, isValidDate, todayISO, stamp, nextNumber } = require('../utils');
 const { requirePermission } = require('../auth');
+const { resolveMaterials } = require('../materials');
 const { KEYS } = require('../permissions');
 const router = express.Router();
 
@@ -42,6 +43,8 @@ router.post('/create', requirePermission(KEYS.PRODUCTION_INDENT_CREATE), async (
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const mats = await resolveMaterials(client, items);          // a chosen raw material brings its list name, so it is always spelt the same way
+    if (mats.error) { await client.query('ROLLBACK'); return fail(res, 400, mats.error); }
     const indentNumber = await nextNumber(client, 'production_indents', 'indent_number', `IND-${stamp(todayISO())}-`);
     const r = await client.query(
       'INSERT INTO production_indents (indent_number, production_head, created_by) VALUES ($1, $2, $3) RETURNING id',
@@ -51,7 +54,7 @@ router.post('/create', requirePermission(KEYS.PRODUCTION_INDENT_CREATE), async (
       await client.query(
         `INSERT INTO production_indent_items (indent_id, item_name, quantity, unit, required_by, priority)
          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [id, String(it.item_name).trim(), Number(it.quantity), String(it.unit).trim(),
+        [id, (it.material_id && mats.map.get(Number(it.material_id)) ? mats.map.get(Number(it.material_id)).name : String(it.item_name).trim()), Number(it.quantity), String(it.unit).trim(),
          it.required_by || null, it.priority || 'normal']);
     }
     await client.query('COMMIT');

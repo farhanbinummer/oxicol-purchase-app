@@ -29,12 +29,13 @@
   </form>
 
   <script src="common.js"></script>
+  <script src="material-picker.js"></script>
   <script>
     const tbody = document.querySelector('#items tbody');
     function addRow() {
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><input class="name" size="24"></td>' +
+        '<td><input class="name" size="24" aria-label="Chemical name: type to search raw materials"></td>' +
         '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
         '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Drum</option></select></td>' +
         '<td><input class="req" type="date"></td>' +
@@ -42,6 +43,7 @@
         '<td><button type="button" class="del">X</button></td>';
       tbody.appendChild(tr);
       tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) tr.remove(); };
+      oxiMaterialPicker(tr.querySelector('.name'), { onPick: (m) => { const u = tr.querySelector('.unit'); if (m.unit && [...u.options].some(o => o.value === m.unit || o.text === m.unit)) u.value = m.unit; tr.querySelector('.qty').focus(); } });
     }
     document.getElementById('addRow').onclick = addRow;
     addRow();
@@ -50,6 +52,7 @@
       e.preventDefault();
       const items = [...tbody.rows].map(tr => ({
         item_name: tr.querySelector('.name').value,
+        material_id: tr.querySelector('.name').dataset.materialId || undefined,
         quantity: tr.querySelector('.qty').value,
         unit: tr.querySelector('.unit').value,
         required_by: tr.querySelector('.req').value || null,

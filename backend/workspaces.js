@@ -8,8 +8,8 @@
 //   - money is only included when the person holds field.prices.
 // So a dashboard count and the list it opens are computed from the same conditions.
 //
-// Functionality the application does not have yet (quotations, stock locations, dispatches, returns, branch
-// delivery confirmation, line-level inspection, attachments) is deliberately absent: no card, queue or menu entry
+// Functionality the application does not have yet (quotations, stock locations, dispatches, returns,
+// line-level inspection, attachments beyond goods receipts) is deliberately absent: no card, queue or menu entry
 // exists for it. See docs/WORKSPACES.md for that list.
 
 const { pool } = require('./database');
@@ -19,6 +19,7 @@ const { emailOn, whatsappOn } = require('./notify');
 const { visibleClause } = require('./rd-visibility');
 const RD = require('./rd-logic');
 const taskflow = require('./taskflow');
+const DEL = require('./delivery');
 
 const PRE_DELIVERY = "('created','payment_pending','payment_done','in_transit')"; // a PO whose goods have not been received yet
 const MAX_QUEUE = 15;
@@ -453,16 +454,31 @@ BUILDERS.branch = async (ctx) => {
               (CURRENT_DATE - b.created_at::date) AS waiting, b.priority,
               (SELECT COUNT(*)::int FROM branch_request_items i WHERE i.request_id = b.id) AS lines
          FROM branch_stock_requests b WHERE TRUE${rq.clause} ORDER BY b.delivery_needed_by NULLS LAST, b.id DESC`, rq.params);
+    const dl = await DEL.deliveryFor(pool, rows.rows.map(r => r.id));
+    rows.rows.forEach(r => { r.delivery = dl.get(r.id); });
+    const canConfirm = ctx.can(KEYS.BRANCH_REQUEST_CONFIRM);
+    // goods that should have arrived by now (date reached) and are not all confirmed: the branch is asked to confirm or report
+    const toConfirm = rows.rows.filter(r => DEL.canStillConfirm(r.status, r.delivery.state) && r.due && r.due <= RD.todayIST());
     const n = (...s) => rows.rows.filter(r => s.includes(r.status)).length;
     cards.push(card('awaiting', 'Awaiting approval', n('pending'), 'branch-request-list.html?status=pending', n('pending') ? 'warn' : 'good', 'Submitted, not yet approved'));
     cards.push(card('progress', 'Approved, being fulfilled', n('approved', 'po_raised'), 'branch-request-list.html?status=approved,po_raised', 'neutral', 'Approved or being prepared'));
     cards.push(card('rejected', 'Rejected', n('rejected'), 'branch-request-list.html?status=rejected', n('rejected') ? 'bad' : 'good', 'Not approved'));
+    if (canConfirm) cards.push(card('toconfirm', 'Deliveries to confirm', toConfirm.length, 'branch-request-list.html?status=approved,po_raised', toConfirm.length ? 'warn' : 'good', 'Delivery date reached: tell us what arrived'));
     const decider = await team(KEYS.BRANCH_REQUEST_APPROVE);
-    rows.rows.filter(r => r.status !== 'rejected').forEach(r => queue.push(task({
-      type: 'Request', number: r.request_number, href: 'branch-request-detail.html?id=' + r.id, party: r.branch,
-      reason: r.status === 'pending' ? `${plural(r.lines, 'item')} - waiting for approval` : r.status === 'approved' ? `${plural(r.lines, 'item')} - approved, goods are being arranged` : `${plural(r.lines, 'item')} - being prepared`,
-      responsible: r.status === 'pending' ? decider : 'Purchase and production', due: r.due, overdue: r.late && r.status !== 'rejected', waiting_days: r.waiting,
-      progress: PROGRESS[r.status], next: { label: 'Open request', href: 'branch-request-detail.html?id=' + r.id }, tone: r.late ? 'bad' : r.status === 'pending' ? 'warn' : 'info' })));
+    // a request whose goods have all arrived (or were closed short) is finished for the branch, so it leaves the queue
+    rows.rows.filter(r => r.status !== 'rejected' && !['complete', 'closed_short'].includes(r.delivery.state)).forEach(r => {
+      const open = DEL.canStillConfirm(r.status, r.delivery.state), got = r.delivery.state === 'partial' ? ` (${DEL.deliveryText(r.delivery)})` : '';
+      queue.push(task({
+        type: 'Request', number: r.request_number, href: 'branch-request-detail.html?id=' + r.id, party: r.branch,
+        reason: (r.status === 'pending' ? `${plural(r.lines, 'item')} - waiting for approval` : r.status === 'approved' ? `${plural(r.lines, 'item')} - approved, goods are being arranged` : `${plural(r.lines, 'item')} - being prepared`) + got,
+        responsible: r.status === 'pending' ? decider : 'Purchase and production', due: r.due, overdue: r.late && r.status !== 'rejected', waiting_days: r.waiting,
+        progress: r.delivery.state === 'partial' ? 'Partly received' : PROGRESS[r.status], next: { label: canConfirm && open && r.due && r.due <= RD.todayIST() ? 'Confirm delivery' : 'Open request', href: 'branch-request-detail.html?id=' + r.id }, tone: r.late ? 'bad' : r.status === 'pending' ? 'warn' : 'info' }));
+    });
+    // damage or shortage the branch reported on a delivery
+    rows.rows.filter(r => r.delivery.has_problem).slice(0, 10).forEach(r => exceptions.push(task({
+      type: 'Delivery', number: r.request_number, href: 'branch-request-detail.html?id=' + r.id, party: r.branch,
+      reason: r.delivery.state === 'closed_short' ? `Closed short: ${DEL.deliveryText(r.delivery)}` : `${r.delivery.damaged} damaged on arrival`, responsible: 'Purchase and production', progress: 'Problem reported',
+      next: { label: 'Open request', href: 'branch-request-detail.html?id=' + r.id }, tone: 'bad' })));
     rows.rows.filter(r => r.status === 'rejected').slice(0, 10).forEach(r => exceptions.push(task({
       type: 'Request', number: r.request_number, href: 'branch-request-detail.html?id=' + r.id, party: r.branch,
       reason: 'This request was not approved', responsible: decider, waiting_days: r.waiting, progress: 'Rejected',
@@ -692,6 +708,18 @@ BUILDERS.manager = async (ctx) => {
       type: 'Goods receipt', number: g.grn_number, href: 'grn-detail.html?id=' + g.id, party: g.supplier_name, reason: `Rejected - ${g.po_number} still needs replacement goods`,
       responsible: 'Purchase', waiting_days: g.waiting, progress: 'Rejected', next: { label: 'Open receipt', href: 'grn-detail.html?id=' + g.id }, tone: 'bad' })));
     actions.push({ label: 'Review Exceptions', href: 'variance-report.html' });
+  }
+  // damage or shortage reported by a branch on a delivery in the last 30 days
+  if (ctx.can(KEYS.BRANCH_REQUEST_VIEW)) {
+    const rq = requestScope(ctx, KEYS.BRANCH_REQUEST_VIEW, 'b.branch');
+    const recent = await pool.query(
+      `SELECT DISTINCT b.id, b.request_number, b.branch FROM branch_stock_requests b JOIN branch_receipts r ON r.request_id = b.id
+        WHERE r.received_at > NOW() - INTERVAL '30 days'${rq.clause} ORDER BY b.id DESC LIMIT 100`, rq.params);
+    const dl = await DEL.deliveryFor(pool, recent.rows.map(r => r.id));
+    recent.rows.filter(r => dl.get(r.id).has_problem).slice(0, 10).forEach(r => { const d = dl.get(r.id); exceptions.push(task({
+      type: 'Delivery', number: r.request_number, href: 'branch-request-detail.html?id=' + r.id, party: r.branch,
+      reason: d.state === 'closed_short' ? `Branch says nothing more is coming: ${DEL.deliveryText(d)}` : `${d.damaged} reported damaged on arrival`, responsible: 'Purchase and production', progress: 'Problem reported',
+      next: { label: 'Open request', href: 'branch-request-detail.html?id=' + r.id }, tone: 'bad' })); });
   }
   // Purchase spending for a period the viewer chooses. Only for people who may see money.
   let controls = [];

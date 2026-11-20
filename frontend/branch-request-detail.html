@@ -9,6 +9,14 @@
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .dv-box { margin: var(--s4) 0; } .dv-box h3 { margin: 0 0 4px; } .dv-state { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; background: var(--surface-2); color: var(--text-2); }
+    .dv-state.complete { background: var(--success-bg); color: var(--success); } .dv-state.partial { background: var(--warn-bg); color: var(--warn); } .dv-state.closed_short { background: var(--danger-bg); color: var(--danger); }
+    .dv-form { border: 1px solid var(--border); border-radius: 12px; padding: 12px; max-width: 760px; margin-top: 12px; } .dv-form input[type=number] { width: 7.5em; } .dv-form textarea { width: 100%; max-width: 560px; }
+    .dv-hist { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; } .dv-hist li { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; } .dv-hist small { color: var(--text-2); display: block; }
+    .dv-bad { color: var(--danger); font-weight: 600; } .dv-check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; } .dv-check input { width: 20px; height: 20px; margin-top: 2px; }
+    @media print { #deliveryBox .dv-form { display: none; } }
+  </style>
 </head>
 <body>
   <p><a href="index.html">&larr; Home</a> | <a href="branch-request-list.html">&larr; All requests</a></p>
@@ -34,6 +42,16 @@
     </table>
 
     <div id="poBox"></div>
+
+    <section id="deliveryBox" class="dv-box" aria-labelledby="dvTitle" hidden>
+      <h3 id="dvTitle">Delivery</h3>
+      <p id="dvSummary"></p>
+      <div class="oxi-table-scroll"><table id="dvTable"><thead><tr><th scope="col">Item</th><th scope="col">Requested</th><th scope="col">Received</th><th scope="col">Damaged</th><th scope="col">Still expected</th></tr></thead><tbody id="dvRows"></tbody></table></div>
+      <div id="dvForm"></div>
+      <h4>What the branch has confirmed</h4>
+      <ul class="dv-hist" id="dvHist"></ul>
+      <p id="dvMsg" role="alert"></p>
+    </section>
     <div class="oxi-actions" id="actions"></div>
 
     <div class="oxi-print-signatures">
@@ -98,7 +116,45 @@
       if (window.oxiCan('production_indent.view') && ['approved', 'po_raised'].includes(r.status)) {
         const p = document.createElement('a'); p.href = 'material-plan.html?id=' + r.id; p.className = 'oxi-view-btn'; p.textContent = 'Plan raw materials'; actions.appendChild(p);
       }
+      renderDelivery(d, r);
       document.getElementById('detail').hidden = false;
+    }
+
+    // ---------------- delivery: what the branch has received ----------------
+    const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const dvMsg = (t, ok) => { const m = document.getElementById('dvMsg'); m.textContent = t || ''; m.className = t ? (ok ? 'success' : 'error') : ''; };
+    function renderDelivery(d, r) {
+      const dv = d.delivery, box = document.getElementById('deliveryBox');
+      box.hidden = !['approved', 'po_raised'].includes(r.status) && !dv.receipts.length;       // nothing to show before approval
+      if (box.hidden) return;
+      const sum = document.getElementById('dvSummary'); sum.innerHTML = ''; sum.appendChild(mk('span', 'dv-state ' + dv.state, dv.text));
+      if (dv.damaged > 0) { const x = mk('span', 'dv-bad', '  ' + dv.damaged + ' reported damaged'); sum.appendChild(x); }
+      const name = new Map(d.items.map(i => [i.id, i])), rows = document.getElementById('dvRows'); rows.innerHTML = '';
+      dv.lines.forEach(l => { const it = name.get(l.item_id) || {}; const tr = document.createElement('tr'); addCell(tr, it.item_name); addCell(tr, l.requested + ' ' + (it.unit || '')); addCell(tr, l.received); const dm = addCell(tr, l.damaged || '-'); if (l.damaged) dm.className = 'dv-bad'; addCell(tr, l.remaining); rows.appendChild(tr); });
+      const hist = document.getElementById('dvHist'); hist.innerHTML = '';
+      if (!dv.receipts.length) hist.appendChild(mk('li', null, 'Nothing confirmed yet.'));
+      dv.receipts.slice().reverse().forEach(c => {
+        const li = mk('li'); li.appendChild(mk('strong', null, day(c.at) + ' - ' + c.by));
+        const parts = c.lines.map(x => { const it = name.get(x.item_id) || {}; return x.qty + ' ' + (it.unit || '') + ' ' + (it.item_name || '') + (x.damaged_qty ? ' (' + x.damaged_qty + ' damaged)' : ''); });
+        li.appendChild(mk('small', null, parts.length ? 'Arrived: ' + parts.join(', ') : 'Nothing arrived')); if (c.note) li.appendChild(mk('small', null, 'Note: ' + c.note)); if (c.is_final) li.appendChild(mk('small', 'dv-bad', 'Branch says nothing more is coming.'));
+        hist.appendChild(li); });
+      const fh = document.getElementById('dvForm'); fh.innerHTML = ''; if (!dv.can_confirm) return;
+      const f = mk('form', 'dv-form'); f.setAttribute('aria-label', 'Confirm what arrived'); f.appendChild(mk('strong', null, 'Confirm what arrived'));
+      f.appendChild(mk('p', 'oxi-section-note', 'Enter only what has arrived now. You can come back when the rest arrives.'));
+      const t = mk('table'); const hd = mk('tr'); ['Item', 'Still expected', 'Arrived now', 'Of those, damaged'].forEach(h => { const th = mk('th', null, h); th.scope = 'col'; hd.appendChild(th); }); const th0 = mk('thead'); th0.appendChild(hd); t.appendChild(th0);
+      const tb = mk('tbody'), inputs = [];
+      dv.lines.filter(l => l.remaining > 0).forEach(l => { const it = name.get(l.item_id) || {}; const tr = mk('tr'); tr.appendChild(mk('td', null, it.item_name)); tr.appendChild(mk('td', null, l.remaining + ' ' + (it.unit || '')));
+        const mkIn = (label) => { const i = mk('input'); i.type = 'number'; i.min = '0'; i.step = 'any'; i.inputMode = 'decimal'; i.setAttribute('aria-label', label + ': ' + it.item_name); const td = mk('td'); td.appendChild(i); tr.appendChild(td); return i; };
+        inputs.push({ id: l.item_id, q: mkIn('Arrived now'), d: mkIn('Damaged') }); tb.appendChild(tr); });
+      t.appendChild(tb); const w = mk('div', 'oxi-table-scroll'); w.appendChild(t); f.appendChild(w);
+      const nl = mk('label', null, 'Note (needed if anything is damaged or will not come)'); nl.htmlFor = 'dvNote'; nl.style.display = 'block'; nl.style.marginTop = '10px'; const nt = mk('textarea'); nt.id = 'dvNote'; nt.rows = 2; nt.maxLength = 300; f.append(nl, nt);
+      const cl = mk('label', 'dv-check'); const ck = mk('input'); ck.type = 'checkbox'; ck.id = 'dvFinal'; cl.append(ck, mk('span', null, 'This is everything that will arrive. Nothing more is coming for this request.')); f.appendChild(cl);
+      const err = mk('div', 'oxi-errtext'); err.setAttribute('role', 'alert'); err.hidden = true; const ok = mk('button', null, 'Save'); ok.type = 'submit'; f.append(err, ok);
+      f.onsubmit = async (e) => { e.preventDefault(); err.hidden = true; ok.disabled = true;
+        const res = await api('/api/branch-request/' + r.id + '/receipts', 'POST', { items: inputs.map(x => ({ item_id: x.id, qty: x.q.value, damaged_qty: x.d.value })), note: nt.value, final: ck.checked });
+        ok.disabled = false; if (!res.success) { err.textContent = res.error || 'Could not save.'; err.hidden = false; return; }
+        dvMsg('Saved: ' + res.text + '.', true); load(); };
+      fh.appendChild(f);
     }
     load();
   </script>

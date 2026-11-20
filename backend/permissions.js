@@ -15,6 +15,7 @@ const KEYS = {
   BRANCH_REQUEST_VIEW: 'branch_request.view',
   BRANCH_REQUEST_APPROVE: 'branch_request.approve',
   BRANCH_REQUEST_DELETE: 'branch_request.delete',
+  BRANCH_REQUEST_CONFIRM: 'branch_request.confirm_delivery', // confirm what arrived at the branch (and report damage or shortage)
 
   PRODUCTION_INDENT_CREATE: 'production_indent.create',
   PRODUCTION_INDENT_VIEW: 'production_indent.view',
@@ -82,6 +83,7 @@ const CATALOG = [
   { key: KEYS.BRANCH_REQUEST_VIEW, module: 'Branch Stock Requests', action: 'View requests' },
   { key: KEYS.BRANCH_REQUEST_APPROVE, module: 'Branch Stock Requests', action: 'Approve a request' },
   { key: KEYS.BRANCH_REQUEST_DELETE, module: 'Branch Stock Requests', action: 'Delete a request' },
+  { key: KEYS.BRANCH_REQUEST_CONFIRM, module: 'Branch Stock Requests', action: 'Confirm that the stock arrived (and report damage or shortage)' },
 
   { key: KEYS.PRODUCTION_INDENT_CREATE, module: 'Production Indents', action: 'Create an indent' },
   { key: KEYS.PRODUCTION_INDENT_VIEW, module: 'Production Indents', action: 'View indents' },
@@ -146,7 +148,7 @@ const CATALOG = [
 // also how it is submitted, so there is no separate "submit" permission; and nothing yet exports data except the
 // Tally log, so "export" appears only on that key.
 const KINDS = {
-  'branch_request.create': 'create', 'branch_request.view': 'view', 'branch_request.approve': 'approve', 'branch_request.delete': 'cancel',
+  'branch_request.create': 'create', 'branch_request.view': 'view', 'branch_request.approve': 'approve', 'branch_request.delete': 'cancel', 'branch_request.confirm_delivery': 'edit',
   'production_indent.create': 'create', 'production_indent.view': 'view', 'production_indent.approve': 'approve', 'production_indent.delete': 'cancel',
   'consolidate.view': 'view', 'consolidate.create_po': 'create',
   'po.create': 'create', 'po.view': 'view', 'po.update_status': 'edit', 'po.delete': 'cancel',
@@ -168,7 +170,7 @@ CATALOG.forEach(c => { c.kind = KINDS[c.key] || 'view'; });
 // The exact behaviour the app already had before this system existed. Seeded once;
 // after that, the role_permissions table in the database is the only source of truth.
 const DEFAULTS = {
-  branch: [KEYS.BRANCH_REQUEST_CREATE, KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_DELETE, KEYS.CATALOG_VIEW],
+  branch: [KEYS.BRANCH_REQUEST_CREATE, KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_DELETE, KEYS.BRANCH_REQUEST_CONFIRM, KEYS.CATALOG_VIEW],
   production: [KEYS.PRODUCTION_INDENT_CREATE, KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_DELETE, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS],
   store: [
     KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE,
@@ -198,7 +200,7 @@ const DEFAULTS = {
   // New roles. Nobody holds them until an administrator assigns them.
   qc: [KEYS.GRN_VIEW, KEYS.GRN_APPROVE, KEYS.PO_VIEW, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW],      // plus the lab trial keys below
   manager: [
-    KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE,
+    KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE, KEYS.BRANCH_REQUEST_CONFIRM,
     KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_APPROVE,
     KEYS.PO_VIEW, KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW, KEYS.SUPPLIERS_VIEW,
