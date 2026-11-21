@@ -10,7 +10,7 @@ const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../u
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const { branchScope, branchClause } = require('../access');
-const { taxMode, taxSplit, validOverride } = require('../tax');
+const { taxMode, taxLines, validOverride, cleanRate } = require('../tax');
 const router = express.Router();
 
 // Only APPROVED demand can be purchased. Pending requests/indents have not been signed off yet.
@@ -89,6 +89,7 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
     if (!it.unit || !String(it.unit).trim()) return fail(res, 400, `Item ${i + 1}: unit is required`);
     if (!isFinite(Number(it.quantity)) || Number(it.quantity) <= 0) return fail(res, 400, `Item ${i + 1}: quantity must be greater than 0`);
     if (!isFinite(Number(it.rate)) || Number(it.rate) <= 0) return fail(res, 400, `Item ${i + 1}: rate must be greater than 0`);
+    if (cleanRate(it.gst_rate) === undefined) return fail(res, 400, `Item ${i + 1}: GST rate must be one of 0, 0.25, 3, 5, 12, 18 or 28 (or blank for 18)`);
   }
   const branchIds = Array.isArray(b.branch_request_ids) ? b.branch_request_ids.map(Number).filter(Number.isInteger) : [];
   const indentIds = Array.isArray(b.production_indent_ids) ? b.production_indent_ids.map(Number).filter(Number.isInteger) : [];
@@ -111,10 +112,16 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
 
     const lines = b.items.map(it => ({
       item_name: String(it.item_name).trim(), quantity: Number(it.quantity), unit: String(it.unit).trim(),
-      rate: Number(it.rate), line_amount: round2(Number(it.quantity) * Number(it.rate))
+      rate: Number(it.rate), gst_rate: cleanRate(it.gst_rate), line_amount: round2(Number(it.quantity) * Number(it.rate))
     }));
     const subtotal = round2(lines.reduce((s, l) => s + l.line_amount, 0));
-    const { cgst, sgst, igst, total } = taxSplit(subtotal, taxMode(sup.rows[0].gst_number, validOverride(b.tax_type)));   // IGST for another state's supplier
+    // an item with no rate typed takes the GST rate of the raw material of the same name, when the list has one
+    const missing = lines.filter(l => l.gst_rate === null);
+    if (missing.length) {
+      const mr = (await client.query('SELECT lower(name) AS n, gst_rate::float AS r FROM raw_materials WHERE lower(name) = ANY($1) AND gst_rate IS NOT NULL', [missing.map(l => l.item_name.toLowerCase())])).rows;
+      for (const l of missing) { const m = mr.find(x => x.n === l.item_name.toLowerCase()); if (m && cleanRate(m.r) !== undefined) l.gst_rate = cleanRate(m.r); }
+    }
+    const { cgst, sgst, igst, total } = taxLines(lines.map(l => ({ amount: l.line_amount, rate: l.gst_rate })), taxMode(sup.rows[0].gst_number, validOverride(b.tax_type)));   // IGST for another state's supplier
     const poNumber = await nextNumber(client, 'purchase_orders', 'po_number', `OXI-PO-${stamp(todayISO())}-`);
 
     const po = await client.query(
@@ -127,8 +134,8 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
 
     for (const l of lines) {
       await client.query(
-        'INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount) VALUES ($1,$2,$3,$4,$5,$6)',
-        [poId, l.item_name, l.quantity, l.unit, l.rate, l.line_amount]);
+        'INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount, gst_rate) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [poId, l.item_name, l.quantity, l.unit, l.rate, l.line_amount, l.gst_rate]);
     }
 
     // Mark the lines this order buys (matched by item name and unit) and link their requests. A request becomes "po_raised"

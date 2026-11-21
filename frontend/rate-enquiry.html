@@ -63,11 +63,14 @@
 
       // grid: items x suppliers
       const head = document.getElementById('gridHead'); head.innerHTML = ''; const hr = el('tr');
-      ['Item', 'Qty', 'Unit'].forEach(h => hr.appendChild(el('th', h))); D.suppliers.forEach(s => hr.appendChild(el('th', s.name))); hr.appendChild(el('th', 'Chosen'));
+      ['Item', 'Qty', 'Unit', 'GST'].forEach(h => hr.appendChild(el('th', h))); D.suppliers.forEach(s => hr.appendChild(el('th', s.name))); hr.appendChild(el('th', 'Chosen'));
       head.appendChild(hr);
       const body = document.getElementById('gridBody'); body.innerHTML = '';
       D.items.forEach(it => {
         const tr = el('tr'); tr.appendChild(el('td', it.item_name)); tr.appendChild(el('td', it.quantity)); tr.appendChild(el('td', it.unit));
+        { const gt = el('td'), g = el('select'); g.title = 'GST rate of this item'; [['', 'GST auto'], ['0', 'GST 0'], ['5', 'GST 5'], ['12', 'GST 12'], ['18', 'GST 18'], ['28', 'GST 28']].forEach(([v, t]) => { const o = el('option', t); o.value = v; g.appendChild(o); });
+          const cur = it.gst_rate === null || it.gst_rate === undefined ? '' : String(it.gst_rate); if (![...g.options].some(o => o.value === cur)) { const o = el('option', 'GST ' + cur); o.value = cur; g.appendChild(o); } g.value = cur; g.disabled = !can || !!it.po_id;
+          g.onchange = async () => { await call('/item', 'PUT', { item_id: it.id, gst_rate: g.value }); await load(); }; gt.appendChild(g); tr.appendChild(gt); }
         const rates = D.quotes.filter(x => x.item_id === it.id).map(x => x.rate), low = rates.length ? Math.min(...rates) : null, locked = !!it.po_id;
         D.suppliers.forEach(s => {
           const cell = el('td', undefined, 're-cell'), qt = q(it.id, s.id);
@@ -87,7 +90,7 @@
         else ch.textContent = '-';
         tr.appendChild(ch); body.appendChild(tr);
       });
-      if (!D.suppliers.length) { const tr = el('tr'); const td = el('td', 'Add the suppliers you are asking, above.'); td.colSpan = 4; tr.appendChild(td); body.appendChild(tr); }
+      if (!D.suppliers.length) { const tr = el('tr'); const td = el('td', 'Add the suppliers you are asking, above.'); td.colSpan = 5; tr.appendChild(td); body.appendChild(tr); }
 
       // orders to raise: chosen but not yet ordered, grouped by supplier
       const box = document.getElementById('orderBox'); box.innerHTML = '';
@@ -124,7 +127,7 @@
       const po = await api('/api/consolidate/create-po', 'POST', {
         supplier_id: supId, delivery_date: delivery, notes: 'Rates from ' + D.enquiry.enquiry_number,
         branch_request_ids: src('branch'), production_indent_ids: src('production'),
-        items: items.map(i => ({ item_name: i.item_name, quantity: i.quantity, unit: i.unit, rate: i.awarded_rate }))
+        items: items.map(i => ({ item_name: i.item_name, quantity: i.quantity, unit: i.unit, rate: i.awarded_rate, gst_rate: i.gst_rate === null ? undefined : i.gst_rate }))
       });
       if (!po.success) { btn.disabled = false; show('Could not create the PO: ' + po.error, false); return; }
       const rec = await api('/api/rate-enquiry/' + encodeURIComponent(id) + '/ordered', 'POST', { item_ids: items.map(i => i.id), po_id: po.po_id });

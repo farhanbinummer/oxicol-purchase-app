@@ -26,7 +26,7 @@
   <h3>Consolidated items</h3>
   <p><small>Tick the sources above to include; matching items combine automatically. Enter the rate you agreed with the supplier.</small></p>
   <table id="consTable">
-    <thead><tr><th></th><th>Item</th><th>Total qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th></tr></thead>
+    <thead><tr><th></th><th>Item</th><th>Total qty</th><th>Unit</th><th>Rate (₹)</th><th>GST %</th><th>Amount (₹)</th></tr></thead>
     <tbody id="consRows"></tbody>
   </table>
 
@@ -104,7 +104,8 @@
 
       const tbody = document.getElementById('consRows');
       const oldRates = {}; // keep any rate the user already typed
-      tbody.querySelectorAll('tr').forEach(tr => { oldRates[tr.dataset.key] = tr.querySelector('.rate').value; });
+      const oldGst = {};
+      tbody.querySelectorAll('tr').forEach(tr => { oldRates[tr.dataset.key] = tr.querySelector('.rate').value; oldGst[tr.dataset.key] = tr.querySelector('.gst').value; });
       tbody.innerHTML = '';
       [...totals.entries()].forEach(([key, row]) => {
         const tr = document.createElement('tr');
@@ -122,6 +123,9 @@
         rateInp.className = 'rate'; rateInp.value = oldRates[key] || '';
         rateInp.addEventListener('input', updateAmount);
         rateTd.appendChild(rateInp); tr.appendChild(rateTd);
+        const gTd = document.createElement('td'), gSel = document.createElement('select'); gSel.className = 'gst'; gSel.title = 'GST rate of this item (blank: the raw material\'s own rate, else 18)';
+        ['', '0', '5', '12', '18', '28'].forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? 'auto' : v; gSel.appendChild(o); }); gSel.value = oldGst[key] || '';
+        gTd.appendChild(gSel); tr.appendChild(gTd);
         const amtTd = addCell(tr, '0.00'); amtTd.className = 'amt';
         tbody.appendChild(tr);
       });
@@ -144,7 +148,8 @@
           item_name: tr.children[1].textContent,
           quantity: Number(tr.querySelector('.qty').textContent),
           unit: tr.children[3].textContent,
-          rate: tr.querySelector('.rate').value
+          rate: tr.querySelector('.rate').value,
+          gst_rate: tr.querySelector('.gst').value || undefined
         });
       });
       const branch_request_ids = [...document.querySelectorAll('.srcBranch:checked')].map(c => Number(c.value));
@@ -175,7 +180,7 @@
         const has = (r) => r.items.some(i => i.item_name.toLowerCase() + '||' + i.unit.toLowerCase() === key);
         data.branch_requests.filter(r => checkedB.has(r.id) && has(r)).forEach(r => sources.push({ type: 'branch', id: r.id }));
         data.production_indents.filter(r => checkedI.has(r.id) && has(r)).forEach(r => sources.push({ type: 'production', id: r.id }));
-        items.push({ item_name: name, unit, quantity: Number(tr.querySelector('.qty').textContent), sources });
+        items.push({ item_name: name, unit, quantity: Number(tr.querySelector('.qty').textContent), gst_rate: tr.querySelector('.gst').value || undefined, sources });
       });
       if (!items.length) return show('Tick at least one item first', false);
       const btn = document.getElementById('enquiryBtn'); btn.disabled = true;

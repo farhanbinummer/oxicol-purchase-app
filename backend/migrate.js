@@ -922,6 +922,14 @@ const STEPS = [
         UNIQUE (item_id, supplier_id))`);
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'rate_enquiry.view'), ('purchase', 'rate_enquiry.manage') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // GST rate per item (blank = the default 18%): on order lines, and on the items of a rate enquiry.
+    name: '040_gst_per_item',
+    run: async (db) => {
+      await db.query('ALTER TABLE po_items ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5,2)');
+      await db.query('ALTER TABLE rate_enquiry_items ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5,2)');
+    }
   }
 ];
 

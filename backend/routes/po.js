@@ -17,7 +17,7 @@ const { resolveMaterials } = require('../materials');
 const { audit } = require('../audit');
 const { refreshSourceStatus } = require('../source-status');
 const { buildPrint } = require('../po-print');
-const { taxMode, taxSplit, modeOfPo, validOverride, CGST_RATE, SGST_RATE, IGST_RATE } = require('../tax');
+const { taxMode, taxLines, modeOfPo, validOverride, cleanRate, CGST_RATE, SGST_RATE, IGST_RATE } = require('../tax');
 const RD = require('../rd-logic');
 const router = express.Router();
 
@@ -53,6 +53,7 @@ function validatePO(body) {
     const rate = Number(it.rate);
     if (!isFinite(qty) || qty <= 0) return `Item ${n}: quantity must be greater than 0`;
     if (!isFinite(rate) || rate <= 0) return `Item ${n}: rate must be greater than 0`;
+    if (cleanRate(it.gst_rate) === undefined) return `Item ${n}: GST rate must be one of 0, 0.25, 3, 5, 12, 18 or 28 (or left blank for 18)`;
   }
   return null;
 }
@@ -67,11 +68,12 @@ async function priceLines(client, items, supplierId, override) {
     unit: String(it.unit).trim(),
     rate: Number(it.rate),
     hsn_code: it.hsn_code ? String(it.hsn_code).trim() : (m && m.hsn_code ? m.hsn_code : null),
+    gst_rate: it.gst_rate !== undefined && it.gst_rate !== null && it.gst_rate !== '' ? cleanRate(it.gst_rate) : (m ? (cleanRate(m.gst_rate) ?? null) : null),   // typed on the line, else the raw material's own rate, else the default
     line_amount: round2(Number(it.quantity) * Number(it.rate))
   }); });
   const subtotal = round2(lines.reduce((sum, l) => sum + l.line_amount, 0));
   const gst = (await client.query('SELECT gst_number FROM suppliers WHERE id = $1', [supplierId])).rows[0];
-  const mode = taxMode(gst && gst.gst_number, validOverride(override)), t = taxSplit(subtotal, mode);
+  const mode = taxMode(gst && gst.gst_number, validOverride(override)), t = taxLines(lines.map(l => ({ amount: l.line_amount, rate: l.gst_rate })), mode);
   return { lines, subtotal, cgst: t.cgst, sgst: t.sgst, igst: t.igst, total: t.total, mode };
 }
 
@@ -115,9 +117,9 @@ router.post('/create', requirePermission(KEYS.PO_CREATE), async (req, res) => {
 
     for (const l of lines) {
       await client.query(
-        `INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount, hsn_code)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [poId, l.item_name, l.quantity, l.unit, l.rate, l.line_amount, l.hsn_code]
+        `INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount, hsn_code, gst_rate)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [poId, l.item_name, l.quantity, l.unit, l.rate, l.line_amount, l.hsn_code, l.gst_rate]
       );
     }
 
@@ -371,14 +373,14 @@ router.put('/:id', requirePermission(KEYS.PO_EDIT), async (req, res) => {
     const p = await priceLines(client, items, supplier_id, validOverride(req.body.tax_type) || (Number(supplier_id) === cur.supplier_id ? modeOfPo(cur) : null));
     if (p.error) { await client.query('ROLLBACK'); return fail(res, 400, p.error); }
     const before = { supplier_id: cur.supplier_id, delivery_date: cur.delivery_date, notes: cur.notes, total_amount: Number(cur.total_amount),
-      items: (await client.query('SELECT item_name, quantity, unit, rate, line_amount FROM po_items WHERE po_id = $1 ORDER BY id', [id])).rows };
+      items: (await client.query('SELECT item_name, quantity, unit, rate, line_amount, gst_rate FROM po_items WHERE po_id = $1 ORDER BY id', [id])).rows };
     await client.query(
       `UPDATE purchase_orders SET supplier_id = $1, delivery_date = $2, notes = $3, subtotal = $4, cgst_amount = $5, sgst_amount = $6, igst_amount = $9, total_amount = $7 WHERE id = $8`,
       [supplier_id, delivery_date || null, notes ? String(notes).trim() : null, p.subtotal, p.cgst, p.sgst, p.total, id, p.igst]);
     await client.query('DELETE FROM po_items WHERE po_id = $1', [id]);
     for (const l of p.lines) {
-      await client.query('INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount, hsn_code) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [id, l.item_name, l.quantity, l.unit, l.rate, l.line_amount, l.hsn_code]);
+      await client.query('INSERT INTO po_items (po_id, item_name, quantity, unit, rate, line_amount, hsn_code, gst_rate) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [id, l.item_name, l.quantity, l.unit, l.rate, l.line_amount, l.hsn_code, l.gst_rate]);
     }
     await audit(client, req, { action: 'po.edit', entity: 'purchase_order', id, summary: `${cur.po_number} edited: total Rs ${before.total_amount} -> Rs ${p.total}, ${p.lines.length} item(s)`,
       before, after: { supplier_id: Number(supplier_id), delivery_date: delivery_date || null, notes: notes || null, total_amount: p.total, items: p.lines } });
