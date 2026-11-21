@@ -10,25 +10,55 @@
   <meta name="theme-color" content="#142235">
   <link rel="icon" href="icons/icon-192.png">
   <style>
-    .ed-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .ed-top input[type=search] { flex: 1 1 260px; max-width: 460px; }
-    .ed-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--s3); } .ed-chips button { min-height: 40px; padding: 0 14px; border-radius: 999px; }
-    .ed-chips button[aria-pressed=true] { background: var(--accent); color: #fff; border-color: var(--accent); } .ed-chips b { margin-left: 6px; font-variant-numeric: tabular-nums; }
-    .ed-chips button.bad:not([aria-pressed=true]) b { color: var(--danger); }
-    .ed-card { border: 1px solid var(--border); border-left: 6px solid var(--info); border-radius: var(--r-card, 14px); background: var(--surface); margin: 0 0 var(--s3); padding: 14px 16px; box-shadow: var(--shadow-sm); }
-    .ed-card.late { border-left-color: var(--danger); } .ed-card.today { border-left-color: var(--warn); } .ed-card.soon { border-left-color: var(--info); } .ed-card.way { border-left-color: var(--success); } .ed-card.nodate { border-left-color: var(--text-2); }
-    .ed-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin: 0 0 10px; } .ed-head .po { font-size: 18px; font-weight: 700; } .ed-head .sup { color: var(--text-2); }
-    .ed-head .when { margin-left: auto; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 13px; background: var(--surface-2); color: var(--text-2); }
-    .ed-card.late .when { background: var(--danger-bg); color: var(--danger); } .ed-card.today .when { background: var(--warn-bg); color: var(--warn); } .ed-card.way .when { background: var(--success-bg); color: var(--success); }
-    .ed-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 12px; } @media (max-width: 720px) { .ed-grid { grid-template-columns: 1fr; } }
-    .ed-box { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--surface-2, transparent); } .ed-box h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
-    .ed-big { font-size: 20px; font-weight: 700; line-height: 1.2; } .ed-sub { color: var(--text-2); font-size: 14px; margin-top: 2px; }
-    .ed-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 14px; margin: 0; } .ed-kv dt { font-size: 12px; color: var(--text-2); } .ed-kv dd { margin: 1px 0 0; font-weight: 600; overflow-wrap: anywhere; }
-    .ed-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; } .ed-acts button, .ed-acts a { min-height: 40px; }
-    .ed-copied { color: var(--success); font-size: 13px; }
-    .ed-items { margin: 10px 0 0; } .ed-items summary { cursor: pointer; font-weight: 600; } .ed-items table { margin-top: 8px; }
-    .ed-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
-    .ed-foot .grow { flex: 1; color: var(--text-2); font-size: 14px; }
+    /* summary tiles (they are also the filters) */
+    .ed-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s4); }
+    .ed-search { position: relative; flex: 1 1 280px; max-width: 520px; } .ed-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--text-2); pointer-events: none; }
+    .ed-search input { width: 100%; padding-left: 38px; border-radius: 999px; }
+    .ed-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 var(--s3); }
+    .ed-chips button.ed-tile { display: flex; align-items: center; gap: 12px; text-align: left; min-height: 64px; padding: 10px 14px; border-radius: 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: transform .12s, border-color .12s, box-shadow .12s; }
+    .ed-chips button.ed-tile:hover { transform: translateY(-1px); border-color: var(--tone, var(--accent)); box-shadow: var(--shadow-md); background: var(--surface); }
+    .ed-chips button.ed-tile[aria-pressed=true] { border-color: var(--tone, var(--accent)); background: var(--tone-bg, var(--primary-soft)); box-shadow: inset 0 0 0 1px var(--tone, var(--accent)); }
+    .ed-tile .ic { flex: none; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--tone-bg, var(--primary-soft)); color: var(--tone, var(--accent)); } .ed-tile .ic svg { width: 20px; height: 20px; }
+    .ed-tile .num { display: block; font-size: 24px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; } .ed-tile .lbl { display: block; font-size: 12.5px; color: var(--text-2); margin-top: 3px; font-weight: 600; }
+    .ed-tile.t-all { --tone: var(--accent); --tone-bg: var(--primary-soft); } .ed-tile.t-overdue { --tone: var(--danger); --tone-bg: var(--danger-bg); } .ed-tile.t-today { --tone: var(--warn); --tone-bg: var(--warn-bg); }
+    .ed-tile.t-soon { --tone: var(--info); --tone-bg: var(--info-bg); } .ed-tile.t-way { --tone: var(--success); --tone-bg: var(--success-bg); } .ed-tile.t-nodate { --tone: var(--neutral); --tone-bg: var(--neutral-bg); }
+    .ed-tile.t-overdue:not([aria-pressed=true]) .num.zero, .ed-tile .num.zero { opacity: .55; }
+
+    /* order cards */
+    .ed-card { --tone: var(--info); --tone-bg: var(--info-bg); position: relative; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); margin: 0 0 var(--s4); padding: 18px 20px 14px; box-shadow: var(--shadow-sm); overflow: hidden; transition: box-shadow .15s, border-color .15s; max-width: 1100px; }
+    .ed-card::before { content: ""; position: absolute; left: 0; top: 0; right: 0; height: 4px; background: var(--tone); opacity: .9; }
+    .ed-card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+    .ed-card.late { --tone: var(--danger); --tone-bg: var(--danger-bg); } .ed-card.today { --tone: var(--warn); --tone-bg: var(--warn-bg); } .ed-card.soon { --tone: var(--info); --tone-bg: var(--info-bg); } .ed-card.way { --tone: var(--success); --tone-bg: var(--success-bg); } .ed-card.nodate { --tone: var(--neutral); --tone-bg: var(--neutral-bg); }
+    .ed-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 0 0 14px; }
+    .ed-avatar { flex: none; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-weight: 800; font-size: 18px; background: var(--tone-bg); color: var(--tone); }
+    .ed-id { display: flex; flex-direction: column; min-width: 0; } .ed-head .po { font-size: 18px; font-weight: 800; letter-spacing: .1px; } .ed-head .sup { color: var(--text-2); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+    .ed-head .when { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-weight: 700; font-size: 13px; background: var(--tone-bg); color: var(--tone); }
+    .ed-head .when svg { width: 14px; height: 14px; }
+
+    /* ordered > dispatched > delivered */
+    .ed-steps { display: grid; grid-template-columns: 1fr 1fr 1fr; margin: 0 0 16px; padding: 0 4px; }
+    .ed-step { position: relative; text-align: center; font-size: 12.5px; color: var(--text-2); padding-top: 26px; }
+    .ed-step::before { content: ""; position: absolute; top: 8px; left: -50%; right: 50%; height: 3px; background: var(--border-strong); border-radius: 3px; } .ed-step:first-child::before { display: none; }
+    .ed-step::after { content: ""; position: absolute; top: 1px; left: 50%; width: 17px; height: 17px; margin-left: -8.5px; border-radius: 50%; background: var(--surface); border: 3px solid var(--border-strong); box-sizing: border-box; }
+    .ed-step b { display: block; font-size: 13px; color: var(--text-2); font-weight: 700; } .ed-step span { display: block; margin-top: 1px; }
+    .ed-step.done::before { background: var(--success); } .ed-step.done::after { background: var(--success); border-color: var(--success); } .ed-step.done b { color: var(--text); }
+    .ed-step.now::before { background: var(--success); } .ed-step.now::after { border-color: var(--tone); box-shadow: 0 0 0 4px var(--tone-bg); } .ed-step.now b { color: var(--tone); }
+
+    .ed-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 12px; } @media (max-width: 720px) { .ed-grid { grid-template-columns: 1fr; } }
+    .ed-box { border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; background: var(--surface-2, transparent); display: flex; flex-direction: column; }
+    .ed-box h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-2); font-weight: 700; } .ed-box h3 svg { width: 16px; height: 16px; color: var(--accent); }
+    .ed-big { font-size: 19px; font-weight: 800; line-height: 1.25; } .ed-sub { color: var(--text-2); font-size: 14px; margin-top: 3px; }
+    .ed-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 14px; margin: 0; } .ed-kv dt { font-size: 12px; color: var(--text-2); } .ed-kv dd { margin: 1px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+    .ed-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 12px; } .ed-acts button, .ed-acts a { min-height: 40px; border-radius: 10px; }
+    .ed-copied { color: var(--success); font-size: 13px; align-self: center; }
+    .ed-items { margin: 12px 0 0; } .ed-items summary { cursor: pointer; font-weight: 600; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); border: 1px dashed var(--border-strong); list-style: none; display: flex; align-items: center; gap: 8px; }
+    .ed-items summary::-webkit-details-marker { display: none; } .ed-items summary::before { content: "\25B8"; color: var(--accent); transition: transform .15s; } .ed-items[open] summary::before { transform: rotate(90deg); }
+    .ed-items table { margin-top: 8px; }
+    .ed-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .ed-foot .grow { flex: 1; color: var(--text-2); font-size: 13.5px; }
     .ed-warn { color: var(--danger); font-weight: 600; font-size: 14px; }
+    @media (max-width: 560px) { .ed-card { padding: 16px 14px 12px; } .ed-head .when { margin-left: 0; } .ed-step { font-size: 11.5px; } }
+    @media print { .ed-card { box-shadow: none; break-inside: avoid; } }
   </style>
 </head>
 <body>
@@ -38,7 +68,10 @@
   <p id="message" role="status"></p>
 
   <div class="ed-top">
-    <input type="search" id="edSearch" placeholder="Find by order, supplier, tracking number, vehicle or item" aria-label="Find a delivery by order, supplier, tracking number, vehicle or item" autocomplete="off">
+    <div class="ed-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="search" id="edSearch" placeholder="Find by order, supplier, tracking number, vehicle or item" aria-label="Find a delivery by order, supplier, tracking number, vehicle or item" autocomplete="off">
+    </div>
   </div>
   <div class="ed-chips" id="whenChips" role="group" aria-label="Show deliveries"></div>
   <p class="oxi-section-sub" id="summary" aria-live="polite"></p>
@@ -47,6 +80,12 @@
   <script src="common.js"></script>
   <script src="po-delivery.js"></script>
   <script>
+    const ICONS = {
+      all: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h8"/>', overdue: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', today: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/><path d="m9 16 2 2 4-4"/>',
+      soon: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18M8 15h3"/>', way: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="17" cy="17.5" r="1.7"/>', nodate: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/>',
+      cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/>', truck: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="17" cy="17.5" r="1.7"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+    };
+    const icon = (k) => { const w = document.createElement('span'); w.style.display = 'contents'; w.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICONS[k] + '</svg>'; return w.firstChild; };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     const $ = (id) => document.getElementById(id);
     const FILTERS = [['all', 'All waiting'], ['overdue', 'Overdue'], ['today', 'Due today'], ['soon', 'Due in 7 days'], ['way', 'On its way'], ['nodate', 'No date set']];
@@ -74,23 +113,34 @@
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, old); else old();
     }
 
+    // ordered > dispatched > delivered: where this order is on its way
+    function steps(p) {
+      const d = sent(p), box = el('div', 'ed-steps'); box.setAttribute('aria-hidden', 'true');
+      const st = (cls, t, sub) => { const x = el('div', 'ed-step ' + cls); x.append(el('b', null, t), el('span', null, sub || '')); box.appendChild(x); };
+      st('done', 'Ordered', p.po_date ? shortDay(p.po_date) : '');
+      st(d ? 'done' : 'now', 'Dispatched', d ? (p.dispatch_date ? shortDay(p.dispatch_date) : 'On its way') : 'Waiting');
+      st(d ? 'now' : '', 'Delivery', p.delivery_date ? 'Due ' + shortDay(p.delivery_date) : 'No date yet');
+      return box;
+    }
+
     function card(p) {
       const k = kind(p), c = el('article', 'ed-card ' + (k === 'late' ? 'late' : k === 'today' ? 'today' : sent(p) ? 'way' : k === 'nodate' ? 'nodate' : 'soon'));
       c.setAttribute('aria-label', 'Order ' + p.po_number + ', ' + p.supplier_name + ', ' + whenText(p));
-      const head = el('div', 'ed-head'); const a = el('a', 'po', p.po_number); a.href = 'po-detail.html?id=' + p.id; head.append(a, el('span', 'sup', p.supplier_name));
+      const head = el('div', 'ed-head'); const a = el('a', 'po', p.po_number); a.href = 'po-detail.html?id=' + p.id; const idb = el('div', 'ed-id'); idb.append(a, el('span', 'sup', p.supplier_name)); head.append(el('div', 'ed-avatar', (p.supplier_name || '?').trim().charAt(0).toUpperCase()), idb);
       if (p.earlier_rejected) head.appendChild(el('span', 'badge badge-bad', 'An earlier delivery was rejected'));
-      head.appendChild(el('span', 'when', whenText(p))); c.appendChild(head);
+      const wp = el('span', 'when'); wp.append(icon('clock'), document.createTextNode(whenText(p))); head.appendChild(wp); c.appendChild(head);
+      c.appendChild(steps(p));
 
       const grid = el('div', 'ed-grid');
       // 1) when it is expected
-      const b1 = el('section', 'ed-box'); b1.setAttribute('aria-label', 'Expected delivery'); b1.appendChild(el('h3', null, 'Expected delivery'));
+      const b1 = el('section', 'ed-box'); b1.setAttribute('aria-label', 'Expected delivery'); { const h = el('h3'); h.append(icon('cal'), document.createTextNode('Expected delivery')); b1.appendChild(h); }
       b1.appendChild(el('div', 'ed-big', p.delivery_date ? fmtDay(p.delivery_date) : 'Not set'));
       b1.appendChild(el('div', 'ed-sub', p.delivery_date ? (k === 'late' ? plural(p.days_late, 'day') + ' past the date. Ask the supplier.' : k === 'today' ? 'Expected today' : 'In ' + (-p.days_late) + (p.days_late === -1 ? ' day' : ' days')) : 'Nobody has entered a date yet.'));
       if (canDate) { const acts = el('div', 'ed-acts'); const bt = el('button', 'oxi-btn-secondary', p.delivery_date ? 'Change date' : 'Set date'); bt.type = 'button'; bt.setAttribute('aria-label', (p.delivery_date ? 'Change' : 'Set') + ' the expected date of ' + p.po_number); bt.onclick = () => oxiPoDelivery.dateDialog(p, refresh); acts.appendChild(bt); b1.appendChild(acts); }
       grid.appendChild(b1);
 
       // 2) who is bringing it and how to follow it
-      const b2 = el('section', 'ed-box'); b2.setAttribute('aria-label', 'Dispatch and tracking'); b2.appendChild(el('h3', null, 'Dispatch and tracking'));
+      const b2 = el('section', 'ed-box'); b2.setAttribute('aria-label', 'Dispatch and tracking'); { const h = el('h3'); h.append(icon('truck'), document.createTextNode('Dispatch and tracking')); b2.appendChild(h); }
       if (sent(p)) {
         const dl = el('dl', 'ed-kv'); const kv = (key, val) => { if (!val) return; const w = el('div'); w.append(el('dt', null, key), el('dd', null, val)); dl.appendChild(w); };
         kv('Transporter / courier', p.transporter); kv('Tracking / LR number', p.tracking_number); kv('Vehicle', p.vehicle_number);
@@ -122,7 +172,10 @@
     function paint() {
       const q = term.trim().toLowerCase(), pool = q ? ALL.filter(p => hay(p).includes(q)) : ALL;
       const chips = $('whenChips'); chips.innerHTML = '';
-      FILTERS.forEach(([f, label]) => { const n = pool.filter(p => matches(p, f)).length; const b = el('button', 'oxi-btn-secondary' + (f === 'overdue' && n ? ' bad' : ''), label); b.type = 'button'; b.setAttribute('aria-pressed', String(f === when)); b.appendChild(el('b', null, String(n)));
+      FILTERS.forEach(([f, label]) => {
+        const n = pool.filter(p => matches(p, f)).length, b = el('button', 'ed-tile t-' + f); b.type = 'button'; b.setAttribute('aria-pressed', String(f === when));
+        const ic = el('span', 'ic'); ic.appendChild(icon(f)); const tx = el('span'); tx.append(el('span', 'num' + (n ? '' : ' zero'), String(n)), el('span', 'lbl', label)); b.append(ic, tx);
+        b.setAttribute('aria-label', label + ': ' + n);
         b.onclick = () => { when = f; history.replaceState(null, '', 'expected-deliveries.html?when=' + f); paint(); }; chips.appendChild(b); });
       const rows = pool.filter(p => matches(p, when)), box = $('list'); box.innerHTML = '';
       const late = ALL.filter(p => kind(p) === 'late').length, today = ALL.filter(p => kind(p) === 'today').length;
