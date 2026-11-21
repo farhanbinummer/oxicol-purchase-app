@@ -56,8 +56,9 @@
 
     <table style="width:auto">
       <tr><td>Subtotal</td><td id="subtotal" align="right"></td></tr>
-      <tr><td>CGST 9%</td><td id="cgst" align="right"></td></tr>
-      <tr><td>SGST 9%</td><td id="sgst" align="right"></td></tr>
+      <tr id="rowCgst"><td>CGST 9%</td><td id="cgst" align="right"></td></tr>
+      <tr id="rowSgst"><td>SGST 9%</td><td id="sgst" align="right"></td></tr>
+      <tr id="rowIgst" hidden><td>IGST 18%</td><td id="igst" align="right"></td></tr>
       <tr><td><b>TOTAL</b></td><td id="total" align="right"></td></tr>
     </table>
 
@@ -183,6 +184,7 @@
         set('subtotal', mv(po.subtotal));
         set('cgst', mv(po.cgst_amount));
         set('sgst', mv(po.sgst_amount));
+        { const inter = Number(po.igst_amount) > 0; document.getElementById('rowCgst').hidden = inter; document.getElementById('rowSgst').hidden = inter; document.getElementById('rowIgst').hidden = !inter; set('igst', mv(po.igst_amount)); }
         set('total', mv(po.total_amount));
         if (d.fields && !d.fields.prices && !document.getElementById('priceNote')) {
           const note = document.createElement('p'); note.id = 'priceNote'; note.className = 'oxi-note-card';

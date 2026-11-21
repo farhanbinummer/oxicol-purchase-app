@@ -32,7 +32,7 @@
 
   <h3>Create PO</h3>
   <label>Supplier<br><select id="supplier"><option value="">Loading...</option></select></label><br><br>
-  <label>Delivery date<br><input type="date" id="delivery"></label><br><br>
+  <label>Delivery date<br><input type="date" id="delivery"></label><br><small>GST is added automatically: CGST + SGST for a supplier in our state, IGST for another state (from the supplier's GST number).</small><br><br>
   <button id="createBtn">Create PO from selected items</button>
   <button id="enquiryBtn" type="button" hidden>Ask suppliers for rates first</button>
   <p><small>No rate yet? Tick the items and use <b>Ask suppliers for rates first</b>: you compare the suppliers' quotes, then raise the order from the best ones.</small></p>

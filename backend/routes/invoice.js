@@ -4,14 +4,13 @@
 //   POST /api/invoice/match/:invoice_id   run (or re-run) the 3-way match
 
 const express = require('express');
+const { taxSplit, modeOfPo } = require('../tax');
 const { pool } = require('../database');
 const { fail, round2, isValidDate } = require('../utils');
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const router = express.Router();
 
-const CGST_RATE = Number(process.env.CGST_RATE ?? 9);
-const SGST_RATE = Number(process.env.SGST_RATE ?? 9);
 const EPSILON = 0.5; // rupees - amounts within this are treated as "the same"
 
 // ------------------------------------------------------------
@@ -99,7 +98,7 @@ router.post('/match/:invoice_id', requirePermission(KEYS.INVOICE_MATCH), async (
          JOIN po_items pi ON pi.po_id = $2 AND pi.item_name = gi.item_name
         WHERE gi.grn_id = $1`, [grn.rows[0].id, invoice.po_id]);
     const grnSubtotal = round2(Number(valued.rows[0].subtotal));
-    const grnTotal = round2(grnSubtotal * (1 + CGST_RATE / 100 + SGST_RATE / 100));
+    const grnTotal = taxSplit(grnSubtotal, modeOfPo(poRow)).total;   // the same kind of tax the order carries
 
     const poTotal = round2(Number(poRow.total_amount));
     const invoiceTotal = round2(Number(invoice.invoice_amount));

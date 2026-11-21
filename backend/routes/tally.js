@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const { taxSplit, modeOfPo } = require('../tax');
 const { pool } = require('../database');
 const { fail } = require('../utils');
 const { requirePermission } = require('../auth');
@@ -62,10 +63,9 @@ router.post('/sync/:po_id', requirePermission(KEYS.TALLY_SYNC), async (req, res)
         stock_item: i.item_name, quantity: Number(i.quantity), unit: i.unit,
         rate: Number(i.rate), amount: Number(i.line_amount)
       })),
-      tax_ledgers: [
-        { ledger: 'CGST', amount: Number(p.cgst_amount) },
-        { ledger: 'SGST', amount: Number(p.sgst_amount) }
-      ],
+      tax_ledgers: Number(p.igst_amount) > 0
+        ? [{ ledger: 'IGST', amount: Number(p.igst_amount) }]
+        : [{ ledger: 'CGST', amount: Number(p.cgst_amount) }, { ledger: 'SGST', amount: Number(p.sgst_amount) }],
       total_amount: Number(p.total_amount),
       narration: `PO ${p.po_number} to ${p.supplier_name}`
     });
@@ -94,17 +94,15 @@ router.post('/sync/:po_id', requirePermission(KEYS.TALLY_SYNC), async (req, res)
            FROM grn_items gi JOIN po_items pi ON pi.po_id = $2 AND pi.item_name = gi.item_name
           WHERE gi.grn_id = $1`, [grn.id, poId])).rows[0];
       const subtotal = round2(Number(valued.subtotal));
-      const cgstRate = Number(process.env.CGST_RATE ?? 9), sgstRate = Number(process.env.SGST_RATE ?? 9);
-      const cgst = round2(subtotal * cgstRate / 100);
-      const sgst = round2(subtotal * sgstRate / 100);
-      const payable = round2(subtotal + cgst + sgst);
+      const gst = taxSplit(subtotal, modeOfPo(p));                    // the same kind of tax the order carries
+      const cgst = gst.cgst, sgst = gst.sgst, igst = gst.igst, payable = gst.total;
       vouchers.push({
         voucher_type: 'Journal',
         voucher_number: grn.grn_number,
         date: p.po_date,
         entries: [
           { ledger: PURCHASE_LEDGER, type: 'Dr', amount: subtotal },
-          { ledger: GST_INPUT_LEDGER, type: 'Dr', amount: round2(cgst + sgst) },
+          { ledger: GST_INPUT_LEDGER, type: 'Dr', amount: round2(cgst + sgst + igst) },
           { ledger: `${PAYABLE_LEDGER} - ${p.supplier_name}`, type: 'Cr', amount: payable }
         ],
         narration: `Goods received against ${p.po_number} (${grn.grn_number}), valued at PO rates`
