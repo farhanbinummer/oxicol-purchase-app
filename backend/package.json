@@ -20,6 +20,7 @@
     "test:po-edit": "node --test tests/po-edit.test.js",
     "test:partial-po": "node --test tests/partial-po.test.js",
     "test:rate-enquiry": "node --test tests/rate-enquiry.test.js",
+    "test:igst": "node --test tests/igst.test.js",
     "test:indent-edit": "node --test tests/indent-edit.test.js",
     "test:branch-delivery": "node --test tests/branch-delivery.test.js",
     "test:admin-records": "node --test tests/admin-records.test.js",

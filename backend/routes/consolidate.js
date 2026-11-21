@@ -10,10 +10,9 @@ const { fail, round2, isValidDate, stamp, todayISO, nextNumber } = require('../u
 const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const { branchScope, branchClause } = require('../access');
+const { taxMode, taxSplit, validOverride } = require('../tax');
 const router = express.Router();
 
-const CGST_RATE = Number(process.env.CGST_RATE ?? 9);
-const SGST_RATE = Number(process.env.SGST_RATE ?? 9);
 // Only APPROVED demand can be purchased. Pending requests/indents have not been signed off yet.
 const OPEN = "('approved')";
 
@@ -107,7 +106,7 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
   try {
     await client.query('BEGIN');
 
-    const sup = await client.query("SELECT id FROM suppliers WHERE id = $1 AND status = 'active'", [b.supplier_id]);
+    const sup = await client.query("SELECT id, gst_number FROM suppliers WHERE id = $1 AND status = 'active'", [b.supplier_id]);
     if (sup.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 400, 'Supplier not found'); }
 
     const lines = b.items.map(it => ({
@@ -115,17 +114,15 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
       rate: Number(it.rate), line_amount: round2(Number(it.quantity) * Number(it.rate))
     }));
     const subtotal = round2(lines.reduce((s, l) => s + l.line_amount, 0));
-    const cgst = round2(subtotal * CGST_RATE / 100);
-    const sgst = round2(subtotal * SGST_RATE / 100);
-    const total = round2(subtotal + cgst + sgst);
+    const { cgst, sgst, igst, total } = taxSplit(subtotal, taxMode(sup.rows[0].gst_number, validOverride(b.tax_type)));   // IGST for another state's supplier
     const poNumber = await nextNumber(client, 'purchase_orders', 'po_number', `OXI-PO-${stamp(todayISO())}-`);
 
     const po = await client.query(
       `INSERT INTO purchase_orders
          (po_number, supplier_id, subtotal, cgst_amount, sgst_amount, igst_amount, total_amount, delivery_date, status, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,0,$6,$7,'created',$8,$9) RETURNING id, po_number, total_amount`,
+       VALUES ($1,$2,$3,$4,$5,$10,$6,$7,'created',$8,$9) RETURNING id, po_number, total_amount`,
       [poNumber, b.supplier_id, subtotal, cgst, sgst, total, b.delivery_date || null,
-       b.notes ? String(b.notes).trim() : 'Consolidated from branch requests / production indents', req.user.id]);
+       b.notes ? String(b.notes).trim() : 'Consolidated from branch requests / production indents', req.user.id, igst]);
     const poId = po.rows[0].id;
 
     for (const l of lines) {

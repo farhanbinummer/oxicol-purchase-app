@@ -112,6 +112,9 @@ jobs:
       - name: Rate enquiry tests
         working-directory: backend
         run: npm run test:rate-enquiry
+      - name: GST (IGST) tests
+        working-directory: backend
+        run: npm run test:igst
       - name: Production request edit tests
         working-directory: backend
         run: npm run test:indent-edit

@@ -26,6 +26,14 @@
     <p>
       <label>Delivery date<br><input type="date" id="delivery"></label>
     </p>
+    <p>
+      <label>Tax<br><select id="taxType">
+        <option value="">Automatic (from the supplier's GST number)</option>
+        <option value="intra">Same state: CGST + SGST</option>
+        <option value="inter">Other state: IGST</option>
+      </select></label>
+      <small id="taxNote"></small>
+    </p>
 
     <h3>Items</h3>
     <table id="items">
@@ -38,8 +46,9 @@
 
     <table style="width:auto">
       <tr><td>Subtotal</td><td id="subtotal" align="right">0.00</td></tr>
-      <tr><td>CGST 9%</td><td id="cgst" align="right">0.00</td></tr>
-      <tr><td>SGST 9%</td><td id="sgst" align="right">0.00</td></tr>
+      <tr class="tx-intra"><td id="cgstLabel">CGST 9%</td><td id="cgst" align="right">0.00</td></tr>
+      <tr class="tx-intra"><td id="sgstLabel">SGST 9%</td><td id="sgst" align="right">0.00</td></tr>
+      <tr class="tx-inter" hidden><td id="igstLabel">IGST 18%</td><td id="igst" align="right">0.00</td></tr>
       <tr><td><b>TOTAL</b></td><td id="total" align="right"><b>0.00</b></td></tr>
     </table>
 
@@ -84,6 +93,17 @@
       oxiMaterialPicker(tr.querySelector('.name'), { onPick: (m) => { const u = tr.querySelector('.unit'); if (m.unit && [...u.options].some(o => o.value === m.unit || o.text === m.unit)) u.value = m.unit; tr.querySelector('.qty').focus(); } });
     }
 
+    // Which GST applies comes from the server (the supplier's GST number against ours), so the screen and the saved order agree.
+    let tax = { mode: 'intra', cgst_rate: 9, sgst_rate: 9, igst_rate: 18 };
+    async function loadTax() {
+      const sid = document.getElementById('supplier').value, note = document.getElementById('taxNote');
+      if (!sid) { tax = { mode: 'intra', cgst_rate: 9, sgst_rate: 9, igst_rate: 18 }; note.textContent = ''; return recalc(); }
+      const d = await api('/api/po/tax-mode?supplier_id=' + encodeURIComponent(sid) + (document.getElementById('taxType').value ? '&tax_type=' + document.getElementById('taxType').value : ''));
+      if (d.success) { tax = d; note.textContent = d.mode === 'inter' ? ' IGST applies (supplier is in another state).' : (d.has_gst_number ? ' CGST + SGST apply (supplier is in our state).' : ' This supplier has no GST number saved, so CGST + SGST are assumed. Choose the tax above if that is wrong.'); }
+      recalc();
+    }
+    document.getElementById('supplier').addEventListener('change', loadTax); document.getElementById('taxType').addEventListener('change', loadTax);
+
     // Updates line amounts and totals on screen (the server recalculates on save).
     function recalc() {
       let subtotal = 0;
@@ -92,11 +112,15 @@
         tr.querySelector('.amt').textContent = money(amt);
         subtotal += Math.round(amt * 100) / 100;
       });
-      const cgst = subtotal * 0.09, sgst = subtotal * 0.09;
+      const inter = tax.mode === 'inter';
+      const cgst = inter ? 0 : subtotal * tax.cgst_rate / 100, sgst = inter ? 0 : subtotal * tax.sgst_rate / 100, igst = inter ? subtotal * tax.igst_rate / 100 : 0;
+      document.querySelectorAll('.tx-intra').forEach(r => { r.hidden = inter; }); document.querySelectorAll('.tx-inter').forEach(r => { r.hidden = !inter; });
+      document.getElementById('cgstLabel').textContent = 'CGST ' + tax.cgst_rate + '%'; document.getElementById('sgstLabel').textContent = 'SGST ' + tax.sgst_rate + '%'; document.getElementById('igstLabel').textContent = 'IGST ' + tax.igst_rate + '%';
       document.getElementById('subtotal').textContent = money(subtotal);
       document.getElementById('cgst').textContent = money(cgst);
       document.getElementById('sgst').textContent = money(sgst);
-      document.getElementById('total').innerHTML = '<b>' + money(subtotal + cgst + sgst) + '</b>';
+      document.getElementById('igst').textContent = money(igst);
+      document.getElementById('total').innerHTML = '<b>' + money(subtotal + cgst + sgst + igst) + '</b>';
     }
 
     document.getElementById('addRow').onclick = addRow;
@@ -112,7 +136,7 @@
         const fill = () => {
           const sel = document.getElementById('supplier');
           if (![...sel.options].some(o => o.value == d.po.supplier_id)) { const o = document.createElement('option'); o.value = d.po.supplier_id; o.textContent = d.po.supplier_name; sel.appendChild(o); }
-          sel.value = d.po.supplier_id;
+          sel.value = d.po.supplier_id; loadTax();
         };
         const wait = setInterval(() => { if (document.getElementById('supplier').options.length > 1) { clearInterval(wait); fill(); } }, 100); setTimeout(() => clearInterval(wait), 5000);
         document.getElementById('delivery').value = d.po.delivery_date ? String(d.po.delivery_date).slice(0, 10) : '';
@@ -136,6 +160,7 @@
       }));
       const body = {
         supplier_id: document.getElementById('supplier').value,
+        tax_type: document.getElementById('taxType').value || undefined,
         delivery_date: document.getElementById('delivery').value,
         notes: document.getElementById('notes').value,
         items
