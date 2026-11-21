@@ -4,7 +4,7 @@
 //   POST /api/invoice/match/:invoice_id   run (or re-run) the 3-way match
 
 const express = require('express');
-const { taxSplit, modeOfPo } = require('../tax');
+const { taxLines, modeOfPo } = require('../tax');
 const { pool } = require('../database');
 const { fail, round2, isValidDate } = require('../utils');
 const { requirePermission } = require('../auth');
@@ -92,13 +92,14 @@ router.post('/match/:invoice_id', requirePermission(KEYS.INVOICE_MATCH), async (
     }
 
     // Value what was actually received, at the PO's own rates - not what the invoice claims.
-    const valued = await client.query(
-      `SELECT COALESCE(SUM(gi.received_quantity * pi.rate), 0) AS subtotal
+    const recv = await client.query(
+      `SELECT gi.received_quantity * pi.rate AS amount, pi.gst_rate
          FROM grn_items gi
          JOIN po_items pi ON pi.po_id = $2 AND pi.item_name = gi.item_name
         WHERE gi.grn_id = $1`, [grn.rows[0].id, invoice.po_id]);
-    const grnSubtotal = round2(Number(valued.rows[0].subtotal));
-    const grnTotal = taxSplit(grnSubtotal, modeOfPo(poRow)).total;   // the same kind of tax the order carries
+    const gstOn = taxLines(recv.rows.map(r => ({ amount: Number(r.amount), rate: r.gst_rate === null ? null : Number(r.gst_rate) })), modeOfPo(poRow));   // each item at its own GST rate, same kind of tax as the order
+    const grnSubtotal = gstOn.subtotal;
+    const grnTotal = gstOn.total;
 
     const poTotal = round2(Number(poRow.total_amount));
     const invoiceTotal = round2(Number(invoice.invoice_amount));

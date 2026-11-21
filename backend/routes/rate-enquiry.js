@@ -6,6 +6,7 @@
 //   PUT  /api/rate-enquiry/:id/quote     { item_id, supplier_id, rate, note }   rate empty = remove the quote
 //   PUT  /api/rate-enquiry/:id/award     { item_id, supplier_id|null }          choose the supplier for a line
 //   POST /api/rate-enquiry/:id/ordered   { item_ids[], po_id }                  record the purchase order raised from the chosen lines
+//   PUT  /api/rate-enquiry/:id/item      { item_id, gst_rate }                  the item's GST rate (blank = the raw material's own, else 18)
 //   PUT  /api/rate-enquiry/:id/status    { status: open|closed|cancelled }
 // Money is involved (quoted rates), so every route needs price access as well.
 
@@ -16,6 +17,7 @@ const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const { fieldAccess } = require('../access');
 const { audit } = require('../audit');
+const { cleanRate } = require('../tax');
 const router = express.Router();
 
 const needPrices = (req, res, next) => fieldAccess(req.access).prices ? next() : fail(res, 403, 'Rate enquiries show rates, which this role may not see');
@@ -27,7 +29,7 @@ const fix = (res, e, msg) => { console.error(msg, e); fail(res, 500, msg); };
 async function load(db, id) {
   const e = (await db.query('SELECT * FROM rate_enquiries WHERE id = $1', [id])).rows[0];
   if (!e) return null;
-  const items = (await db.query('SELECT id, item_name, unit, quantity::float AS quantity, sources, awarded_supplier_id, awarded_rate::float AS awarded_rate, po_id FROM rate_enquiry_items WHERE enquiry_id = $1 ORDER BY id', [id])).rows;
+  const items = (await db.query('SELECT id, item_name, unit, quantity::float AS quantity, gst_rate::float AS gst_rate, sources, awarded_supplier_id, awarded_rate::float AS awarded_rate, po_id FROM rate_enquiry_items WHERE enquiry_id = $1 ORDER BY id', [id])).rows;
   const suppliers = (await db.query('SELECT s.id, s.name, s.phone, s.contact_person FROM rate_enquiry_suppliers r JOIN suppliers s ON s.id = r.supplier_id WHERE r.enquiry_id = $1 ORDER BY s.name', [id])).rows;
   const quotes = (await db.query('SELECT item_id, supplier_id, rate::float AS rate, note, quoted_by, quoted_at FROM rate_quotes WHERE enquiry_id = $1', [id])).rows;
   const pos = (await db.query('SELECT id, po_number FROM purchase_orders WHERE id = ANY($1)', [items.map(i => i.po_id).filter(Boolean)])).rows;
@@ -54,6 +56,7 @@ router.post('/', ...MANAGE, async (req, res) => {
     if (!it || !String(it.item_name || '').trim()) return fail(res, 400, `Item ${i + 1}: name is required`);
     if (!String(it.unit || '').trim()) return fail(res, 400, `Item ${i + 1}: unit is required`);
     if (!isFinite(Number(it.quantity)) || Number(it.quantity) <= 0) return fail(res, 400, `Item ${i + 1}: quantity must be greater than 0`);
+    if (cleanRate(it.gst_rate) === undefined) return fail(res, 400, `Item ${i + 1}: GST rate must be one of 0, 0.25, 3, 5, 12, 18 or 28 (or blank)`);
   }
   const sup = Array.isArray(b.supplier_ids) ? [...new Set(b.supplier_ids.map(Number).filter(n => Number.isInteger(n) && n > 0))] : [];
   const client = await pool.connect();
@@ -68,8 +71,8 @@ router.post('/', ...MANAGE, async (req, res) => {
       [number, b.title ? String(b.title).trim().slice(0, 120) : null, b.notes ? String(b.notes).trim() : null, req.user.id, req.user.name || null])).rows[0];
     for (const it of b.items) {
       const src = (Array.isArray(it.sources) ? it.sources : []).filter(s => s && ['branch', 'production'].includes(s.type) && Number.isInteger(Number(s.id))).map(s => ({ type: s.type, id: Number(s.id) }));
-      await client.query('INSERT INTO rate_enquiry_items (enquiry_id, item_name, unit, quantity, sources) VALUES ($1,$2,$3,$4,$5)',
-        [e.id, String(it.item_name).trim(), String(it.unit).trim(), round2(Number(it.quantity)), JSON.stringify(src)]);
+      await client.query('INSERT INTO rate_enquiry_items (enquiry_id, item_name, unit, quantity, sources, gst_rate) VALUES ($1,$2,$3,$4,$5,$6)',
+        [e.id, String(it.item_name).trim(), String(it.unit).trim(), round2(Number(it.quantity)), JSON.stringify(src), cleanRate(it.gst_rate)]);
     }
     for (const s of sup) await client.query('INSERT INTO rate_enquiry_suppliers (enquiry_id, supplier_id) VALUES ($1,$2)', [e.id, s]);
     await audit(client, req, { action: 'rate_enquiry.create', entity: 'rate_enquiry', id: e.id, summary: `${number} started for ${b.items.length} item(s)` });
@@ -186,6 +189,21 @@ router.post('/:id/ordered', ...MANAGE, async (req, res) => {
     await audit(client, req, { action: 'rate_enquiry.ordered', entity: 'rate_enquiry', id, summary: `${e.enquiry_number}: ${itemIds.length} item(s) ordered in ${po.po_number}` });
     await client.query('COMMIT'); res.json({ success: true });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); fix(res, e, 'Could not record the order'); } finally { client.release(); }
+});
+
+router.put('/:id/item', ...MANAGE, async (req, res) => {
+  const id = idOf(req); if (!id) return fail(res, 400, 'Invalid enquiry id');
+  const b = req.body || {}, itemId = Number(b.item_id), rate = cleanRate(b.gst_rate);
+  if (!Number.isInteger(itemId)) return fail(res, 400, 'item_id is required');
+  if (rate === undefined) return fail(res, 400, 'GST rate must be one of 0, 0.25, 3, 5, 12, 18 or 28 (or blank)');
+  try {
+    const e = (await pool.query('SELECT status FROM rate_enquiries WHERE id = $1', [id])).rows[0];
+    if (!e) return fail(res, 404, 'Rate enquiry not found');
+    if (e.status !== 'open') return fail(res, 400, 'This enquiry is ' + e.status);
+    const r = await pool.query('UPDATE rate_enquiry_items SET gst_rate = $1 WHERE id = $2 AND enquiry_id = $3 AND po_id IS NULL', [rate, itemId, id]);
+    if (!r.rowCount) return fail(res, 400, 'That item is not part of this enquiry, or is already ordered');
+    res.json({ success: true });
+  } catch (e) { fix(res, e, 'Could not save the GST rate'); }
 });
 
 router.put('/:id/status', ...MANAGE, async (req, res) => {

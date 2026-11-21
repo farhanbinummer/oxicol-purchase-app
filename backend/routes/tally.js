@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const { taxSplit, modeOfPo } = require('../tax');
+const { taxLines, modeOfPo } = require('../tax');
 const { pool } = require('../database');
 const { fail } = require('../utils');
 const { requirePermission } = require('../auth');
@@ -89,13 +89,13 @@ router.post('/sync/:po_id', requirePermission(KEYS.TALLY_SYNC), async (req, res)
       "SELECT id, grn_number FROM grn_notes WHERE po_id = $1 AND status <> 'rejected' ORDER BY id DESC LIMIT 1",
       [poId])).rows[0];
     if (grn) {
-      const valued = (await pool.query(
-        `SELECT COALESCE(SUM(gi.received_quantity * pi.rate), 0) AS subtotal
+      // what was received, valued at the order's own rates, with each item's own GST rate
+      const recv = (await pool.query(
+        `SELECT gi.received_quantity * pi.rate AS amount, pi.gst_rate
            FROM grn_items gi JOIN po_items pi ON pi.po_id = $2 AND pi.item_name = gi.item_name
-          WHERE gi.grn_id = $1`, [grn.id, poId])).rows[0];
-      const subtotal = round2(Number(valued.subtotal));
-      const gst = taxSplit(subtotal, modeOfPo(p));                    // the same kind of tax the order carries
-      const cgst = gst.cgst, sgst = gst.sgst, igst = gst.igst, payable = gst.total;
+          WHERE gi.grn_id = $1`, [grn.id, poId])).rows;
+      const gst = taxLines(recv.map(r => ({ amount: Number(r.amount), rate: r.gst_rate === null ? null : Number(r.gst_rate) })), modeOfPo(p));   // the same kind of tax the order carries
+      const subtotal = gst.subtotal, cgst = gst.cgst, sgst = gst.sgst, igst = gst.igst, payable = gst.total;
       vouchers.push({
         voucher_type: 'Journal',
         voucher_number: grn.grn_number,

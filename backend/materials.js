@@ -30,7 +30,7 @@ async function resolveMaterials(db, items) {
   const bad = ids.find(v => !idOf(v));
   if (bad !== undefined) return { error: `Item ${items.findIndex(it => it && String(it.material_id) === String(bad)) + 1}: that raw material is not valid. Choose it from the list again.` };
   if (!ids.length) return { map: new Map() };
-  const r = await db.query('SELECT id, code, name, unit, hsn_code FROM raw_materials WHERE id = ANY($1) AND active', [ids.map(Number)]);
+  const r = await db.query('SELECT id, code, name, unit, hsn_code, gst_rate::float AS gst_rate FROM raw_materials WHERE id = ANY($1) AND active', [ids.map(Number)]);
   const map = new Map(r.rows.map(m => [m.id, m]));
   for (const [i, it] of items.entries()) {
     if (it && it.material_id !== undefined && it.material_id !== null && it.material_id !== '' && !map.has(Number(it.material_id))) return { error: `Item ${i + 1}: that raw material is no longer in the list. Choose it again.` };

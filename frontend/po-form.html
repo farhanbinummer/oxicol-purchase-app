@@ -38,7 +38,7 @@
     <h3>Items</h3>
     <table id="items">
       <thead>
-        <tr><th>Item name</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th><th></th></tr>
+        <tr><th>Item name</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>GST %</th><th>Amount (₹)</th><th></th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -84,13 +84,14 @@
         '<td><input class="qty" type="number" min="0" step="any" style="width:80px"></td>' +
         '<td><select class="unit"><option>Litre</option><option>Kg</option><option>Nos</option><option>Box</option><option>Drum</option></select></td>' +
         '<td><input class="rate" type="number" min="0" step="any" style="width:90px"></td>' +
+        '<td><select class="gst" title="GST rate of this item"><option value="">18 (default)</option><option>0</option><option>5</option><option>12</option><option>18</option><option>28</option></select></td>' +
         '<td class="amt" align="right">0.00</td>' +
         '<td><button type="button" class="del">X</button></td>';
       tbody.appendChild(tr);
       tr.querySelector('.del').onclick = () => { if (tbody.rows.length > 1) { tr.remove(); recalc(); } };
-      tr.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc));
+      tr.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc)); tr.querySelector('.gst').addEventListener('change', recalc);
       // type a few letters and choose the raw material: its unit is filled in when the list has one (you can still change it)
-      oxiMaterialPicker(tr.querySelector('.name'), { onPick: (m) => { const u = tr.querySelector('.unit'); if (m.unit && [...u.options].some(o => o.value === m.unit || o.text === m.unit)) u.value = m.unit; tr.querySelector('.qty').focus(); } });
+      oxiMaterialPicker(tr.querySelector('.name'), { onPick: (m) => { const u = tr.querySelector('.unit'); if (m.unit && [...u.options].some(o => o.value === m.unit || o.text === m.unit)) u.value = m.unit; if (m.gst_rate !== null && m.gst_rate !== undefined) { const g = tr.querySelector('.gst'); if ([...g.options].some(o => o.value === String(m.gst_rate))) { g.value = String(m.gst_rate); recalc(); } } tr.querySelector('.qty').focus(); } });
     }
 
     // Which GST applies comes from the server (the supplier's GST number against ours), so the screen and the saved order agree.
@@ -106,16 +107,20 @@
 
     // Updates line amounts and totals on screen (the server recalculates on save).
     function recalc() {
-      let subtotal = 0;
+      let subtotal = 0; const byRate = new Map();   // taxable value per GST rate: tax is worked out per rate, as on a GST invoice
       [...tbody.rows].forEach(tr => {
         const amt = (Number(tr.querySelector('.qty').value) || 0) * (Number(tr.querySelector('.rate').value) || 0);
         tr.querySelector('.amt').textContent = money(amt);
         subtotal += Math.round(amt * 100) / 100;
+        const r = tr.querySelector('.gst').value === '' ? 18 : Number(tr.querySelector('.gst').value);
+        byRate.set(r, (byRate.get(r) || 0) + Math.round(amt * 100) / 100);
       });
+      const r2 = (n) => Math.round(n * 100) / 100;
       const inter = tax.mode === 'inter';
-      const cgst = inter ? 0 : subtotal * tax.cgst_rate / 100, sgst = inter ? 0 : subtotal * tax.sgst_rate / 100, igst = inter ? subtotal * tax.igst_rate / 100 : 0;
+      let cgst = 0, sgst = 0, igst = 0;
+      byRate.forEach((base, r) => { if (inter) igst += r2(base * r / 100); else { cgst += r2(base * r / 200); sgst += r2(base * r / 200); } });
       document.querySelectorAll('.tx-intra').forEach(r => { r.hidden = inter; }); document.querySelectorAll('.tx-inter').forEach(r => { r.hidden = !inter; });
-      document.getElementById('cgstLabel').textContent = 'CGST ' + tax.cgst_rate + '%'; document.getElementById('sgstLabel').textContent = 'SGST ' + tax.sgst_rate + '%'; document.getElementById('igstLabel').textContent = 'IGST ' + tax.igst_rate + '%';
+      document.getElementById('cgstLabel').textContent = 'CGST'; document.getElementById('sgstLabel').textContent = 'SGST'; document.getElementById('igstLabel').textContent = 'IGST';
       document.getElementById('subtotal').textContent = money(subtotal);
       document.getElementById('cgst').textContent = money(cgst);
       document.getElementById('sgst').textContent = money(sgst);
@@ -142,7 +147,7 @@
         document.getElementById('delivery').value = d.po.delivery_date ? String(d.po.delivery_date).slice(0, 10) : '';
         document.getElementById('notes').value = d.po.notes || '';
         tbody.innerHTML = '';
-        d.items.forEach(it => { addRow(); const tr = tbody.lastElementChild; tr.querySelector('.name').value = it.item_name; tr.querySelector('.qty').value = it.quantity; tr.querySelector('.rate').value = it.rate;
+        d.items.forEach(it => { addRow(); const tr = tbody.lastElementChild; tr.querySelector('.name').value = it.item_name; tr.querySelector('.qty').value = it.quantity; tr.querySelector('.rate').value = it.rate; { const g = tr.querySelector('.gst'); if (it.gst_rate !== null && it.gst_rate !== undefined) { const v = String(Number(it.gst_rate)); if (![...g.options].some(o => o.value === v)) { const o = document.createElement('option'); o.textContent = v; g.appendChild(o); } g.value = v; } }
           const u = tr.querySelector('.unit'); if (![...u.options].some(o => o.value === it.unit)) { const o = document.createElement('option'); o.textContent = it.unit; u.appendChild(o); } u.value = it.unit; });
         recalc();
       });
@@ -156,7 +161,8 @@
         material_id: tr.querySelector('.name').dataset.materialId || undefined,
         quantity: tr.querySelector('.qty').value,
         unit: tr.querySelector('.unit').value,
-        rate: tr.querySelector('.rate').value
+        rate: tr.querySelector('.rate').value,
+        gst_rate: tr.querySelector('.gst').value || undefined
       }));
       const body = {
         supplier_id: document.getElementById('supplier').value,

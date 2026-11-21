@@ -50,7 +50,7 @@
 
     <h3>Items</h3>
     <table>
-      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount (₹)</th></tr></thead>
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>GST %</th><th>Amount (₹)</th></tr></thead>
       <tbody id="items"></tbody>
     </table>
 
@@ -195,7 +195,7 @@
         tbody.innerHTML = '';
         d.items.forEach(it => {
           const tr = document.createElement('tr');
-          [it.item_name, Number(it.quantity), it.unit, mv(it.rate), mv(it.line_amount)]
+          [it.item_name, Number(it.quantity), it.unit, mv(it.rate), (it.gst_rate === undefined || (d.fields && !d.fields.prices)) ? '\u2014' : Number(it.gst_rate === null ? 18 : it.gst_rate), mv(it.line_amount)]
             .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
           tbody.appendChild(tr);
         });

@@ -24,4 +24,29 @@ function taxSplit(subtotal, mode) {
 const modeOfPo = (po) => Number(po && po.igst_amount) > 0 ? 'inter' : 'intra';
 const validOverride = (v) => v === 'intra' || v === 'inter' ? v : null;
 
-module.exports = { taxMode, taxSplit, modeOfPo, validOverride, CGST_RATE, SGST_RATE, IGST_RATE };
+/** GST rates an item may carry (percent of its value; same-state orders split it half CGST, half SGST). */
+const RATES = [0, 0.25, 3, 5, 12, 18, 28];
+/** null/'' = not set (the order's default rate applies); a bad value returns undefined. */
+function cleanRate(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return RATES.includes(n) ? n : undefined;
+}
+/**
+ * Tax on a set of lines [{ amount, rate }] - `rate` null means the default total rate (IGST_RATE, 18%). Tax is worked out on the total of
+ * each rate (as on a GST invoice) and rounded once per rate; CGST and SGST are always equal.
+ */
+function taxLines(lines, mode) {
+  const groups = new Map();
+  for (const l of lines) { const r = l.rate === null || l.rate === undefined ? IGST_RATE : Number(l.rate); groups.set(r, round2((groups.get(r) || 0) + Number(l.amount))); }
+  let cgst = 0, sgst = 0, igst = 0, subtotal = 0;
+  for (const [r, base] of groups) {
+    subtotal += base;
+    if (mode === 'inter') igst += round2(base * r / 100);
+    else { const half = round2(base * r / 200); cgst += half; sgst += half; }
+  }
+  subtotal = round2(subtotal); cgst = round2(cgst); sgst = round2(sgst); igst = round2(igst);
+  return { cgst, sgst, igst, total: round2(subtotal + cgst + sgst + igst), subtotal };
+}
+
+module.exports = { RATES, cleanRate, taxLines, taxMode, taxSplit, modeOfPo, validOverride, CGST_RATE, SGST_RATE, IGST_RATE };
