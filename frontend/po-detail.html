@@ -172,7 +172,10 @@
         // the printed purchase order shows prices, so only people with price access are offered it
         if (d.fields && d.fields.prices) { const a = document.getElementById('printLink'); a.href = 'po-print.html?id=' + encodeURIComponent(id); document.getElementById('printRow').hidden = false; }
         { const open = ['created', 'payment_pending'].includes(d.po.status) && !(d.payments || []).some(x => x.status !== 'failed') && !(d.grns || []).some(x => x.status !== 'rejected');
-          if (open && d.fields && d.fields.prices && window.oxiCan && window.oxiCan('po.edit')) { document.getElementById('editLink').href = 'po-form.html?edit=' + encodeURIComponent(id); document.getElementById('editRow').hidden = false; } }
+          if (open && d.fields && d.fields.prices) {
+            // ask the server now: the permissions remembered in the browser can be older than the "edit" permission itself
+            api('/api/workspace/me').then(me => { if (me && me.success && (me.is_admin || (me.permissions || []).includes('po.edit'))) { document.getElementById('editLink').href = 'po-form.html?edit=' + encodeURIComponent(id); document.getElementById('editRow').hidden = false; } });
+          } }
         setBadge('status', po.status);
         rebuildStatusOptions(po.status);
         set('notes', po.notes || '-');

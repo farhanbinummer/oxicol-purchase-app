@@ -92,5 +92,5 @@ test('bad input changes nothing, and only people who may edit can edit', async (
 });
 test('the order page offers Edit, and the form can load and save an existing order', () => {
   const root = path.join(__dirname, '..', '..', 'frontend'), d = fs.readFileSync(path.join(root, 'po-detail.html'), 'utf8'), f = fs.readFileSync(path.join(root, 'po-form.html'), 'utf8');
-  assert.match(d, /po-form\.html\?edit=/); assert.match(d, /oxiCan\('po\.edit'\)/); assert.match(f, /method: editId \? 'PUT' : 'POST'/);
+  assert.match(d, /po-form\.html\?edit=/); assert.match(d, /includes\('po\.edit'\)/); assert.doesNotMatch(d, /oxiCan\('po\.edit'\)/, 'asks the server, not the remembered permissions'); assert.match(f, /method: editId \? 'PUT' : 'POST'/);
 });
