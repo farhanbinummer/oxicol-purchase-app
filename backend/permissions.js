@@ -23,6 +23,13 @@ const KEYS = {
   PRODUCTION_INDENT_DELETE: 'production_indent.delete',
 
   CONSOLIDATE_VIEW: 'consolidate.view',
+  STOCK_VIEW: 'stock.view',                   // see how much of each raw material is in store
+  STOCK_ADJUST: 'stock.adjust',               // enter opening stock and corrections
+  WORK_ORDER_VIEW: 'work_order.view',         // see work orders / batches
+  WORK_ORDER_CREATE: 'work_order.create',     // plan a batch, change it, cancel it
+  WORK_ORDER_ISSUE: 'work_order.issue',       // issue the raw materials for a batch from store
+  WORK_ORDER_COMPLETE: 'work_order.complete', // record what a batch produced
+  WORK_ORDER_QC: 'work_order.qc',             // pass or fail a finished batch
   RATE_ENQUIRY_VIEW: 'rate_enquiry.view',     // see rate enquiries and the quotes suppliers gave
   RATE_ENQUIRY_MANAGE: 'rate_enquiry.manage', // start an enquiry, enter quotes, choose the supplier and raise the order from it
   CONSOLIDATE_CREATE_PO: 'consolidate.create_po',
@@ -95,6 +102,13 @@ const CATALOG = [
   { key: KEYS.PRODUCTION_INDENT_APPROVE, module: 'Production Indents', action: 'Approve an indent' },
   { key: KEYS.PRODUCTION_INDENT_DELETE, module: 'Production Indents', action: 'Delete an indent' },
 
+  { key: KEYS.STOCK_VIEW, module: 'Stock', action: 'See raw material stock in store' },
+  { key: KEYS.STOCK_ADJUST, module: 'Stock', action: 'Enter opening stock and stock corrections' },
+  { key: KEYS.WORK_ORDER_VIEW, module: 'Work Orders', action: 'View work orders (production batches)' },
+  { key: KEYS.WORK_ORDER_CREATE, module: 'Work Orders', action: 'Plan, change or cancel a work order' },
+  { key: KEYS.WORK_ORDER_ISSUE, module: 'Work Orders', action: 'Issue raw materials from store for a work order' },
+  { key: KEYS.WORK_ORDER_COMPLETE, module: 'Work Orders', action: 'Record the finished quantity of a work order' },
+  { key: KEYS.WORK_ORDER_QC, module: 'Work Orders', action: 'Pass or fail a finished batch at quality check' },
   { key: KEYS.RATE_ENQUIRY_VIEW, module: 'Rate Enquiries', action: 'View rate enquiries and supplier quotes' },
   { key: KEYS.RATE_ENQUIRY_MANAGE, module: 'Rate Enquiries', action: 'Start a rate enquiry, enter quotes and raise the order from it' },
   { key: KEYS.CONSOLIDATE_VIEW, module: 'Consolidate Orders', action: 'View open requests/indents to merge' },
@@ -160,7 +174,7 @@ const CATALOG = [
 const KINDS = {
   'branch_request.create': 'create', 'branch_request.view': 'view', 'branch_request.approve': 'approve', 'branch_request.delete': 'cancel', 'branch_request.confirm_delivery': 'edit',
   'production_indent.create': 'create', 'production_indent.view': 'view', 'production_indent.approve': 'approve', 'production_indent.delete': 'cancel',
-  'rate_enquiry.view': 'view', 'rate_enquiry.manage': 'edit', 'consolidate.view': 'view', 'consolidate.create_po': 'create',
+  'stock.view': 'view', 'stock.adjust': 'edit', 'work_order.view': 'view', 'work_order.create': 'create', 'work_order.issue': 'edit', 'work_order.complete': 'edit', 'work_order.qc': 'approve', 'rate_enquiry.view': 'view', 'rate_enquiry.manage': 'edit', 'consolidate.view': 'view', 'consolidate.create_po': 'create',
   'po.create': 'create', 'po.view': 'view', 'po.update_status': 'edit', 'po.update_delivery': 'edit', 'po.edit': 'edit', 'po.delete': 'cancel',
   'payment.create': 'create', 'payment.view_by_po': 'view', 'payment.view_all': 'view', 'payment.approve': 'approve',
   'grn.create': 'create', 'grn.view': 'view', 'grn.approve': 'approve',
@@ -181,13 +195,15 @@ CATALOG.forEach(c => { c.kind = KINDS[c.key] || 'view'; });
 // after that, the role_permissions table in the database is the only source of truth.
 const DEFAULTS = {
   branch: [KEYS.BRANCH_REQUEST_CREATE, KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_DELETE, KEYS.BRANCH_REQUEST_CONFIRM, KEYS.CATALOG_VIEW],
-  production: [KEYS.PRODUCTION_INDENT_CREATE, KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_DELETE, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS],
+  production: [KEYS.PRODUCTION_INDENT_CREATE, KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_DELETE, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS,
+    KEYS.STOCK_VIEW, KEYS.WORK_ORDER_VIEW, KEYS.WORK_ORDER_CREATE, KEYS.WORK_ORDER_COMPLETE],
   store: [
     KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE,
     KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_APPROVE,
     KEYS.PO_VIEW, KEYS.PAYMENT_VIEW_BY_PO,
     KEYS.GRN_CREATE, KEYS.GRN_VIEW, KEYS.GRN_APPROVE,
-    KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS
+    KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS,
+    KEYS.STOCK_VIEW, KEYS.STOCK_ADJUST, KEYS.WORK_ORDER_VIEW, KEYS.WORK_ORDER_ISSUE
   ],
   purchase: [
     KEYS.CONSOLIDATE_VIEW, KEYS.CONSOLIDATE_CREATE_PO, KEYS.RATE_ENQUIRY_VIEW, KEYS.RATE_ENQUIRY_MANAGE,
@@ -195,7 +211,8 @@ const DEFAULTS = {
     KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW,
     KEYS.SUPPLIERS_VIEW, KEYS.SUPPLIERS_MANAGE, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW,
-    KEYS.FIELD_PRICES, KEYS.FIELD_SUPPLIER_BANK
+    KEYS.FIELD_PRICES, KEYS.FIELD_SUPPLIER_BANK,
+    KEYS.STOCK_VIEW, KEYS.WORK_ORDER_VIEW
   ],
   accounts: [
     KEYS.PO_VIEW,
@@ -208,13 +225,14 @@ const DEFAULTS = {
     KEYS.FIELD_PRICES, KEYS.FIELD_SUPPLIER_BANK
   ],
   // New roles. Nobody holds them until an administrator assigns them.
-  qc: [KEYS.GRN_VIEW, KEYS.GRN_APPROVE, KEYS.PO_VIEW, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW],      // plus the lab trial keys below
+  qc: [KEYS.GRN_VIEW, KEYS.GRN_APPROVE, KEYS.PO_VIEW, KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.STOCK_VIEW, KEYS.WORK_ORDER_VIEW, KEYS.WORK_ORDER_QC],      // plus the lab trial keys below
   manager: [
     KEYS.BRANCH_REQUEST_VIEW, KEYS.BRANCH_REQUEST_APPROVE, KEYS.BRANCH_REQUEST_CONFIRM,
     KEYS.PRODUCTION_INDENT_VIEW, KEYS.PRODUCTION_INDENT_APPROVE,
     KEYS.PO_VIEW, KEYS.PO_UPDATE_DELIVERY, KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW, KEYS.SUPPLIERS_VIEW, KEYS.SUPPLIERS_MANAGE,
-    KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.FIELD_PRICES
+    KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.FIELD_PRICES,
+    KEYS.STOCK_VIEW, KEYS.WORK_ORDER_VIEW
   ]
 };
 

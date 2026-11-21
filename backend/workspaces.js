@@ -153,7 +153,8 @@ const WORKSPACES = {
         { label: 'Rate Enquiries', href: 'rate-enquiries.html', icon: 'clipboardlist', perm: KEYS.RATE_ENQUIRY_VIEW, also: ['rate-enquiry.html'] },
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html', 'po-form.html'] },
         { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
-        { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW } ] },
+        { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW },
+        { label: 'Stock', href: 'stock.html', icon: 'tag', perm: KEYS.STOCK_VIEW } ] },
       { title: 'Progress', items: [
         { label: 'Goods Receipts', href: 'grn-list.html', icon: 'grn', perm: KEYS.GRN_VIEW, also: ['grn-detail.html'] },
         { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL } ] },
@@ -169,7 +170,9 @@ const WORKSPACES = {
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Receiving', items: [
         { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
-        { label: 'Goods Receipts', href: 'grn-list.html', icon: 'clipboardlist', perm: KEYS.GRN_VIEW, also: ['grn-detail.html', 'grn-form.html'] } ] },
+        { label: 'Goods Receipts', href: 'grn-list.html', icon: 'clipboardlist', perm: KEYS.GRN_VIEW, also: ['grn-detail.html', 'grn-form.html'] },
+        { label: 'Stock', href: 'stock.html', icon: 'tag', perm: KEYS.STOCK_VIEW },
+        { label: 'Batches to Supply', href: 'work-orders.html?status=planned', icon: 'production', perm: KEYS.WORK_ORDER_VIEW, also: ['work-order.html'] } ] },
       { title: 'Requests', items: [
         { label: 'Branch Requests', href: 'branch-request-list.html', icon: 'branch', perm: KEYS.BRANCH_REQUEST_VIEW, also: ['branch-request-detail.html'] },
         { label: 'Production Requirements', href: 'production-indent-list.html', icon: 'production', perm: KEYS.PRODUCTION_INDENT_VIEW, also: ['production-indent-detail.html'] } ] },
@@ -193,6 +196,8 @@ const WORKSPACES = {
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Planning', items: [
         { label: 'Material Planning', href: 'material-plan.html', icon: 'calculator', perm: KEYS.PRODUCTION_INDENT_VIEW },
+        { label: 'Work Orders', href: 'work-orders.html', icon: 'production', perm: KEYS.WORK_ORDER_VIEW, also: ['work-order.html', 'work-order-form.html'] },
+        { label: 'Stock', href: 'stock.html', icon: 'tag', perm: KEYS.STOCK_VIEW },
         { label: 'Production Requirements', href: 'production-indent-list.html', icon: 'production', perm: KEYS.PRODUCTION_INDENT_VIEW, also: ['production-indent-detail.html', 'production-indent-form.html'] } ] },
       { title: 'Master Data', items: [
         { label: 'Recipes / Bill of Materials', href: 'recipes.html', icon: 'book', perm: KEYS.PRODUCTION_INDENT_VIEW },
@@ -208,6 +213,7 @@ const WORKSPACES = {
       { title: 'Inspection', items: [
         { label: 'Inspection Queue', href: 'grn-list.html?status=pending_qc', icon: 'shield', perm: KEYS.GRN_VIEW, also: ['grn-detail.html'] },
         { label: 'Inspection History', href: 'grn-list.html?status=approved,rejected', icon: 'history', perm: KEYS.GRN_VIEW },
+        { label: 'Batches to Check', href: 'work-orders.html?status=completed', icon: 'shield', perm: KEYS.WORK_ORDER_VIEW, also: ['work-order.html'] },
         { label: 'Rejections & Replacements', href: 'variance-report.html', icon: 'variance', perm: KEYS.DASHBOARD_VIEW } ] }
     ]
   },
@@ -239,7 +245,9 @@ const WORKSPACES = {
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html'] },
         { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
         { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW },
-        { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL } ] },
+        { label: 'Payments', href: 'payment-list.html', icon: 'payment', perm: KEYS.PAYMENT_VIEW_ALL },
+        { label: 'Work Orders', href: 'work-orders.html', icon: 'production', perm: KEYS.WORK_ORDER_VIEW, also: ['work-order.html', 'work-order-form.html'] },
+        { label: 'Stock', href: 'stock.html', icon: 'tag', perm: KEYS.STOCK_VIEW } ] },
       { title: 'Reports', items: [{ label: 'Variances', href: 'variance-report.html', icon: 'variance', perm: KEYS.DASHBOARD_VIEW }, { label: 'Team Performance', href: 'team-performance.html', icon: 'dashboard', perm: KEYS.KPI_VIEW_ALL }] }
     ]
   },

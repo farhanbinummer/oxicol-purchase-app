@@ -52,6 +52,13 @@ that exists is syncing a PO to the Tally log, so **Export** appears on one row.
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | View rate enquiries and supplier quotes (`rate_enquiry.view`) | view | Yes | - | Yes | - | - | - | - | - |
 | Start a rate enquiry, enter quotes and raise the order from it (`rate_enquiry.manage`) | edit | Yes | - | Yes | - | - | - | - | - |
+| See raw material stock (`stock.view`) | view | Yes | Yes | Yes | - | Yes | Yes | Yes | - |
+| Enter opening stock and corrections (`stock.adjust`) | edit | Yes | - | - | - | Yes | - | - | - |
+| View work orders (`work_order.view`) | view | Yes | Yes | Yes | - | Yes | Yes | Yes | - |
+| Plan, change or cancel a work order (`work_order.create`) | create | Yes | - | - | - | - | - | Yes | - |
+| Issue materials for a work order (`work_order.issue`) | edit | Yes | - | - | - | Yes | - | - | - |
+| Record what a work order made (`work_order.complete`) | edit | Yes | - | - | - | - | - | Yes | - |
+| Pass or fail a finished batch (`work_order.qc`) | approve | Yes | - | - | - | - | Yes | - | - |
 | Create a PO (`po.create`) | create | Yes | - | Yes | - | - | - | - | - |
 | View POs (`po.view`) | view | Yes | Yes | Yes | Yes | Yes | Yes | - | - |
 | Change PO status (`po.update_status`) | edit | Yes | - | Yes | - | - | - | - | - |

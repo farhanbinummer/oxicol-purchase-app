@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stock</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .st-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 var(--s3); } .st-top input[type=search] { flex: 1 1 260px; max-width: 420px; }
+    .st-num { text-align: right; font-variant-numeric: tabular-nums; } .st-zero { color: var(--text-2); } .st-in { font-weight: 700; }
+    .st-panel { border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; background: var(--surface); margin: 0 0 var(--s4); max-width: 760px; }
+    .st-panel h3 { margin-top: 0; } .st-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; } .st-row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
+    .st-plus { color: var(--success); font-weight: 700; } .st-minus { color: var(--danger); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="work-orders.html">Work orders</a></p>
+  <h1>Stock in store</h1>
+  <p class="oxi-page-sub">Raw materials in store. Goods passed at quality check are added automatically; work orders take materials out. Opening stock and corrections are entered here, with a reason.</p>
+  <p id="message" role="status"></p>
+
+  <div class="st-top">
+    <input type="search" id="q" placeholder="Find a raw material" aria-label="Find a raw material">
+    <select id="only" aria-label="Show"><option value="">All materials</option><option value="in">In stock</option><option value="out">Out of stock</option></select>
+  </div>
+
+  <div class="st-panel" id="adjustBox" hidden>
+    <h3>Add or correct stock</h3>
+    <div class="st-row">
+      <label>Raw material<select id="adjMat" style="min-width:260px"></select></label>
+      <label>Quantity (+ add, - take out)<input type="number" step="any" id="adjQty" style="width:140px"></label>
+      <label>Reason<input id="adjNote" maxlength="200" placeholder='e.g. Opening stock, or "Counted 21 Nov"' style="min-width:260px"></label>
+      <button type="button" id="adjBtn">Save</button>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Code</th><th>Raw material</th><th class="st-num">In store</th><th>Unit</th><th>Last change</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
+  </table>
+
+  <div class="st-panel" id="histBox" hidden style="max-width:none">
+    <h3 id="histTitle">History</h3>
+    <table><thead><tr><th>When</th><th>What</th><th class="st-num">Quantity</th><th>Note</th><th>By</th></tr></thead><tbody id="hist"></tbody></table>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    const el = (t, txt, cls) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+    const KIND = { receipt: 'Goods received', issue: 'Issued to a batch', return: 'Returned from a batch', adjust: 'Correction / opening stock' };
+    const qty = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+    let canAdjust = false, mats = [];
+    async function load() {
+      const d = await api('/api/stock?q=' + encodeURIComponent(document.getElementById('q').value) + '&only=' + document.getElementById('only').value);
+      const body = document.getElementById('rows'); body.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      mats = d.materials;
+      if (!mats.length) body.innerHTML = '<tr><td colspan="6">Nothing matches.</td></tr>';
+      mats.forEach(m => {
+        const tr = el('tr'); tr.append(el('td', m.code || ''), el('td', m.name), el('td', qty(m.on_hand), 'st-num ' + (m.on_hand > 0 ? 'st-in' : 'st-zero')), el('td', m.unit || ''), el('td', m.last_at ? new Date(m.last_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'));
+        const td = el('td'); const b = el('button', 'History'); b.type = 'button'; b.className = 'oxi-btn-secondary'; b.onclick = () => history(m); td.appendChild(b); tr.appendChild(td); body.appendChild(tr);
+      });
+      if (canAdjust) { const sel = document.getElementById('adjMat'), cur = sel.value; if (!sel.options.length || d.materials.length > sel.options.length) { sel.innerHTML = ''; mats.forEach(m => { const o = el('option', m.name + (m.unit ? ' (' + m.unit + ')' : '')); o.value = m.id; sel.appendChild(o); }); } if (cur) sel.value = cur; }
+    }
+    async function history(m) {
+      const d = await api('/api/stock/' + m.id + '/movements'); if (!d.success) { show(d.error, false); return; }
+      document.getElementById('histTitle').textContent = m.name + ': ' + qty(d.on_hand) + ' ' + (m.unit || '') + ' in store';
+      const b = document.getElementById('hist'); b.innerHTML = '';
+      if (!d.movements.length) b.innerHTML = '<tr><td colspan="5">No movements yet.</td></tr>';
+      d.movements.forEach(x => { const tr = el('tr'); tr.append(el('td', new Date(x.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })), el('td', KIND[x.kind] || x.kind), el('td', (x.qty > 0 ? '+' : '') + qty(x.qty), 'st-num ' + (x.qty > 0 ? 'st-plus' : 'st-minus')), el('td', x.note || ''), el('td', x.by_name || '')); b.appendChild(tr); });
+      document.getElementById('histBox').hidden = false; document.getElementById('histBox').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    document.getElementById('adjBtn').onclick = async () => {
+      const btn = document.getElementById('adjBtn'); btn.disabled = true;
+      const d = await api('/api/stock/adjust', 'POST', { material_id: document.getElementById('adjMat').value, qty: document.getElementById('adjQty').value, note: document.getElementById('adjNote').value });
+      btn.disabled = false;
+      if (d.success) { show('Saved. In store now: ' + qty(d.on_hand), true); document.getElementById('adjQty').value = ''; document.getElementById('adjNote').value = ''; load(); } else show(d.error, false);
+    };
+    let t; document.getElementById('q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 250); }); document.getElementById('only').addEventListener('change', load);
+    (async () => { const me = await api('/api/workspace/me'); canAdjust = !!(me && me.success && (me.is_admin || (me.permissions || []).includes('stock.adjust'))); document.getElementById('adjustBox').hidden = !canAdjust; load(); })();
+  </script>
+</body>
+</html>

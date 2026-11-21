@@ -135,7 +135,7 @@ function svgIcon(name, size) {
   const PERM_FOR_FORM = {
     'grn-form.html': 'grn.create', 'po-form.html': 'po.create', 'payment-form.html': 'payment.create',
     'branch-request-form.html': 'branch_request.create', 'production-indent-form.html': 'production_indent.create',
-    'project-new.html': 'rd.create'
+    'project-new.html': 'rd.create', 'work-order-form.html': 'work_order.create'
   };
 
   // Turns each page's old "<- Home | + New ..." line, title and description into one shared header:
@@ -935,8 +935,8 @@ function addLink(tr, text, href) {
 (function () {
   const CARD_PAGES = ['projects.html', 'project.html', 'branch-request-list.html', 'production-indent-list.html', 'po-list.html',
     'payment-list.html', 'grn-list.html', 'users.html', 'variance-report.html',
-    'branch-request-detail.html', 'production-indent-detail.html', 'po-detail.html', 'grn-detail.html', 'material-plan.html', 'recipes.html'];
-  const FORM_PAGES = ['project-new.html', 'po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html'];
+    'branch-request-detail.html', 'production-indent-detail.html', 'po-detail.html', 'grn-detail.html', 'material-plan.html', 'recipes.html', 'work-orders.html', 'work-order.html', 'stock.html'];
+  const FORM_PAGES = ['project-new.html', 'po-form.html', 'branch-request-form.html', 'production-indent-form.html', 'grn-form.html', 'consolidate.html', 'work-order-form.html'];
   const page = location.pathname.split('/').pop() || 'index.html';
   const isForm = FORM_PAGES.includes(page);
   if (!CARD_PAGES.includes(page) && !isForm) return;

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan a Batch</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style> .wo-num { text-align: right; font-variant-numeric: tabular-nums; } .wo-short { color: var(--danger); font-weight: 700; } .wo-ok { color: var(--success); font-weight: 700; } </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="work-orders.html">All work orders</a></p>
+  <h1 id="title">Plan a batch</h1>
+  <p class="oxi-page-sub">Choose a finished product and how much to make. The raw materials come from its recipe, and are checked against what is in store.</p>
+  <p id="message" role="status"></p>
+  <form id="f">
+    <p><label>Finished product<br><select id="product" required style="min-width:320px"><option value="">Loading...</option></select></label></p>
+    <p><label>Quantity to make <span id="unitHint"></span><br><input type="number" id="qty" min="0" step="any" required style="width:160px"></label></p>
+    <p><label>Planned date<br><input type="date" id="date"></label></p>
+    <p><label>Notes<br><textarea id="notes" rows="2" cols="50"></textarea></label></p>
+    <h3>Raw materials this batch needs</h3>
+    <table><thead><tr><th>Material</th><th class="wo-num">Needed</th><th class="wo-num">In store</th><th>Stock</th></tr></thead><tbody id="mats"><tr><td colspan="4">Choose a product and a quantity.</td></tr></tbody></table>
+    <p><small>Not enough in store does not stop you planning: Stores can only issue what is there, so buy the shortfall (Purchase Requirements) before the batch starts.</small></p>
+    <p><button type="submit" id="save">Plan batch</button></p>
+  </form>
+  <script src="common.js"></script>
+  <script>
+    const el = (t, txt, cls) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+    const qn = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+    const editId = new URLSearchParams(location.search).get('edit'); let unit = '';
+    async function preview() {
+      const pid = document.getElementById('product').value, q = document.getElementById('qty').value, b = document.getElementById('mats');
+      if (!pid || !q || Number(q) <= 0) { b.innerHTML = '<tr><td colspan="4">Choose a product and a quantity.</td></tr>'; return; }
+      const d = await api('/api/work-orders/preview?product_id=' + encodeURIComponent(pid) + '&qty=' + encodeURIComponent(q));
+      b.innerHTML = '';
+      if (!d.success) { b.innerHTML = ''; const tr = el('tr'); const td = el('td', d.error); td.colSpan = 4; td.className = 'wo-short'; tr.appendChild(td); b.appendChild(tr); return; }
+      d.materials.forEach(m => { const tr = el('tr'); tr.append(el('td', m.name), el('td', qn(m.qty) + ' ' + (m.unit || ''), 'wo-num'), el('td', qn(m.on_hand) + ' ' + (m.unit || ''), 'wo-num'), el('td', m.short > 0 ? 'Short by ' + qn(m.short) : 'OK', m.short > 0 ? 'wo-short' : 'wo-ok')); b.appendChild(tr); });
+    }
+    let t; const soon = () => { clearTimeout(t); t = setTimeout(preview, 250); };
+    document.getElementById('product').addEventListener('change', () => { const o = document.getElementById('product').selectedOptions[0]; document.getElementById('unitHint').textContent = o && o.dataset.unit ? '(' + o.dataset.unit + ')' : ''; soon(); });
+    document.getElementById('qty').addEventListener('input', soon);
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault(); const btn = document.getElementById('save'); btn.disabled = true;
+      const body = { product_id: document.getElementById('product').value, planned_qty: document.getElementById('qty').value, planned_date: document.getElementById('date').value, notes: document.getElementById('notes').value };
+      const d = await api(editId ? '/api/work-orders/' + encodeURIComponent(editId) : '/api/work-orders', editId ? 'PUT' : 'POST', body);
+      btn.disabled = false;
+      if (d.success) location.href = 'work-order.html?id=' + (editId || d.id); else show(d.error, false);
+    });
+    (async () => {
+      const d = await api('/api/work-orders/products'); const sel = document.getElementById('product'); sel.innerHTML = '<option value="">-- Choose a product --</option>';
+      if (d.success) d.products.forEach(p => { const o = el('option', p.name); o.value = p.id; o.dataset.unit = p.unit || ''; sel.appendChild(o); });
+      if (d.success && !d.products.length) show('No product has a recipe yet. The Administrator adds recipes under Recipes.', false);
+      if (editId) {
+        document.getElementById('title').textContent = 'Change a planned batch'; document.getElementById('save').textContent = 'Save changes'; sel.disabled = true;
+        const w = await api('/api/work-orders/' + encodeURIComponent(editId));
+        if (w.success) { sel.value = w.work_order.product_id; document.getElementById('qty').value = w.work_order.planned_qty; document.getElementById('date').value = w.work_order.planned_date || ''; document.getElementById('notes').value = w.work_order.notes || ''; preview(); } else show(w.error, false);
+      }
+    })();
+  </script>
+</body>
+</html>

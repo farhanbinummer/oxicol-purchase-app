@@ -14,6 +14,7 @@ const { requirePermission } = require('../auth');
 const { KEYS } = require('../permissions');
 const { can } = require('../access');
 const R = require('../rd-logic');          // the same file checks as lab-trial photos: the file's own bytes decide what it is
+const { receiveGrn } = require('../stock');
 const router = express.Router();
 
 const CONDITIONS = ['Good', 'Damaged', 'Short'];
@@ -129,6 +130,9 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
         [grnId, l.item_name, l.po_quantity, l.received_quantity, l.variance, l.condition, l.variance_note]);
     }
 
+    let stockNote = null;
+    if (status === 'approved') stockNote = await receiveGrn(client, req, grnId);    // passed at quality check: it goes into stock
+
     // Goods have arrived -> PO becomes "delivered" (never moves a PO backwards).
     if (PO_FLOW.indexOf(po.rows[0].status) < PO_FLOW.indexOf('delivered')) {
       await client.query("UPDATE purchase_orders SET status = 'delivered' WHERE id = $1", [poId]);
@@ -147,7 +151,8 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
       discrepancies: lines.some(l => l.variance !== 0),
       short_items: short.map(l => ({ item_name: l.item_name, variance: l.variance })),
       condition,
-      status
+      status,
+      stock: stockNote
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -247,12 +252,17 @@ router.put('/:id/approve', requirePermission(KEYS.GRN_APPROVE), async (req, res)
       return fail(res, 400, `Only "pending_qc" GRNs can be decided (this one is "${cur.rows[0].status}")`);
     }
     const status = approved ? 'approved' : 'rejected';
-    await pool.query(
-      'UPDATE grn_notes SET status = $1, qc_notes = COALESCE($2, qc_notes) WHERE id = $3',
-      [status, b.qc_notes ? String(b.qc_notes).trim() : null, id]);
+    let stockNote = null;
+    const cl = await pool.connect();
+    try {
+      await cl.query('BEGIN');
+      await cl.query('UPDATE grn_notes SET status = $1, qc_notes = COALESCE($2, qc_notes) WHERE id = $3', [status, b.qc_notes ? String(b.qc_notes).trim() : null, id]);
+      if (approved) stockNote = await receiveGrn(cl, req, id);          // passed at quality check: it goes into stock
+      await cl.query('COMMIT');
+    } catch (e) { await cl.query('ROLLBACK').catch(() => {}); throw e; } finally { cl.release(); }
     await audit(pool, req, { action: 'grn.qc_' + status, entity: 'grn', id, summary: `${cur.rows[0].grn_number} ${status} at quality check`, before: { status: 'pending_qc' }, after: { status }, reason: b.qc_notes ? String(b.qc_notes).trim() : undefined });
     notify({ roles: ['purchase', 'accounts'], subject: 'GRN ' + status, text: `GRN ${cur.rows[0].grn_number} was ${status} at quality check.`, path: 'grn-detail.html?id=' + id });
-    res.json({ success: true, grn_id: id, status });
+    res.json({ success: true, grn_id: id, status, stock: stockNote });
   } catch (err) {
     console.error(err);
     fail(res, 500, 'Could not update GRN');

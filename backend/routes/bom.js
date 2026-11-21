@@ -325,4 +325,5 @@ router.post('/plan/:requestId/draft-indent', requirePermission(KEYS.PRODUCTION_I
   } finally { client.release(); }
 });
 
+router.activeRecipe = activeRecipe; router.recipeLines = recipeLines;   // work orders use the same recipe lookup
 module.exports = router;

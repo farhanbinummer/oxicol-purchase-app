@@ -935,6 +935,39 @@ const STEPS = [
     // A short note on each goods receipt line explaining a difference between ordered and received.
     name: '041_grn_variance_note',
     run: async (db) => { await db.query('ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS variance_note VARCHAR(200)'); }
+  },
+  {
+    // Stock in store (a ledger: receipts, issues to batches, returns, corrections) and production work orders (batches).
+    name: '042_stock_work_orders',
+    run: async (db) => {
+      await db.query(`CREATE TABLE IF NOT EXISTS stock_movements (
+        id SERIAL PRIMARY KEY, material_id INTEGER NOT NULL REFERENCES raw_materials(id),
+        qty NUMERIC(14,3) NOT NULL CHECK (qty <> 0),
+        kind VARCHAR(10) NOT NULL CHECK (kind IN ('receipt','issue','return','adjust')),
+        ref_type VARCHAR(12), ref_id INTEGER, note VARCHAR(200),
+        by_user INTEGER, by_name VARCHAR(100), at TIMESTAMP NOT NULL DEFAULT NOW())`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_stock_mov_material ON stock_movements(material_id)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_stock_mov_ref ON stock_movements(ref_type, ref_id)');
+      await db.query(`CREATE TABLE IF NOT EXISTS work_orders (
+        id SERIAL PRIMARY KEY, batch_number VARCHAR(30) NOT NULL UNIQUE,
+        product_id INTEGER NOT NULL REFERENCES products(id), recipe_id INTEGER REFERENCES recipe_versions(id),
+        planned_qty NUMERIC(14,3) NOT NULL CHECK (planned_qty > 0), unit VARCHAR(20) NOT NULL DEFAULT 'Nos',
+        planned_date DATE, notes TEXT,
+        status VARCHAR(12) NOT NULL DEFAULT 'planned' CHECK (status IN ('planned','issued','completed','qc_passed','qc_failed','cancelled')),
+        finished_qty NUMERIC(14,3), finished_on DATE, result_notes TEXT,
+        qc_notes TEXT, qc_by_name VARCHAR(100), qc_at TIMESTAMP,
+        cancel_reason TEXT,
+        created_by INTEGER, created_by_name VARCHAR(100), created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        issued_by_name VARCHAR(100), issued_at TIMESTAMP, completed_by_name VARCHAR(100), completed_at TIMESTAMP)`);
+      await db.query(`CREATE TABLE IF NOT EXISTS work_order_materials (
+        id SERIAL PRIMARY KEY, wo_id INTEGER NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+        material_id INTEGER NOT NULL REFERENCES raw_materials(id),
+        planned_qty NUMERIC(14,6) NOT NULL, issued_qty NUMERIC(14,3), unit VARCHAR(20))`);
+      await db.query('CREATE INDEX IF NOT EXISTS idx_wo_mat_wo ON work_order_materials(wo_id)');
+      const grants = [['production', ['stock.view', 'work_order.view', 'work_order.create', 'work_order.complete']], ['store', ['stock.view', 'stock.adjust', 'work_order.view', 'work_order.issue']],
+        ['qc', ['stock.view', 'work_order.view', 'work_order.qc']], ['purchase', ['stock.view', 'work_order.view']], ['manager', ['stock.view', 'work_order.view']]];
+      for (const [role, keys] of grants) for (const k of keys) await db.query('INSERT INTO role_permissions (role, permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [role, k]);
+    }
   }
 ];
 

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Work Orders</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .wo-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--s3); } .wo-chips button { min-height: 38px; padding: 0 14px; border-radius: 999px; } .wo-chips button[aria-pressed=true] { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .wo-num { text-align: right; font-variant-numeric: tabular-nums; }
+    .wo-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: var(--neutral-bg); color: var(--neutral); }
+    .wo-pill.planned { background: var(--info-bg); color: var(--info); } .wo-pill.issued { background: var(--warn-bg); color: var(--warn); } .wo-pill.completed { background: var(--primary-soft); color: var(--accent); } .wo-pill.qc_passed { background: var(--success-bg); color: var(--success); } .wo-pill.qc_failed { background: var(--danger-bg); color: var(--danger); }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="work-order-form.html" id="newLink" hidden>+ Plan a batch</a> | <a href="stock.html">Stock</a></p>
+  <h1>Work Orders (production batches)</h1>
+  <p class="oxi-page-sub">Production plans a batch from a recipe, Stores issues the raw materials, Production records what was made, and Quality check passes or fails it.</p>
+  <p id="message" role="status"></p>
+  <div class="wo-chips" id="chips"></div>
+  <input type="search" id="q" placeholder="Find by batch number or product" aria-label="Find a work order" style="max-width:420px;margin:0 0 12px">
+  <table>
+    <thead><tr><th>Batch</th><th>Product</th><th class="wo-num">Planned</th><th class="wo-num">Made</th><th>Planned date</th><th>Status</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="6">Loading...</td></tr></tbody>
+  </table>
+  <script src="common.js"></script>
+  <script>
+    const el = (t, txt, cls) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+    const FILTERS = [['', 'All'], ['planned', 'Waiting for materials'], ['issued', 'In production'], ['completed', 'Waiting for QC'], ['qc_passed', 'Passed'], ['qc_failed', 'Failed'], ['cancelled', 'Cancelled']];
+    const LABEL = { planned: 'Waiting for materials', issued: 'In production', completed: 'Waiting for QC', qc_passed: 'Passed QC', qc_failed: 'Failed QC', cancelled: 'Cancelled' };
+    const qty = (n) => n == null ? '-' : Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+    let status = new URLSearchParams(location.search).get('status') || '';
+    function chips() { const c = document.getElementById('chips'); c.innerHTML = ''; FILTERS.forEach(([v, t]) => { const b = el('button', t, 'oxi-btn-secondary'); b.type = 'button'; b.setAttribute('aria-pressed', String(v === status)); b.onclick = () => { status = v; chips(); load(); }; c.appendChild(b); }); }
+    async function load() {
+      const d = await api('/api/work-orders?status=' + encodeURIComponent(status) + '&q=' + encodeURIComponent(document.getElementById('q').value));
+      const body = document.getElementById('rows'); body.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      if (!d.work_orders.length) body.innerHTML = '<tr><td colspan="6">No work orders here.</td></tr>';
+      d.work_orders.forEach(w => { const tr = el('tr'); const a = el('a', w.batch_number); a.href = 'work-order.html?id=' + w.id; const td = el('td'); td.appendChild(a); tr.append(td, el('td', w.product_name), el('td', qty(w.planned_qty) + ' ' + w.unit, 'wo-num'), el('td', w.finished_qty == null ? '-' : qty(w.finished_qty) + ' ' + w.unit, 'wo-num'), el('td', w.planned_date || '-'));
+        const s = el('td'); s.appendChild(el('span', LABEL[w.status] || w.status, 'wo-pill ' + w.status)); tr.appendChild(s); body.appendChild(tr); });
+    }
+    let t; document.getElementById('q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 250); });
+    chips(); load();
+    api('/api/workspace/me').then(me => { if (me && me.success && (me.is_admin || (me.permissions || []).includes('work_order.create'))) document.getElementById('newLink').hidden = false; });
+  </script>
+</body>
+</html>

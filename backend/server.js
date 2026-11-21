@@ -74,6 +74,8 @@ app.use('/api/branch-request', require('./routes/branchRequest'));
 app.use('/api/production-indent', require('./routes/productionIndent'));
 app.use('/api/consolidate', require('./routes/consolidate'));
 app.use('/api/rate-enquiry', require('./routes/rate-enquiry'));
+app.use('/api/stock', require('./routes/stock'));
+app.use('/api/work-orders', require('./routes/work-orders'));
 app.use('/api/invoice', require('./routes/invoice'));
 app.use('/api/three-way-match', require('./routes/threeWayMatch'));
 app.use('/api/dashboard', require('./routes/dashboard'));

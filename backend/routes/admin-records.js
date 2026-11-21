@@ -58,6 +58,7 @@ const KINDS = {
       await db.query('DELETE FROM three_way_match WHERE po_id = ANY($1) OR invoice_id IN (SELECT id FROM purchase_invoices WHERE po_id = ANY($1))', [ids]);
       await db.query('DELETE FROM purchase_invoices WHERE po_id = ANY($1)', [ids]);
       await db.query('DELETE FROM payments WHERE po_id = ANY($1)', [ids]);
+      await db.query("DELETE FROM stock_movements WHERE ref_type = 'grn' AND ref_id IN (SELECT id FROM grn_notes WHERE po_id = ANY($1))", [ids]);   // stock those receipts added
       await db.query('DELETE FROM grn_notes WHERE po_id = ANY($1)', [ids]);                 // goods receipt lines and files go with them
       await db.query('DELETE FROM purchase_orders WHERE id = ANY($1)', [ids]);              // order lines and links go with it
       // a request or production request whose only order is gone is waiting for an order again
@@ -73,7 +74,7 @@ const KINDS = {
       const files = (await hasTable(db, 'grn_attachments')) ? await tally(db, 'SELECT grn_id AS k, COUNT(*) AS n FROM grn_attachments WHERE grn_id = ANY($1) GROUP BY grn_id', ids) : new Map();
       return new Map(ids.map(id => [id, { Items: take(items, id), Files: take(files, id) }]));
     },
-    async remove(db, ids) { await db.query('DELETE FROM grn_notes WHERE id = ANY($1)', [ids]); }
+    async remove(db, ids) { await db.query("DELETE FROM stock_movements WHERE ref_type = 'grn' AND ref_id = ANY($1)", [ids]); await db.query('DELETE FROM grn_notes WHERE id = ANY($1)', [ids]); }          // the stock it added goes too
   },
   payment: {
     label: 'payment', words: 'payments', sort: 4,
@@ -143,8 +144,16 @@ const KINDS = {
   material: {
     label: 'raw material', words: 'raw materials', sort: 9,
     q: { alias: 'm', cols: `m.id, m.code AS number, m.name AS title, CASE WHEN m.active THEN 'Active' ELSE 'Switched off' END AS status, NULL::text AS created`, from: `raw_materials m`, search: ['m.code', 'm.name'], order: 'm.name' },
-    async counts(db, ids) { const m = await tally(db, 'SELECT material_id AS k, COUNT(*) AS n FROM bom_lines WHERE material_id = ANY($1) GROUP BY material_id', ids); return new Map(ids.map(id => [id, { 'Recipe lines': take(m, id) }])); },
-    blocked(c) { return c['Recipe lines'] ? `Used in ${plural(c['Recipe lines'], 'recipe line')}. Take it out of those recipes first, or switch it off instead.` : null; },
+    async counts(db, ids) {
+      const [m, st, wo] = await Promise.all([tally(db, 'SELECT material_id AS k, COUNT(*) AS n FROM bom_lines WHERE material_id = ANY($1) GROUP BY material_id', ids),
+        tally(db, 'SELECT material_id AS k, COUNT(*) AS n FROM stock_movements WHERE material_id = ANY($1) GROUP BY material_id', ids), tally(db, 'SELECT material_id AS k, COUNT(*) AS n FROM work_order_materials WHERE material_id = ANY($1) GROUP BY material_id', ids)]);
+      return new Map(ids.map(id => [id, { 'Recipe lines': take(m, id), 'Stock records': take(st, id), 'Work order lines': take(wo, id) }]));
+    },
+    blocked(c) {
+      if (c['Recipe lines']) return `Used in ${plural(c['Recipe lines'], 'recipe line')}. Take it out of those recipes first, or switch it off instead.`;
+      if (c['Stock records'] || c['Work order lines']) return `It has stock records or work orders (${plural((c['Stock records'] || 0) + (c['Work order lines'] || 0), 'record')}). Switch it off instead.`;
+      return null;
+    },
     async remove(db, ids) { await db.query('DELETE FROM raw_materials WHERE id = ANY($1)', [ids]); }
   },
   product: {
@@ -153,9 +162,13 @@ const KINDS = {
     async counts(db, ids) {
       const [req, rec, al] = await Promise.all([tally(db, 'SELECT product_id AS k, COUNT(*) AS n FROM branch_request_items WHERE product_id = ANY($1) GROUP BY product_id', ids),
         tally(db, 'SELECT product_id AS k, COUNT(*) AS n FROM recipe_versions WHERE product_id = ANY($1) GROUP BY product_id', ids), tally(db, 'SELECT product_id AS k, COUNT(*) AS n FROM product_aliases WHERE product_id = ANY($1) GROUP BY product_id', ids)]);
-      return new Map(ids.map(id => [id, { 'Branch request lines': take(req, id), 'Recipe versions': take(rec, id), 'Other names': take(al, id) }]));
+      const wo = await tally(db, 'SELECT product_id AS k, COUNT(*) AS n FROM work_orders WHERE product_id = ANY($1) GROUP BY product_id', ids);
+      return new Map(ids.map(id => [id, { 'Branch request lines': take(req, id), 'Recipe versions': take(rec, id), 'Other names': take(al, id), 'Work orders': take(wo, id) }]));
     },
-    blocked(c) { return c['Branch request lines'] ? `Branches have requested it on ${plural(c['Branch request lines'], 'request line')}. Remove those requests first, or switch the product off instead.` : null; },
+    blocked(c) {
+      if (c['Work orders']) return `It has ${plural(c['Work orders'], 'work order')}. Switch the product off instead.`;
+      return c['Branch request lines'] ? `Branches have requested it on ${plural(c['Branch request lines'], 'request line')}. Remove those requests first, or switch the product off instead.` : null;
+    },
     async remove(db, ids) { await db.query('DELETE FROM products WHERE id = ANY($1)', [ids]); }          // its recipes and other names go with it
   }
 };
