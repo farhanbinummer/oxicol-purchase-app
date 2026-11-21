@@ -34,6 +34,8 @@
   <label>Supplier<br><select id="supplier"><option value="">Loading...</option></select></label><br><br>
   <label>Delivery date<br><input type="date" id="delivery"></label><br><br>
   <button id="createBtn">Create PO from selected items</button>
+  <button id="enquiryBtn" type="button" hidden>Ask suppliers for rates first</button>
+  <p><small>No rate yet? Tick the items and use <b>Ask suppliers for rates first</b>: you compare the suppliers' quotes, then raise the order from the best ones.</small></p>
 
   <script src="common.js"></script>
   <script>
@@ -159,6 +161,27 @@
              ' | linked ' + d.branch_requests_linked + ' branch request(s), ' + d.production_indents_linked + ' indent(s)', true);
         load();
       } else { show('Error: ' + d.error, false); }
+    };
+
+    // Rate enquiry: the ticked items (with the ticked sources behind them) go into a new enquiry; rates are collected there, before any PO.
+    window.oxiMe && api('/api/workspace/me').then(me => { if (me && me.success && (me.is_admin || (me.permissions || []).includes('rate_enquiry.manage'))) document.getElementById('enquiryBtn').hidden = false; });
+    document.getElementById('enquiryBtn').onclick = async () => {
+      const checkedB = new Set([...document.querySelectorAll('.srcBranch:checked')].map(c => Number(c.value)));
+      const checkedI = new Set([...document.querySelectorAll('.srcIndent:checked')].map(c => Number(c.value)));
+      const items = [];
+      document.querySelectorAll('#consRows tr').forEach(tr => {
+        if (!tr.querySelector('.incl').checked) return;
+        const name = tr.children[1].textContent, unit = tr.children[3].textContent, key = name.toLowerCase() + '||' + unit.toLowerCase(), sources = [];
+        const has = (r) => r.items.some(i => i.item_name.toLowerCase() + '||' + i.unit.toLowerCase() === key);
+        data.branch_requests.filter(r => checkedB.has(r.id) && has(r)).forEach(r => sources.push({ type: 'branch', id: r.id }));
+        data.production_indents.filter(r => checkedI.has(r.id) && has(r)).forEach(r => sources.push({ type: 'production', id: r.id }));
+        items.push({ item_name: name, unit, quantity: Number(tr.querySelector('.qty').textContent), sources });
+      });
+      if (!items.length) return show('Tick at least one item first', false);
+      const btn = document.getElementById('enquiryBtn'); btn.disabled = true;
+      const d = await api('/api/rate-enquiry', 'POST', { items });
+      btn.disabled = false;
+      if (d.success) location.href = 'rate-enquiry.html?id=' + d.id; else show('Error: ' + d.error, false);
     };
 
     load();

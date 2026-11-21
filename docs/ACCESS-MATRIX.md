@@ -50,6 +50,8 @@ that exists is syncing a PO to the Tally log, so **Export** appears on one row.
 
 | Action | Kind | Administrator | Manager | Purchase | Accounts | Stores | Quality check | Production | Branch staff |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| View rate enquiries and supplier quotes (`rate_enquiry.view`) | view | Yes | - | Yes | - | - | - | - | - |
+| Start a rate enquiry, enter quotes and raise the order from it (`rate_enquiry.manage`) | edit | Yes | - | Yes | - | - | - | - | - |
 | Create a PO (`po.create`) | create | Yes | - | Yes | - | - | - | - | - |
 | View POs (`po.view`) | view | Yes | Yes | Yes | Yes | Yes | Yes | - | - |
 | Change PO status (`po.update_status`) | edit | Yes | - | Yes | - | - | - | - | - |

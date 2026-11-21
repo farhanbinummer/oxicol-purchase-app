@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rate Enquiries</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="consolidate.html">Start from Purchase Requirements</a></p>
+  <h1>Rate Enquiries</h1>
+  <p class="oxi-page-sub">Ask several suppliers for a rate before a purchase order is made, compare their quotes, then raise the order from the best ones. Start one from <a href="consolidate.html">Purchase Requirements</a> by ticking the items and choosing "Ask suppliers for rates first".</p>
+  <p id="message"></p>
+  <table>
+    <thead><tr><th>Enquiry</th><th>Title</th><th>Date</th><th>Items</th><th>Suppliers asked</th><th>Quotes in</th><th>Ordered</th><th>Status</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="8">Loading...</td></tr></tbody>
+  </table>
+  <script src="common.js"></script>
+  <script>
+    (async () => {
+      const d = await api('/api/rate-enquiry');
+      const body = document.getElementById('rows'); body.innerHTML = '';
+      if (!d.success) { show(d.error, false); return; }
+      if (!d.enquiries.length) { body.innerHTML = '<tr><td colspan="8">No rate enquiries yet.</td></tr>'; return; }
+      d.enquiries.forEach(e => {
+        const tr = document.createElement('tr');
+        const a = document.createElement('a'); a.href = 'rate-enquiry.html?id=' + e.id; a.textContent = e.enquiry_number;
+        const td = document.createElement('td'); td.appendChild(a); tr.appendChild(td);
+        [e.title || '', e.created, e.items, e.suppliers, e.quotes, e.ordered + ' of ' + e.items, e.status].forEach(v => { const c = document.createElement('td'); c.textContent = v; tr.appendChild(c); });
+        body.appendChild(tr);
+      });
+    })();
+  </script>
+</body>
+</html>
