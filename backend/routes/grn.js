@@ -54,6 +54,7 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
     if (it.condition && !CONDITIONS.includes(it.condition)) {
       return fail(res, 400, `Item ${i + 1}: condition must be Good, Damaged or Short`);
     }
+    if (it.variance_note && String(it.variance_note).trim().length > 200) return fail(res, 400, `Item ${i + 1}: the reason for the difference is at most 200 characters`);
     if (!it.po_item_id && !it.item_name) return fail(res, 400, `Item ${i + 1}: item is not identified`);
   }
 
@@ -96,6 +97,7 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
         po_quantity: ordered,
         received_quantity: received,
         variance,
+        variance_note: entry.variance_note && String(entry.variance_note).trim() ? String(entry.variance_note).trim() : null,
         condition: entry.condition || (variance < 0 ? 'Short' : 'Good')
       });
     }
@@ -122,9 +124,9 @@ router.post('/create', requirePermission(KEYS.GRN_CREATE), async (req, res) => {
 
     for (const l of lines) {
       await client.query(
-        `INSERT INTO grn_items (grn_id, item_name, po_quantity, received_quantity, variance, condition)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [grnId, l.item_name, l.po_quantity, l.received_quantity, l.variance, l.condition]);
+        `INSERT INTO grn_items (grn_id, item_name, po_quantity, received_quantity, variance, condition, variance_note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [grnId, l.item_name, l.po_quantity, l.received_quantity, l.variance, l.condition, l.variance_note]);
     }
 
     // Goods have arrived -> PO becomes "delivered" (never moves a PO backwards).
