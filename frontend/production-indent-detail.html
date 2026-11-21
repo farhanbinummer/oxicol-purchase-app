@@ -29,7 +29,7 @@
 
     <h3>Materials needed</h3>
     <table>
-      <thead><tr><th>Item</th><th>Quantity</th><th>Unit</th><th>Required by</th><th>Priority</th></tr></thead>
+      <thead><tr><th>Item</th><th>Quantity</th><th>Unit</th><th>Required by</th><th>Priority</th><th>Purchase</th></tr></thead>
       <tbody id="items"></tbody>
     </table>
 
@@ -79,11 +79,13 @@
       const body = document.getElementById('items'); body.innerHTML = '';
       d.items.forEach(i => { const tr = document.createElement('tr');
         addCell(tr, i.item_name); addCell(tr, Number(i.quantity)); addCell(tr, i.unit);
-        addCell(tr, day(i.required_by) || '-'); addCell(tr, i.priority); body.appendChild(tr); });
+        addCell(tr, day(i.required_by) || '-'); addCell(tr, i.priority);
+        const po = (d.linked_pos || []).find(p => p.id === i.ordered_in_po);
+        addCell(tr, i.ordered_in_po ? 'Ordered' + (po ? ' in ' + po.po_number : '') : (r.status === 'approved' || r.status === 'po_raised' ? 'Still to order' : '-')); body.appendChild(tr); });
 
       const poBox = document.getElementById('poBox'); poBox.innerHTML = '';
       if (d.linked_pos.length) {
-        const h = document.createElement('h3'); h.textContent = 'Purchase order raised'; poBox.appendChild(h);
+        const h = document.createElement('h3'); h.textContent = r.status === 'po_raised' ? 'Purchase order raised' : 'Purchase order raised for some items'; poBox.appendChild(h);
         d.linked_pos.forEach(p => { const a = document.createElement('a'); a.href = 'po-detail.html?id=' + p.id;
           a.textContent = p.po_number; a.style.marginRight = '12px'; poBox.appendChild(a); });
       } else if (r.status === 'approved') {

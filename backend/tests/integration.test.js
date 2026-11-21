@@ -188,10 +188,11 @@ test('the reverse also holds: a request already in a PO cannot be planned', asyn
   const r = await mkRequest(tok.kannur, [{ product_id: p, quantity: 1 }]);
   await api(tok.store, 'PUT', `/api/branch-request/${r.request_id}/approve`, {});
   const sup = (await pool.query("SELECT id FROM suppliers WHERE status = 'active' LIMIT 1")).rows[0];
-  const po = await api(tok.purchase, 'POST', '/api/consolidate/create-po', { supplier_id: sup.id, branch_request_ids: [r.request_id], items: [{ item_name: 'x', quantity: 1, unit: 'Nos', rate: 5 }] });
+  const line = (await pool.query('SELECT item_name, unit FROM branch_request_items WHERE request_id = $1 LIMIT 1', [r.request_id])).rows[0];
+  const po = await api(tok.purchase, 'POST', '/api/consolidate/create-po', { supplier_id: sup.id, branch_request_ids: [r.request_id], items: [{ item_name: line.item_name, quantity: 1, unit: line.unit, rate: 5 }] });
   assert.equal(po.success, true, JSON.stringify(po)); made.pos.push(po.po_id);
   assert.match((await api(tok.production, 'POST', `/api/bom/plan/${r.request_id}/draft-indent`, {})).error, /twice/);
-  assert.equal((await api(tok.purchase, 'POST', '/api/consolidate/create-po', { supplier_id: sup.id, branch_request_ids: [r.request_id], items: [{ item_name: 'x', quantity: 1, unit: 'Nos', rate: 5 }] })).success, false, 'the same request cannot make a second PO');
+  assert.equal((await api(tok.purchase, 'POST', '/api/consolidate/create-po', { supplier_id: sup.id, branch_request_ids: [r.request_id], items: [{ item_name: line.item_name, quantity: 1, unit: line.unit, rate: 5 }] })).success, false, 'the same request cannot make a second PO');
 });
 
 test('repeated or simultaneous submissions create one record, not two', async () => {

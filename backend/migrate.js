@@ -885,6 +885,19 @@ const STEPS = [
     run: async (db) => {
       await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'po.edit') ON CONFLICT DO NOTHING");
     }
+  },
+  {
+    // A purchase order may buy only some lines of a request: each line remembers the order that bought it.
+    name: '038_partial_po',
+    run: async (db) => {
+      await db.query('ALTER TABLE production_indent_items ADD COLUMN IF NOT EXISTS ordered_in_po INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL');
+      await db.query('ALTER TABLE branch_request_items ADD COLUMN IF NOT EXISTS ordered_in_po INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL');
+      // requests already raised: every line belongs to the order that raised them
+      await db.query("UPDATE production_indent_items i SET ordered_in_po = (SELECT MIN(l.po_id) FROM po_source_links l WHERE l.source_type = 'production' AND l.source_id = i.indent_id) WHERE ordered_in_po IS NULL AND EXISTS (SELECT 1 FROM production_indents d WHERE d.id = i.indent_id AND d.status = 'po_raised')");
+      await db.query("UPDATE branch_request_items i SET ordered_in_po = (SELECT MIN(l.po_id) FROM po_source_links l WHERE l.source_type = 'branch' AND l.source_id = i.request_id) WHERE ordered_in_po IS NULL AND EXISTS (SELECT 1 FROM branch_stock_requests d WHERE d.id = i.request_id AND d.status = 'po_raised')");
+      await db.query('CREATE INDEX IF NOT EXISTS idx_pi_items_po ON production_indent_items(ordered_in_po)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_br_items_po ON branch_request_items(ordered_in_po)');
+    }
   }
 ];
 

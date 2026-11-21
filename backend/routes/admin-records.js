@@ -15,6 +15,7 @@ const express = require('express');
 const { pool } = require('../database');
 const { fail } = require('../utils');
 const { audit } = require('../audit');
+const { refreshSourceStatus } = require('../source-status');
 const rdData = require('./admin-data');
 const router = express.Router();
 
@@ -60,12 +61,7 @@ const KINDS = {
       await db.query('DELETE FROM grn_notes WHERE po_id = ANY($1)', [ids]);                 // goods receipt lines and files go with them
       await db.query('DELETE FROM purchase_orders WHERE id = ANY($1)', [ids]);              // order lines and links go with it
       // a request or production request whose only order is gone is waiting for an order again
-      for (const l of links) {
-        const left = (await db.query('SELECT 1 FROM po_source_links WHERE source_type = $1 AND source_id = $2 LIMIT 1', [l.source_type, l.source_id])).rowCount;
-        if (left) continue;
-        if (l.source_type === 'branch') await db.query("UPDATE branch_stock_requests SET status = 'approved' WHERE id = $1 AND status = 'po_raised'", [l.source_id]);
-        else await db.query("UPDATE production_indents SET status = 'approved' WHERE id = $1 AND status = 'po_raised'", [l.source_id]);
-      }
+      for (const l of links) await refreshSourceStatus(db, l.source_type, l.source_id);
     },
     audit: (r) => ({ supplier: r.title, total_amount: r.amount })
   },

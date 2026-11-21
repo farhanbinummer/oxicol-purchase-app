@@ -28,7 +28,7 @@ router.get('/all', requirePermission(KEYS.CONSOLIDATE_VIEW), async (req, res) =>
       `SELECT r.id, r.request_number, r.branch, r.requested_by, r.status,
               json_agg(json_build_object('item_name', i.item_name, 'quantity', i.quantity, 'unit', i.unit)
                        ORDER BY i.id) AS items
-         FROM branch_stock_requests r JOIN branch_request_items i ON i.request_id = r.id
+         FROM branch_stock_requests r JOIN branch_request_items i ON i.request_id = r.id AND i.ordered_in_po IS NULL
         WHERE r.status IN ${OPEN} AND r.planned_indent_id IS NULL${scoped}
         GROUP BY r.id ORDER BY r.id`, scopeParams);
 
@@ -42,7 +42,7 @@ router.get('/all', requirePermission(KEYS.CONSOLIDATE_VIEW), async (req, res) =>
       `SELECT d.id, d.indent_number, d.production_head, d.status,
               json_agg(json_build_object('item_name', i.item_name, 'quantity', i.quantity, 'unit', i.unit)
                        ORDER BY i.id) AS items
-         FROM production_indents d JOIN production_indent_items i ON i.indent_id = d.id
+         FROM production_indents d JOIN production_indent_items i ON i.indent_id = d.id AND i.ordered_in_po IS NULL
         WHERE d.status IN ${OPEN}
         GROUP BY d.id ORDER BY d.id`);
 
@@ -75,7 +75,7 @@ router.get('/all', requirePermission(KEYS.CONSOLIDATE_VIEW), async (req, res) =>
 // POST /api/consolidate/create-po
 // body: { supplier_id, delivery_date, notes, branch_request_ids:[], production_indent_ids:[],
 //         items: [{ item_name, quantity, unit, rate }] }
-// Creates the PO (same maths as /api/po/create) and marks every listed request/indent "po_raised".
+// Creates the PO (same maths as /api/po/create). The lines it buys are marked as ordered; a request/indent turns "po_raised" once all its lines are.
 // ------------------------------------------------------------
 router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (req, res) => {
   const b = req.body || {};
@@ -134,24 +134,27 @@ router.post('/create-po', requirePermission(KEYS.CONSOLIDATE_CREATE_PO), async (
         [poId, l.item_name, l.quantity, l.unit, l.rate, l.line_amount]);
     }
 
-    // Link and close out every source that fed this PO.
-    for (const id of branchIds) {
-      const r = await client.query(
-        "UPDATE branch_stock_requests SET status = 'po_raised' WHERE id = $1 AND status = 'approved' AND planned_indent_id IS NULL RETURNING id", [id]);
-      if (r.rowCount === 0) {
-        const why = await client.query('SELECT status, request_number, planned_indent_id FROM branch_stock_requests WHERE id = $1', [id]);
-        await client.query('ROLLBACK');
-        const w = why.rows[0];
-        if (w && w.planned_indent_id) return fail(res, 400, `${w.request_number} was planned into a production indent. Buy its raw materials through that indent - buying the request as well would count the same demand twice.`);
-        return fail(res, 400, `Branch request ${w ? w.request_number : id} is not an approved, open request (it is "${w ? w.status : 'missing'}")`);
+    // Mark the lines this order buys (matched by item name and unit) and link their requests. A request becomes "po_raised"
+    // only when every one of its lines is on an order; otherwise it stays approved and its other lines stay open.
+    const bought = new Set(lines.map(l => l.item_name.toLowerCase() + '||' + l.unit.toLowerCase()));
+    const SRC = { branch: { ids: branchIds, head: 'branch_stock_requests', lines: 'branch_request_items', fk: 'request_id', label: 'Branch request' },
+                  production: { ids: indentIds, head: 'production_indents', lines: 'production_indent_items', fk: 'indent_id', label: 'Production indent' } };
+    for (const type of ['branch', 'production']) {
+      const S = SRC[type];
+      for (const id of S.ids) {
+        const h = (await client.query(`SELECT status${type === 'branch' ? ', request_number, planned_indent_id' : ''} FROM ${S.head} WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (type === 'branch' && h && h.planned_indent_id) {
+          await client.query('ROLLBACK');
+          return fail(res, 400, `${h.request_number} was planned into a production indent. Buy its raw materials through that indent - buying the request as well would count the same demand twice.`);
+        }
+        if (!h || h.status !== 'approved') { await client.query('ROLLBACK'); return fail(res, 400, `${S.label} ${id} is not an approved, open ${type === 'branch' ? 'request' : 'indent'}${h ? ` (it is "${h.status}")` : ''}`); }
+        const open = (await client.query(`SELECT id, item_name, unit FROM ${S.lines} WHERE ${S.fk} = $1 AND ordered_in_po IS NULL`, [id])).rows;
+        const mine = open.filter(l => bought.has(l.item_name.toLowerCase() + '||' + l.unit.toLowerCase()));
+        if (mine.length === 0) { await client.query('ROLLBACK'); return fail(res, 400, `${S.label} ${id} has nothing in this order: tick only the sources whose items you are buying`); }
+        await client.query(`UPDATE ${S.lines} SET ordered_in_po = $1 WHERE id = ANY($2)`, [poId, mine.map(l => l.id)]);
+        if (mine.length === open.length) await client.query(`UPDATE ${S.head} SET status = 'po_raised' WHERE id = $1`, [id]);
+        await client.query('INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,$2,$3)', [poId, type, id]);
       }
-      await client.query("INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,'branch',$2)", [poId, id]);
-    }
-    for (const id of indentIds) {
-      const r = await client.query(
-        "UPDATE production_indents SET status = 'po_raised' WHERE id = $1 AND status = 'approved' RETURNING id", [id]);
-      if (r.rowCount === 0) { await client.query('ROLLBACK'); return fail(res, 400, `Production indent ${id} is not an approved, open indent`); }
-      await client.query("INSERT INTO po_source_links (po_id, source_type, source_id) VALUES ($1,'production',$2)", [poId, id]);
     }
 
     await audit(client, req, { action: 'po.create_consolidated', entity: 'purchase_order', id: poId, summary: `${po.rows[0].po_number} created from ${branchIds.length} request(s) and ${indentIds.length} indent(s)`, after: { branch_request_ids: branchIds, production_indent_ids: indentIds, total: Number(po.rows[0].total_amount) } });
