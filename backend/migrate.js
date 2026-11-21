@@ -878,6 +878,13 @@ const STEPS = [
       await db.query("UPDATE production_indents SET status = 'approved' WHERE status = 'po_raised' AND NOT EXISTS (SELECT 1 FROM po_source_links l WHERE l.source_type = 'production' AND l.source_id = production_indents.id)");
       await db.query("UPDATE branch_stock_requests SET status = 'approved' WHERE status = 'po_raised' AND NOT EXISTS (SELECT 1 FROM po_source_links l WHERE l.source_type = 'branch' AND l.source_id = branch_stock_requests.id)");
     }
+  },
+  {
+    // Editing a purchase order has its own key; Purchase (who makes orders) has it. Administrators have every key.
+    name: '037_po_edit',
+    run: async (db) => {
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'po.edit') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 

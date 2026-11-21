@@ -12,8 +12,8 @@
 </head>
 <body>
   <p><a href="index.html">&larr; Home</a> | <a href="po-list.html">All POs</a></p>
-  <h1>Create Purchase Order</h1>
-  <p class="oxi-page-sub">Pick a supplier, add the items and rates, and save.</p>
+  <h1 id="pageTitle">Create Purchase Order</h1>
+  <p class="oxi-page-sub" id="pageSub">Pick a supplier, add the items and rates, and save.</p>
   <p id="message"></p>
 
   <form id="poForm">
@@ -100,7 +100,29 @@
     }
 
     document.getElementById('addRow').onclick = addRow;
+    // po-form.html?edit=ID changes an existing order (allowed until a payment or goods receipt exists)
+    const editId = new URLSearchParams(location.search).get('edit');
     addRow();
+    if (editId) {
+      document.getElementById('pageTitle').textContent = 'Edit Purchase Order';
+      document.getElementById('saveBtn').textContent = 'Save changes';
+      Promise.all([api('/api/po/' + encodeURIComponent(editId)), fetch('/api/suppliers').then(r => r.json())]).then(([d]) => {
+        if (!d.success) return show(d.error || 'Could not load the order', false);
+        document.getElementById('pageSub').textContent = d.po.po_number + ': change anything, then save. Totals are recalculated.';
+        const fill = () => {
+          const sel = document.getElementById('supplier');
+          if (![...sel.options].some(o => o.value == d.po.supplier_id)) { const o = document.createElement('option'); o.value = d.po.supplier_id; o.textContent = d.po.supplier_name; sel.appendChild(o); }
+          sel.value = d.po.supplier_id;
+        };
+        const wait = setInterval(() => { if (document.getElementById('supplier').options.length > 1) { clearInterval(wait); fill(); } }, 100); setTimeout(() => clearInterval(wait), 5000);
+        document.getElementById('delivery').value = d.po.delivery_date ? String(d.po.delivery_date).slice(0, 10) : '';
+        document.getElementById('notes').value = d.po.notes || '';
+        tbody.innerHTML = '';
+        d.items.forEach(it => { addRow(); const tr = tbody.lastElementChild; tr.querySelector('.name').value = it.item_name; tr.querySelector('.qty').value = it.quantity; tr.querySelector('.rate').value = it.rate;
+          const u = tr.querySelector('.unit'); if (![...u.options].some(o => o.value === it.unit)) { const o = document.createElement('option'); o.textContent = it.unit; u.appendChild(o); } u.value = it.unit; });
+        recalc();
+      });
+    }
 
     // Send the form to the server.
     document.getElementById('poForm').addEventListener('submit', async (e) => {
@@ -121,11 +143,13 @@
       const btn = document.getElementById('saveBtn');
       btn.disabled = true;
       try {
-        const r = await fetch('/api/po/create', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        const r = await fetch(editId ? '/api/po/' + encodeURIComponent(editId) : '/api/po/create', {
+          method: editId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
         });
         const d = await r.json();
-        if (d.success) {
+        if (d.success && editId) {
+          location.href = 'po-detail.html?id=' + encodeURIComponent(editId);
+        } else if (d.success) {
           show('PO saved: ' + d.po_number + '  |  Total ₹' + money(d.total_amount), true);
           document.getElementById('poForm').reset();
           tbody.innerHTML = ''; addRow(); recalc();

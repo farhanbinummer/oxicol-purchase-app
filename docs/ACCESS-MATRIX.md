@@ -53,6 +53,7 @@ that exists is syncing a PO to the Tally log, so **Export** appears on one row.
 | Create a PO (`po.create`) | create | Yes | - | Yes | - | - | - | - | - |
 | View POs (`po.view`) | view | Yes | Yes | Yes | Yes | Yes | Yes | - | - |
 | Change PO status (`po.update_status`) | edit | Yes | - | Yes | - | - | - | - | - |
+| Edit a PO (supplier, items, rates, date, notes) before any payment or goods receipt (`po.edit`) | edit | Yes | - | Yes | - | - | - | - | - |
 | Delete a PO (`po.delete`) | cancel | Yes | - | Yes | - | - | - | - | - |
 
 ### Payments
