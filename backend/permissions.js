@@ -23,6 +23,8 @@ const KEYS = {
   PRODUCTION_INDENT_DELETE: 'production_indent.delete',
 
   CONSOLIDATE_VIEW: 'consolidate.view',
+  RATE_ENQUIRY_VIEW: 'rate_enquiry.view',     // see rate enquiries and the quotes suppliers gave
+  RATE_ENQUIRY_MANAGE: 'rate_enquiry.manage', // start an enquiry, enter quotes, choose the supplier and raise the order from it
   CONSOLIDATE_CREATE_PO: 'consolidate.create_po',
 
   PO_CREATE: 'po.create',
@@ -93,6 +95,8 @@ const CATALOG = [
   { key: KEYS.PRODUCTION_INDENT_APPROVE, module: 'Production Indents', action: 'Approve an indent' },
   { key: KEYS.PRODUCTION_INDENT_DELETE, module: 'Production Indents', action: 'Delete an indent' },
 
+  { key: KEYS.RATE_ENQUIRY_VIEW, module: 'Rate Enquiries', action: 'View rate enquiries and supplier quotes' },
+  { key: KEYS.RATE_ENQUIRY_MANAGE, module: 'Rate Enquiries', action: 'Start a rate enquiry, enter quotes and raise the order from it' },
   { key: KEYS.CONSOLIDATE_VIEW, module: 'Consolidate Orders', action: 'View open requests/indents to merge' },
   { key: KEYS.CONSOLIDATE_CREATE_PO, module: 'Consolidate Orders', action: 'Create a PO from consolidation' },
 
@@ -156,7 +160,7 @@ const CATALOG = [
 const KINDS = {
   'branch_request.create': 'create', 'branch_request.view': 'view', 'branch_request.approve': 'approve', 'branch_request.delete': 'cancel', 'branch_request.confirm_delivery': 'edit',
   'production_indent.create': 'create', 'production_indent.view': 'view', 'production_indent.approve': 'approve', 'production_indent.delete': 'cancel',
-  'consolidate.view': 'view', 'consolidate.create_po': 'create',
+  'rate_enquiry.view': 'view', 'rate_enquiry.manage': 'edit', 'consolidate.view': 'view', 'consolidate.create_po': 'create',
   'po.create': 'create', 'po.view': 'view', 'po.update_status': 'edit', 'po.update_delivery': 'edit', 'po.edit': 'edit', 'po.delete': 'cancel',
   'payment.create': 'create', 'payment.view_by_po': 'view', 'payment.view_all': 'view', 'payment.approve': 'approve',
   'grn.create': 'create', 'grn.view': 'view', 'grn.approve': 'approve',
@@ -186,7 +190,7 @@ const DEFAULTS = {
     KEYS.DASHBOARD_VIEW, KEYS.CATALOG_VIEW, KEYS.CATALOG_MAP_ITEMS
   ],
   purchase: [
-    KEYS.CONSOLIDATE_VIEW, KEYS.CONSOLIDATE_CREATE_PO,
+    KEYS.CONSOLIDATE_VIEW, KEYS.CONSOLIDATE_CREATE_PO, KEYS.RATE_ENQUIRY_VIEW, KEYS.RATE_ENQUIRY_MANAGE,
     KEYS.PO_CREATE, KEYS.PO_VIEW, KEYS.PO_UPDATE_STATUS, KEYS.PO_UPDATE_DELIVERY, KEYS.PO_EDIT, KEYS.PO_DELETE,
     KEYS.PAYMENT_VIEW_BY_PO, KEYS.PAYMENT_VIEW_ALL,
     KEYS.GRN_VIEW, KEYS.INVOICE_VIEW, KEYS.THREE_WAY_MATCH_VIEW,

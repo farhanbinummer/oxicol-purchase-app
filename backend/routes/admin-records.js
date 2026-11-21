@@ -132,7 +132,13 @@ const KINDS = {
       return new Map(ids.map(id => [id, { 'Purchase orders': take(po, id), Payments: take(pay, id) }]));
     },
     blocked(c) { const used = [c['Purchase orders'] && plural(c['Purchase orders'], 'purchase order'), c.Payments && plural(c.Payments, 'payment')].filter(Boolean); return used.length ? `Used by ${used.join(' and ')}. Remove those first, or switch the supplier off instead.` : null; },
-    async remove(db, ids) { await db.query('DELETE FROM suppliers WHERE id = ANY($1)', [ids]); }
+    async remove(db, ids) {
+      // rate-enquiry quotes and choices that mention it go with it
+      await db.query('UPDATE rate_enquiry_items SET awarded_supplier_id = NULL, awarded_rate = NULL WHERE awarded_supplier_id = ANY($1)', [ids]);
+      await db.query('DELETE FROM rate_quotes WHERE supplier_id = ANY($1)', [ids]);
+      await db.query('DELETE FROM rate_enquiry_suppliers WHERE supplier_id = ANY($1)', [ids]);
+      await db.query('DELETE FROM suppliers WHERE id = ANY($1)', [ids]);
+    }
   },
   material: {
     label: 'raw material', words: 'raw materials', sort: 9,

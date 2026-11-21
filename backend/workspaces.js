@@ -150,6 +150,7 @@ const WORKSPACES = {
       { title: 'Workspace', items: [{ label: 'Dashboard', href: 'index.html', icon: 'dashboard' }] },
       { title: 'Buying', items: [
         { label: 'Purchase Requirements', href: 'consolidate.html', icon: 'consolidate', perm: KEYS.CONSOLIDATE_VIEW },
+        { label: 'Rate Enquiries', href: 'rate-enquiries.html', icon: 'clipboardlist', perm: KEYS.RATE_ENQUIRY_VIEW, also: ['rate-enquiry.html'] },
         { label: 'Purchase Orders', href: 'po-list.html', icon: 'po', perm: KEYS.PO_VIEW, also: ['po-detail.html', 'po-form.html'] },
         { label: 'Expected Deliveries', href: 'expected-deliveries.html', icon: 'grn', perm: KEYS.PO_VIEW },
         { label: 'Suppliers', href: 'suppliers.html', icon: 'userround', perm: KEYS.SUPPLIERS_VIEW } ] },

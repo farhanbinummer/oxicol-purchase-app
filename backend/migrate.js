@@ -898,6 +898,30 @@ const STEPS = [
       await db.query('CREATE INDEX IF NOT EXISTS idx_pi_items_po ON production_indent_items(ordered_in_po)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_br_items_po ON branch_request_items(ordered_in_po)');
     }
+  },
+  {
+    // Rate enquiries: ask several suppliers for a rate on the items to buy, compare the quotes, then raise the order from the chosen ones.
+    name: '039_rate_enquiry',
+    run: async (db) => {
+      await db.query(`CREATE TABLE IF NOT EXISTS rate_enquiries (
+        id SERIAL PRIMARY KEY, enquiry_number VARCHAR(40) NOT NULL UNIQUE, title VARCHAR(120), notes TEXT,
+        status VARCHAR(12) NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed','cancelled')),
+        created_by INTEGER, created_by_name VARCHAR(100), created_at TIMESTAMP NOT NULL DEFAULT NOW())`);
+      await db.query(`CREATE TABLE IF NOT EXISTS rate_enquiry_items (
+        id SERIAL PRIMARY KEY, enquiry_id INTEGER NOT NULL REFERENCES rate_enquiries(id) ON DELETE CASCADE,
+        item_name VARCHAR(200) NOT NULL, unit VARCHAR(30) NOT NULL, quantity NUMERIC(14,3) NOT NULL,
+        sources JSONB NOT NULL DEFAULT '[]', awarded_supplier_id INTEGER REFERENCES suppliers(id), awarded_rate NUMERIC(14,2),
+        po_id INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL)`);
+      await db.query(`CREATE TABLE IF NOT EXISTS rate_enquiry_suppliers (
+        enquiry_id INTEGER NOT NULL REFERENCES rate_enquiries(id) ON DELETE CASCADE, supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+        PRIMARY KEY (enquiry_id, supplier_id))`);
+      await db.query(`CREATE TABLE IF NOT EXISTS rate_quotes (
+        id SERIAL PRIMARY KEY, enquiry_id INTEGER NOT NULL REFERENCES rate_enquiries(id) ON DELETE CASCADE,
+        item_id INTEGER NOT NULL REFERENCES rate_enquiry_items(id) ON DELETE CASCADE, supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+        rate NUMERIC(14,2) NOT NULL CHECK (rate > 0), note VARCHAR(200), quoted_by VARCHAR(100), quoted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (item_id, supplier_id))`);
+      await db.query("INSERT INTO role_permissions (role, permission_key) VALUES ('purchase', 'rate_enquiry.view'), ('purchase', 'rate_enquiry.manage') ON CONFLICT DO NOTHING");
+    }
   }
 ];
 

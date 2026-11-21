@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rate Enquiry</title>
+  <script src="theme-init.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#142235">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    .re-cell { min-width: 130px; } .re-cell input.rate { width: 90px; } .re-cell input.note { width: 120px; font-size: 12px; margin-top: 4px; }
+    .re-low { outline: 2px solid #2e9e6b; border-radius: 6px; } .re-pick { background: rgba(46,158,107,.16); }
+    .re-box { margin: 14px 0; } #msgText { width: 100%; max-width: 640px; min-height: 140px; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">&larr; Home</a> | <a href="rate-enquiries.html">All rate enquiries</a></p>
+  <h1 id="title">Rate Enquiry</h1>
+  <p class="oxi-page-sub" id="sub">Enter the rate each supplier quotes (blank = not quoted yet). The lowest rate for an item is outlined. Choose the supplier for each item, then create the orders.</p>
+  <p id="message"></p>
+
+  <div class="re-box">
+    <b>Suppliers asked</b>
+    <span id="chips"></span>
+    <select id="addSupplier"><option value="">+ Add a supplier</option></select>
+  </div>
+
+  <table id="grid"><thead id="gridHead"></thead><tbody id="gridBody"></tbody></table>
+
+  <div class="re-box" id="orderBox"></div>
+
+  <details class="re-box"><summary>Message to send to the suppliers (copy and paste into WhatsApp or email)</summary>
+    <textarea id="msgText" readonly></textarea><br><button type="button" id="copyBtn">Copy message</button>
+  </details>
+
+  <p id="statusRow"></p>
+  <script src="common.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+    let D = null, allSuppliers = [], can = false, mgr = false;
+    const el = (t, txt, cls) => { const e = document.createElement(t); if (txt !== undefined) e.textContent = txt; if (cls) e.className = cls; return e; };
+    const q = (itemId, supId) => D.quotes.find(x => x.item_id === itemId && x.supplier_id === supId);
+
+    async function load() {
+      const [d, me] = await Promise.all([api('/api/rate-enquiry/' + encodeURIComponent(id)), api('/api/workspace/me')]);
+      if (!d.success) { show(d.error || 'Could not load', false); return; }
+      D = d; mgr = !!(me && me.success && (me.is_admin || (me.permissions || []).includes('rate_enquiry.manage'))); can = mgr && d.enquiry.status === 'open';
+      if (!allSuppliers.length) { const s = await fetch('/api/suppliers').then(r => r.json()).catch(() => ({})); allSuppliers = s.suppliers || []; }
+      render();
+    }
+
+    function render() {
+      document.getElementById('title').textContent = D.enquiry.enquiry_number + (D.enquiry.title ? ' - ' + D.enquiry.title : '') + ' (' + D.enquiry.status + ')';
+      // suppliers asked
+      const chips = document.getElementById('chips'); chips.innerHTML = '';
+      D.suppliers.forEach(s => { const c = el('span', s.name + ' ', 'oxi-chip'); c.style.margin = '0 6px';
+        if (can) { const x = el('button', 'x'); x.type = 'button'; x.title = 'Remove ' + s.name; x.onclick = () => saveSuppliers(D.suppliers.map(y => y.id).filter(y => y !== s.id)); c.appendChild(x); } chips.appendChild(c); });
+      const sel = document.getElementById('addSupplier'); sel.hidden = !can; sel.innerHTML = '<option value="">+ Add a supplier</option>';
+      allSuppliers.filter(s => !D.suppliers.some(y => y.id === s.id)).forEach(s => { const o = el('option', s.name); o.value = s.id; sel.appendChild(o); });
+      sel.onchange = () => { if (sel.value) saveSuppliers(D.suppliers.map(y => y.id).concat(Number(sel.value))); };
+
+      // grid: items x suppliers
+      const head = document.getElementById('gridHead'); head.innerHTML = ''; const hr = el('tr');
+      ['Item', 'Qty', 'Unit'].forEach(h => hr.appendChild(el('th', h))); D.suppliers.forEach(s => hr.appendChild(el('th', s.name))); hr.appendChild(el('th', 'Chosen'));
+      head.appendChild(hr);
+      const body = document.getElementById('gridBody'); body.innerHTML = '';
+      D.items.forEach(it => {
+        const tr = el('tr'); tr.appendChild(el('td', it.item_name)); tr.appendChild(el('td', it.quantity)); tr.appendChild(el('td', it.unit));
+        const rates = D.quotes.filter(x => x.item_id === it.id).map(x => x.rate), low = rates.length ? Math.min(...rates) : null, locked = !!it.po_id;
+        D.suppliers.forEach(s => {
+          const cell = el('td', undefined, 're-cell'), qt = q(it.id, s.id);
+          if (it.awarded_supplier_id === s.id) cell.classList.add('re-pick');
+          const rate = el('input'); rate.type = 'number'; rate.step = 'any'; rate.min = '0'; rate.className = 'rate'; rate.placeholder = 'rate'; rate.value = qt ? qt.rate : ''; rate.disabled = !can || locked;
+          if (qt && qt.rate === low && rates.length > 1) rate.classList.add('re-low');
+          const note = el('input'); note.className = 'note'; note.placeholder = 'note'; note.maxLength = 200; note.value = qt && qt.note ? qt.note : ''; note.disabled = !can || locked;
+          const save = () => saveQuote(it.id, s.id, rate.value, note.value);
+          rate.onchange = save; note.onchange = () => { if (rate.value) save(); };
+          cell.appendChild(rate); cell.appendChild(el('br')); cell.appendChild(note);
+          if (qt) { const r = el('input'); r.type = 'radio'; r.name = 'pick' + it.id; r.checked = it.awarded_supplier_id === s.id; r.disabled = !can || locked; r.title = 'Choose this supplier for ' + it.item_name; r.onchange = () => award(it.id, s.id); cell.appendChild(el('br')); cell.appendChild(r); cell.appendChild(document.createTextNode(' choose')); }
+          tr.appendChild(cell);
+        });
+        const ch = el('td'); const sup = D.suppliers.find(x => x.id === it.awarded_supplier_id);
+        if (it.po_id) { const p = D.pos.find(x => x.id === it.po_id); const a = el('a', 'Ordered ' + (p ? p.po_number : '')); a.href = 'po-detail.html?id=' + it.po_id; ch.appendChild(a); }
+        else if (sup) { ch.textContent = sup.name + ' @ ' + it.awarded_rate; if (can) { const x = el('button', 'clear'); x.type = 'button'; x.style.marginLeft = '6px'; x.onclick = () => award(it.id, null); ch.appendChild(x); } }
+        else ch.textContent = '-';
+        tr.appendChild(ch); body.appendChild(tr);
+      });
+      if (!D.suppliers.length) { const tr = el('tr'); const td = el('td', 'Add the suppliers you are asking, above.'); td.colSpan = 4; tr.appendChild(td); body.appendChild(tr); }
+
+      // orders to raise: chosen but not yet ordered, grouped by supplier
+      const box = document.getElementById('orderBox'); box.innerHTML = '';
+      const groups = new Map(); D.items.filter(i => i.awarded_supplier_id && !i.po_id).forEach(i => { if (!groups.has(i.awarded_supplier_id)) groups.set(i.awarded_supplier_id, []); groups.get(i.awarded_supplier_id).push(i); });
+      if (groups.size && can) box.appendChild(el('h3', 'Create the orders'));
+      if (can) groups.forEach((its, supId) => {
+        const s = D.suppliers.find(x => x.id === supId); const row = el('p');
+        const total = its.reduce((a, i) => a + i.quantity * i.awarded_rate, 0);
+        row.appendChild(el('b', s.name)); row.appendChild(document.createTextNode(': ' + its.map(i => i.item_name + ' ' + i.quantity + i.unit + ' @ ' + i.awarded_rate).join(', ') + '  (items total ' + money(total) + ' before GST)  '));
+        const dt = el('input'); dt.type = 'date'; dt.title = 'Delivery date'; row.appendChild(dt); row.appendChild(document.createTextNode(' '));
+        const b = el('button', 'Create PO for ' + s.name); b.type = 'button'; b.onclick = () => createPo(supId, its, dt.value, b); row.appendChild(b); box.appendChild(row);
+      });
+
+      // message to suppliers
+      document.getElementById('msgText').value = 'Hello,\nPlease share your best rate (per unit, with GST extra or included, and delivery time) for the following:\n\n' + D.items.map((i, n) => (n + 1) + '. ' + i.item_name + ' - ' + i.quantity + ' ' + i.unit).join('\n') + '\n\nThank you,\nOxicol Car Care Products';
+      document.getElementById('copyBtn').onclick = () => { const t = document.getElementById('msgText'); t.select(); (navigator.clipboard ? navigator.clipboard.writeText(t.value) : Promise.resolve(document.execCommand('copy'))).then(() => show('Message copied', true)); };
+
+      const st = document.getElementById('statusRow'); st.innerHTML = '';
+      if (D.enquiry.status === 'open') { const b = el('button', 'Close this enquiry'); b.type = 'button'; b.onclick = () => setStatus('closed'); const c = el('button', 'Cancel it'); c.type = 'button'; c.style.marginLeft = '8px'; c.onclick = () => confirm('Cancel this enquiry?') && setStatus('cancelled'); st.appendChild(b); st.appendChild(c); }
+      else { const b = el('button', 'Reopen'); b.type = 'button'; b.onclick = () => setStatus('open'); st.appendChild(b); }
+      st.hidden = !mgr;
+    }
+
+    async function call(path, method, body) { const d = await api('/api/rate-enquiry/' + encodeURIComponent(id) + path, method, body); if (!d.success) show(d.error || 'Failed', false); return d; }
+    async function saveSuppliers(ids) { const d = await call('/suppliers', 'PUT', { supplier_ids: ids }); await load(); return d; }
+    async function saveQuote(itemId, supId, rate, note) { await call('/quote', 'PUT', { item_id: itemId, supplier_id: supId, rate, note }); await load(); }
+    async function award(itemId, supId) { await call('/award', 'PUT', { item_id: itemId, supplier_id: supId }); await load(); }
+    async function setStatus(s) { await call('/status', 'PUT', { status: s }); await load(); }
+
+    // The order is made by the same server code as "Create PO" on Purchase Requirements, so the same checks apply.
+    async function createPo(supId, items, delivery, btn) {
+      btn.disabled = true;
+      const src = (type) => [...new Set(items.flatMap(i => i.sources.filter(s => s.type === type).map(s => s.id)))];
+      const po = await api('/api/consolidate/create-po', 'POST', {
+        supplier_id: supId, delivery_date: delivery, notes: 'Rates from ' + D.enquiry.enquiry_number,
+        branch_request_ids: src('branch'), production_indent_ids: src('production'),
+        items: items.map(i => ({ item_name: i.item_name, quantity: i.quantity, unit: i.unit, rate: i.awarded_rate }))
+      });
+      if (!po.success) { btn.disabled = false; show('Could not create the PO: ' + po.error, false); return; }
+      const rec = await api('/api/rate-enquiry/' + encodeURIComponent(id) + '/ordered', 'POST', { item_ids: items.map(i => i.id), po_id: po.po_id });
+      show(po.po_number + ' created' + (rec.success ? '' : ' (but it could not be noted on this enquiry: ' + rec.error + ')'), true);
+      await load();
+    }
+    load();
+  </script>
+</body>
+</html>

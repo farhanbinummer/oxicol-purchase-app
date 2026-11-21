@@ -57,14 +57,14 @@ jobs:
           curl -fs http://localhost:3100/api/health
           # The server starts listening before its start-up database updates finish, so wait for the last one to be logged.
           for i in $(seq 1 60); do
-            if grep -q "038_partial_po" ../server-boot.log; then break; fi
+            if grep -q "039_rate_enquiry" ../server-boot.log; then break; fi
             sleep 1
           done
           kill $pid || true
           grep -q "014_rd_stage_work_review" ../server-boot.log
           grep -q "033_suppliers_manage" ../server-boot.log
           grep -q "034_indent_edit" ../server-boot.log
-          grep -q "038_partial_po" ../server-boot.log
+          grep -q "039_rate_enquiry" ../server-boot.log
 
       - name: Unit tests
         working-directory: backend
@@ -109,6 +109,9 @@ jobs:
       - name: Partial purchase order tests
         working-directory: backend
         run: npm run test:partial-po
+      - name: Rate enquiry tests
+        working-directory: backend
+        run: npm run test:rate-enquiry
       - name: Production request edit tests
         working-directory: backend
         run: npm run test:indent-edit
