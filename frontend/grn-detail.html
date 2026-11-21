@@ -44,7 +44,7 @@
     </table>
     <p id="flag"></p>
     <table>
-      <thead><tr><th>Item</th><th>Ordered</th><th>Received</th><th>Variance</th><th>Condition</th></tr></thead>
+      <thead><tr><th>Item</th><th>Ordered</th><th>Received</th><th>Variance</th><th>Condition</th><th>Reason for the difference</th></tr></thead>
       <tbody id="items"></tbody>
     </table>
 
@@ -168,6 +168,7 @@
         const c = addCell(tr, (v > 0 ? '+' : '') + v);
         if (v !== 0) c.className = 'error';
         addBadge(tr, i.condition);
+        addCell(tr, i.variance_note || (v !== 0 ? '-' : ''));
         tbody.appendChild(tr);
       });
       document.getElementById('detail').hidden = false;

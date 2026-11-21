@@ -930,6 +930,11 @@ const STEPS = [
       await db.query('ALTER TABLE po_items ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5,2)');
       await db.query('ALTER TABLE rate_enquiry_items ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5,2)');
     }
+  },
+  {
+    // A short note on each goods receipt line explaining a difference between ordered and received.
+    name: '041_grn_variance_note',
+    run: async (db) => { await db.query('ALTER TABLE grn_items ADD COLUMN IF NOT EXISTS variance_note VARCHAR(200)'); }
   }
 ];
 

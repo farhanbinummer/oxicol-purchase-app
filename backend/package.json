@@ -22,6 +22,7 @@
     "test:rate-enquiry": "node --test tests/rate-enquiry.test.js",
     "test:igst": "node --test tests/igst.test.js",
     "test:gst-items": "node --test tests/gst-items.test.js",
+    "test:grn-variance": "node --test tests/grn-variance.test.js",
     "test:indent-edit": "node --test tests/indent-edit.test.js",
     "test:branch-delivery": "node --test tests/branch-delivery.test.js",
     "test:admin-records": "node --test tests/admin-records.test.js",
